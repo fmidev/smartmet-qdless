@@ -286,7 +286,8 @@ App::~App() = default;
 
 float App::transform(float v) const
 {
-  if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e10F) return v;
+  // Same sentinel detection as Palette::lookup; keep them in sync.
+  if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F) return v;
   return v * itsValueScale + itsValueOffset;
 }
 
@@ -437,7 +438,7 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
       const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / subWidth * spanU;
       const double lon = itsBbox.minLon + up * bboxLonSpan;
       const float val = transform(itsSource->interpolatedValue(lat, lon));
-      if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e10F)
+      if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e6F)
       {
         dataMin = std::min(dataMin, val);
         dataMax = std::max(dataMax, val);
