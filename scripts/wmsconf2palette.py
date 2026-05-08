@@ -20,7 +20,7 @@ Open-ended ranges use null for the missing bound. The 999 sentinel
 sometimes used for open upper ranges in wms-conf is normalised to null.
 
 Run manually whenever the source palettes change; commit the output
-into qdtools/palettes/ for shipping with the RPM.
+into qdless/palettes/ for shipping with the RPM.
 """
 
 import json
