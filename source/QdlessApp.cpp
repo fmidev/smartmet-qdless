@@ -58,6 +58,13 @@ const std::vector<std::pair<const char*, const char*>>& builtinPaletteMap()
       {"DewPoint", "temperature"},
       {"TD", "temperature"},
       {"GroundTemperature", "temperature"},
+      {"TSEA", "seatemperature"},
+      {"TSEA-C", "seatemperature"},
+      {"TemperatureSea", "seatemperature"},
+      {"SeaSurfaceTemperature", "seatemperature"},
+      {"SST", "seatemperature"},
+      {"sea_surface_temperature", "seatemperature"},
+      {"bulk_sea_surface_temperature", "seatemperature"},
       {"Pressure", "pressure"},
       {"MeanSeaLevelPressure", "pressure"},
       {"MSLPressure", "pressure"},
@@ -173,12 +180,26 @@ UnitGuess guessFromUnits(const std::string& shortName, const std::string& longNa
   UnitGuess g;
   const std::string both = shortName + " " + longName;
 
+  // Sea-temperature names take priority over the generic temperature
+  // palette so the realistic −2…+25 °C ramp is used instead of the
+  // atmospheric −50…+50 °C one.
+  auto isSeaTempName = [&] {
+    return nameContains(both, {"sea_surface_temperature", "sea surface temperature",
+                               "sea_temperature", "sea temperature", "temperaturesea"}) ||
+           shortName == "TSEA" || shortName == "TSEA-C" || shortName == "SST";
+  };
+
   // Temperature: K → °C
   if (units == "K" || units == "Kelvin" || units == "kelvin")
   {
-    if (nameContains(both, {"temperature", "dewpoint", "dew point"}) || shortName == "T" ||
-        shortName == "T-K" || shortName == "TD" || shortName == "TD-K" ||
-        shortName == "T2m")
+    if (isSeaTempName())
+    {
+      g.offset = -273.15F;
+      g.palette = "seatemperature";
+    }
+    else if (nameContains(both, {"temperature", "dewpoint", "dew point"}) || shortName == "T" ||
+             shortName == "T-K" || shortName == "TD" || shortName == "TD-K" ||
+             shortName == "T2m")
     {
       g.offset = -273.15F;
       g.palette = "temperature";
@@ -250,7 +271,9 @@ UnitGuess guessFromUnits(const std::string& shortName, const std::string& longNa
   // The user can override with --palette.
   if (g.palette.empty())
   {
-    if (nameContains(both, {"temperature", "dewpoint", "dew_point"}))
+    if (isSeaTempName())
+      g.palette = "seatemperature";
+    else if (nameContains(both, {"temperature", "dewpoint", "dew_point"}))
       g.palette = "temperature";
     else if (nameContains(both, {"gust"}))
       g.palette = "windgust";

@@ -32,7 +32,7 @@ OPEN_UPPER_SENTINEL = 999  # wms-conf sometimes uses this for "+inf"
 
 CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 CSS_RULE = re.compile(
-    r"\.([A-Za-z0-9_]+)\s*\{([^}]*)\}",
+    r"\.([A-Za-z0-9_-]+)\s*\{([^}]*)\}",
     re.IGNORECASE,
 )
 FILL_RGB = re.compile(
