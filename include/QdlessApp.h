@@ -117,6 +117,10 @@ class App
   // Overlay toggles.
   bool itsShowGraticule = false;
   bool itsShowWindArrows = false;
+  bool itsShowCities = false;
+  // Top-N cap for the cities overlay; PageUp / PageDown step through fixed
+  // levels (5, 10, 25, 50, 100, 250, 500). Default = a comfortable mid value.
+  int itsCityOverlayN = 25;
 
   // Transient status message shown on the timeline header for one redraw
   // (e.g. "Saved foo.png"). Cleared by the next non-message-producing key.
@@ -144,7 +148,9 @@ class App
   // Overlays.
   void overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   void overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
+  void overlayCities(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   std::string buildWindArrows(int cellW, int cellH, int originRow, int originCol);
+  std::string buildCityLabels(int cellW, int cellH, int originRow, int originCol);
 
   // Optional pin marker (lat, lon) drawn on the map; set by place search and
   // click-to-probe. Persists until the next set.

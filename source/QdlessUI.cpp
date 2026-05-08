@@ -565,6 +565,13 @@ void UI::popupHelp()
       {"g",                         "Legend"},
       {"c",                         "Toggle coastlines"},
       {"b",                         "Toggle borders"},
+      {"n",                         "Toggle lat/lon graticule"},
+      {"w",                         "Toggle wind arrows"},
+      {"i",                         "Toggle city overlay"},
+      {"PgUp PgDn",                 "Cities: sparser / denser"},
+      {"/",                         "Place search"},
+      {"x",                         "Cross-section"},
+      {"e",                         "Export PNG"},
       {"?",                         "This help"},
   };
 

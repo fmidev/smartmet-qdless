@@ -16,8 +16,10 @@
 #include <json/json.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
+#include <sstream>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -1274,6 +1276,138 @@ void App::overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) c
   plot(cx, cy, bg);
 }
 
+namespace
+{
+// Visible-codepoints width approximation for collision-avoidance: counts
+// each leading byte of a UTF-8 sequence as one cell. East-Asian wide chars
+// are not adjusted for, but city names are mostly Latin/Cyrillic/Arabic.
+int displayCells(const std::string& s)
+{
+  int n = 0;
+  for (unsigned char c : s)
+    if ((c & 0xC0) != 0x80) ++n;
+  return n;
+}
+
+// Discrete population-count steps the user can cycle through with PageDown
+// (denser) and PageUp (sparser). Sorted ascending.
+constexpr std::array<int, 7> kCityNSteps = {{5, 10, 25, 50, 100, 250, 500}};
+
+// Pick visible cities (lat/lon inside viewport), sorted by population
+// descending, capped at maxN.
+std::vector<std::size_t> visibleCities(const CityIndex& idx, const DataSource& src,
+                                       const Viewport& vp, int maxN)
+{
+  struct Hit { std::size_t i; int pop; };
+  std::vector<Hit> hits;
+  for (std::size_t i = 0; i < idx.size(); ++i)
+  {
+    const auto& c = idx.at(i);
+    double u = 0;
+    double v = 0;
+    src.latLonToUV(c.lat, c.lon, u, v);
+    if (u < vp.uMin || u > vp.uMax || v < vp.vMin || v > vp.vMax) continue;
+    hits.push_back({i, c.population});
+  }
+  std::sort(hits.begin(), hits.end(),
+            [](const Hit& a, const Hit& b) { return a.pop > b.pop; });
+  if (static_cast<int>(hits.size()) > maxN) hits.resize(maxN);
+  std::vector<std::size_t> out;
+  out.reserve(hits.size());
+  for (const auto& h : hits) out.push_back(h.i);
+  return out;
+}
+}  // namespace
+
+void App::overlayCities(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
+{
+  if (!itsShowCities || subWidth <= 0 || subHeight <= 0) return;
+  if (!ensureCityIndex()) return;
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  if (spanU <= 0 || spanV <= 0) return;
+
+  const auto picks = visibleCities(itsCityIndex, *itsSource, itsViewport, itsCityOverlayN);
+  const Rgb dot{255, 255, 255};
+  const Rgb halo{30, 30, 30};
+  auto plot = [&](int x, int y, Rgb c) {
+    if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
+      pixels[static_cast<std::size_t>(y) * subWidth + x] = c;
+  };
+  for (std::size_t i : picks)
+  {
+    const auto& c = itsCityIndex.at(i);
+    double u = 0;
+    double v = 0;
+    itsSource->latLonToUV(c.lat, c.lon, u, v);
+    const int cx = static_cast<int>((u - itsViewport.uMin) / spanU * subWidth);
+    const int cy = static_cast<int>((v - itsViewport.vMin) / spanV * subHeight);
+    // 3×3 dark halo around a 1×1 white centre — readable against any palette.
+    for (int dy = -1; dy <= 1; ++dy)
+      for (int dx = -1; dx <= 1; ++dx) plot(cx + dx, cy + dy, halo);
+    plot(cx, cy, dot);
+  }
+}
+
+std::string App::buildCityLabels(int cellW, int cellH, int originRow, int originCol)
+{
+  if (!itsShowCities || cellW <= 0 || cellH <= 0) return {};
+  if (!ensureCityIndex()) return {};
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  if (spanU <= 0 || spanV <= 0) return {};
+
+  const auto picks = visibleCities(itsCityIndex, *itsSource, itsViewport, itsCityOverlayN);
+  // 1 cell of occupancy per (row, col); reject placements that overlap.
+  std::vector<std::vector<bool>> occupied(cellH, std::vector<bool>(cellW, false));
+  std::ostringstream os;
+  for (std::size_t i : picks)
+  {
+    const auto& c = itsCityIndex.at(i);
+    double u = 0;
+    double v = 0;
+    itsSource->latLonToUV(c.lat, c.lon, u, v);
+    const int cellX = static_cast<int>((u - itsViewport.uMin) / spanU * cellW);
+    const int cellY = static_cast<int>((v - itsViewport.vMin) / spanV * cellH);
+    if (cellX < 0 || cellX >= cellW || cellY < 0 || cellY >= cellH) continue;
+
+    const std::string& name = c.name;
+    const int w = displayCells(name);
+    // Place label one cell right of the dot. Try a few fallback offsets if
+    // the primary placement collides with a higher-population label.
+    static const std::array<std::pair<int, int>, 5> kOffsets = {{
+        {1, 0},   // right
+        {-1, 0},  // left (will need to be drawn from the right edge)
+        {0, -1},  // above
+        {0, 1},   // below
+        {2, 0},   // further right
+    }};
+    bool placed = false;
+    for (const auto& [dx, dy] : kOffsets)
+    {
+      const int rowY = cellY + dy;
+      int startX;
+      if (dx >= 0)
+        startX = cellX + dx;
+      else
+        startX = cellX + dx - w + 1;  // anchor right edge to the left of dot
+      if (rowY < 0 || rowY >= cellH || startX < 0 || startX + w > cellW) continue;
+      bool collision = false;
+      for (int k = 0; k < w; ++k)
+        if (occupied[rowY][startX + k]) { collision = true; break; }
+      if (collision) continue;
+      for (int k = 0; k < w; ++k) occupied[rowY][startX + k] = true;
+      // White on a dim background so the label is legible against any palette.
+      os << "\x1b[" << (originRow + rowY + 1) << ';' << (originCol + startX + 1) << 'H'
+         << "\x1b[1;48;5;235;38;5;231m" << name << "\x1b[0m";
+      placed = true;
+      break;
+    }
+    if (!placed) continue;
+  }
+  return os.str();
+}
+
 std::string App::currentTimeLabel() const
 {
   NFmiMetTime t = itsSource->currentValidTime();
@@ -1517,6 +1651,37 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       itsShowWindArrows = !itsShowWindArrows;
       return true;
 
+    case 'i':
+    case 'I':
+      itsShowCities = !itsShowCities;
+      itsLastMessage = itsShowCities
+                           ? fmt::format("Cities: top {} visible", itsCityOverlayN)
+                           : "Cities off";
+      return true;
+
+    case KEY_NPAGE:
+    {
+      // Denser: step N up.
+      auto it = std::upper_bound(kCityNSteps.begin(), kCityNSteps.end(), itsCityOverlayN);
+      if (it != kCityNSteps.end()) itsCityOverlayN = *it;
+      itsShowCities = true;
+      itsLastMessage = fmt::format("Cities: top {}", itsCityOverlayN);
+      return true;
+    }
+    case KEY_PPAGE:
+    {
+      // Sparser: step N down.
+      auto it = std::lower_bound(kCityNSteps.begin(), kCityNSteps.end(), itsCityOverlayN);
+      if (it != kCityNSteps.begin())
+      {
+        --it;
+        itsCityOverlayN = *it;
+      }
+      itsShowCities = true;
+      itsLastMessage = fmt::format("Cities: top {}", itsCityOverlayN);
+      return true;
+    }
+
     case 'e':
     case 'E':
     {
@@ -1735,15 +1900,18 @@ void App::drawMap(UI& ui)
   if (itsShowGraticule) overlayGraticule(pixels, subWidth, subHeight);
   overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
   overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
+  overlayCities(pixels, subWidth, subHeight);
   overlayMarker(pixels, subWidth, subHeight);
 
   // Bypass ncurses: write raw ANSI directly to stdout, positioned at map origin.
   std::ostringstream os;
   itsRenderer.render(os, pixels, subWidth, subHeight, l.map.row, l.map.col);
 
-  // Wind arrow overlay drawn AFTER the raster so glyphs sit on top.
+  // Wind arrow + city label overlays drawn AFTER the raster so glyphs sit
+  // on top of the quadrant blocks.
   if (itsShowWindArrows)
     os << buildWindArrows(l.map.width, l.map.height, l.map.row, l.map.col);
+  os << buildCityLabels(l.map.width, l.map.height, l.map.row, l.map.col);
 
   std::string s = os.str();
   std::fwrite(s.data(), 1, s.size(), stdout);
@@ -1763,6 +1931,7 @@ int App::runOnce()
   auto pixels = sampleSlice(subWidth, subHeight, dataMin, dataMax);
   overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
   overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
+  overlayCities(pixels, subWidth, subHeight);
   overlayMarker(pixels, subWidth, subHeight);
 
   const int id = itsSource->currentParamId();
@@ -1777,6 +1946,7 @@ int App::runOnce()
 
   std::ostringstream os;
   itsRenderer.render(os, pixels, subWidth, subHeight, 1, 0);
+  os << buildCityLabels(cellW, cellH, 1, 0);
   std::cout << os.str() << "\x1b[" << ts.rows << ";1H" << '\n';
   return 0;
 }
