@@ -93,10 +93,13 @@ Palette Palette::builtinRamp(float dataMin, float dataMax)
 
 Rgb Palette::lookup(float value) const
 {
-  // Treat sentinel/garbage values as missing. Catches kFloatMissing (32700)
-  // plus large-magnitude sentinels like 9.999e20 (GRIB) or accidental
-  // uninitialised reads showing up as ±1e29.
-  if (value == kFloatMissing || !std::isfinite(value) || std::abs(value) > 1e10F)
+  // Treat sentinel/garbage values as missing. Catches kFloatMissing (32700),
+  // grid-files' ParamValueMissing (-16777216 ≈ -1.67e7, returned for
+  // out-of-grid points by getGridValueByLatLonCoordinate), GRIB's 9.999e20,
+  // NetCDF's NC_FILL_FLOAT, and accidental uninitialised reads (±1e29).
+  // Threshold 1e6 is well above any real meteorological value (max ~5e4 for
+  // geopotential height) and well below typical sentinels.
+  if (value == kFloatMissing || !std::isfinite(value) || std::abs(value) > 1e6F)
     return missingColor();
   if (itsBands.empty()) return missingColor();
 
