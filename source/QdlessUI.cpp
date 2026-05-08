@@ -203,6 +203,7 @@ void UI::drawStatusBar()
   put("[G]Legend", 1);
   put("[N]Grid", 1);
   put("[W]ind", 1);
+  put("[I]Cities", 1);
   put("[C]oast", 1);
   put("[B]orders", 1);
   put("[E]xport", 1);
