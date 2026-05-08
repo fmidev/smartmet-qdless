@@ -570,7 +570,6 @@ void UI::popupHelp()
       {"w",                         "Toggle wind arrows"},
       {"i",                         "Toggle city overlay"},
       {"PgUp PgDn",                 "Cities: sparser / denser"},
-      {"t",                         "Probe popup text 1× / 2× (DECDHL)"},
       {"/",                         "Place search"},
       {"x",                         "Cross-section"},
       {"e",                         "Export PNG"},
@@ -804,9 +803,8 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
                         const std::vector<std::string>& timeLabels, int currentIndex,
                         const Renderer& renderer, const Palette& palette,
                         std::function<void(int)> onTimeChange, int avoidCellRow,
-                        int avoidCellCol, int textZoom)
+                        int avoidCellCol)
 {
-  const int scale = (textZoom == 2) ? 2 : 1;
   (void)palette;  // reserved for future colour-by-band line rendering
   if (series.empty()) return currentIndex;
 
@@ -898,18 +896,14 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   // border + (param, latlon, [time], range) header rows + chart + footer + border
   const int headerRows = showTimeRow ? 4 : 3;
   const int height = chartH + headerRows + 3;
-  // Screen footprint depends on textZoom — DECDHL doubles the visible
-  // dimensions of every emitted line.
-  const int screenH = scale * height;
-  const int screenW = scale * width;
   // Place the popup in the quadrant opposite the marker if known, so the
   // crosshair on the map stays visible. Falls back to centred placement.
-  int top = std::max(0, (LINES - screenH) / 2);
-  int left = std::max(0, (COLS - screenW) / 2);
+  int top = std::max(0, (LINES - height) / 2);
+  int left = std::max(0, (COLS - width) / 2);
   if (avoidCellRow >= 0 && avoidCellCol >= 0)
   {
-    top = (avoidCellRow < LINES / 2) ? std::max(0, LINES - screenH - 2) : 1;
-    left = (avoidCellCol < COLS / 2) ? std::max(0, COLS - screenW - 2) : 1;
+    top = (avoidCellRow < LINES / 2) ? std::max(0, LINES - height - 2) : 1;
+    left = (avoidCellCol < COLS / 2) ? std::max(0, COLS - width - 2) : 1;
   }
   const int interiorW = width - 2;
 
@@ -1012,44 +1006,20 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
 
     std::ostringstream os;
 
-    // Each logical popup row is built into rowBuf, then emitted via
-    // emitRow. In normal mode (scale=1) the buffer is written once at
-    // (top + R, left). In big-text mode (scale=2) it's written twice —
-    // first with ESC#3 (top half), then with ESC#4 (bottom half) — so
-    // the terminal renders the line at 2× width × 2× height.
-    std::ostringstream rowBuf;
-    auto emitRow = [&](int logicalRow) {
-      const std::string s = rowBuf.str();
-      rowBuf.str("");
-      rowBuf.clear();
-      if (scale == 2)
-      {
-        putAt(os, top + logicalRow * 2, left);
-        os << "\x1b#3" << s;
-        putAt(os, top + logicalRow * 2 + 1, left);
-        os << "\x1b#4" << s;
-      }
-      else
-      {
-        putAt(os, top + logicalRow, left);
-        os << s;
-      }
-    };
-
     // Top border.
-    rowBuf << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x8c";
-    for (int i = 0; i < width - 2; ++i) rowBuf << "\xe2\x94\x80";
-    rowBuf << "\xe2\x94\x90" << kEscReset;
-    emitRow(0);
+    putAt(os, top, left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x8c";
+    for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
+    os << "\xe2\x94\x90" << kEscReset;
 
     auto writeRow = [&](int rowOffset, std::string_view label, bool bold = false) {
-      rowBuf << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
-             << kEscFgWhite;
-      if (bold) rowBuf << kEscBold;
-      rowBuf << ' ' << label;
-      pad(rowBuf, interiorW - 1 - utf8Width(label));
-      rowBuf << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
-      emitRow(rowOffset);
+      putAt(os, top + rowOffset, left);
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
+         << kEscFgWhite;
+      if (bold) os << kEscBold;
+      os << ' ' << label;
+      pad(os, interiorW - 1 - utf8Width(label));
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
     };
 
     writeRow(1, paramName, true);
@@ -1069,22 +1039,23 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
     // Chart rows.
     for (int cy = 0; cy < chartH; ++cy)
     {
-      rowBuf << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
-             << kEscFgWhite;
+      putAt(os, top + chartTopOffset + cy, left);
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
+         << kEscFgWhite;
 
       // Y-axis label + tick (or just spacer + axis line).
       if (hasLabel[cy])
       {
         const std::string lab = fmtAxis(labelValue[cy]);
-        rowBuf << ' ';
-        pad(rowBuf, labelW - utf8Width(lab));
-        rowBuf << lab << " \xe2\x94\xa4";  // " label ┤"
+        os << ' ';
+        pad(os, labelW - utf8Width(lab));
+        os << lab << " \xe2\x94\xa4";  // " label ┤"
       }
       else
       {
-        rowBuf << ' ';
-        pad(rowBuf, labelW);
-        rowBuf << " \xe2\x94\x82";  // axis │
+        os << ' ';
+        pad(os, labelW);
+        os << " \xe2\x94\x82";  // axis │
       }
 
       // Chart cells.
@@ -1094,33 +1065,32 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
         const unsigned mask = grid[static_cast<std::size_t>(cy) * chartW + cx];
         if (inMarker && mask == 0)
         {
-          rowBuf << kEscFgRed << "\xe2\x94\x82" << kEscFgWhite;
+          os << kEscFgRed << "\xe2\x94\x82" << kEscFgWhite;
         }
         else if (mask == 0)
         {
-          rowBuf << ' ';
+          os << ' ';
         }
         else
         {
-          if (inMarker) rowBuf << kEscFgRed;
-          rowBuf << brailleGlyph(mask);
-          if (inMarker) rowBuf << kEscFgWhite;
+          if (inMarker) os << kEscFgRed;
+          os << brailleGlyph(mask);
+          if (inMarker) os << kEscFgWhite;
         }
       }
       // Right-side padding inside the box.
-      pad(rowBuf, interiorW - chartLeftPad - chartW);
-      rowBuf << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
-      emitRow(chartTopOffset + cy);
+      pad(os, interiorW - chartLeftPad - chartW);
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
     }
 
     writeRow(chartTopOffset + chartH,
              "\xe2\x86\x90\xe2\x86\x92 / click / drag step time   any other key closes",
              false);
 
-    rowBuf << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
-    for (int i = 0; i < width - 2; ++i) rowBuf << "\xe2\x94\x80";
-    rowBuf << "\xe2\x94\x98" << kEscReset;
-    emitRow(height - 1);
+    putAt(os, top + height - 1, left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
+    for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
+    os << "\xe2\x94\x98" << kEscReset;
 
     const std::string s = os.str();
     std::fwrite(s.data(), 1, s.size(), stdout);
@@ -1130,12 +1100,11 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   int idx = std::clamp(currentIndex, 0, static_cast<int>(series.size()) - 1);
   bool dragging = false;
 
-  // Translate a screen cell column to a series index, or -1 if outside
-  // the chart's horizontal span. In big-text mode (scale=2) every logical
-  // column occupies two screen columns, so we divide by `scale` first.
+  // Translate a screen cell column to a series index, or -1 if outside the
+  // chart's horizontal span. The chart starts at left + 1 + chartLeftPad
+  // (after the box border and Y-axis label area) and is `chartW` cells wide.
   auto cellToIdx = [&](int cellX) -> int {
-    const int logicalX = (cellX - left) / scale;
-    const int rel = logicalX - 1 - chartLeftPad;  // 1 = box border
+    const int rel = cellX - (left + 1 + chartLeftPad);
     if (rel < 0 || rel >= chartW) return -1;
     if (n <= 1) return 0;
     return std::clamp(rel * (n - 1) / std::max(1, chartW - 1), 0, n - 1);
@@ -1189,9 +1158,8 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
       MEVENT ev;
       if (getmouse(&ev) != OK) continue;
       const int hitIdx = cellToIdx(ev.x);
-      const int logicalY = (ev.y - top) / scale;
-      const bool inChart = hitIdx >= 0 && logicalY >= chartTopOffset &&
-                           logicalY < chartTopOffset + chartH;
+      const bool inChart = hitIdx >= 0 && ev.y >= top + chartTopOffset &&
+                           ev.y < top + chartTopOffset + chartH;
       if ((ev.bstate & BUTTON1_PRESSED) != 0U)
       {
         if (inChart)
