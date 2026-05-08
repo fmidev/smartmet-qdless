@@ -84,7 +84,6 @@ class App
 
   Options itsOpts;
   std::unique_ptr<DataSource> itsSource;
-  LatLonBox itsBbox;  // data extent in lat/lon
   Palette itsPalette;
   Renderer itsRenderer;
   std::vector<Polyline> itsCoastlines;

@@ -49,4 +49,22 @@ std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
   }
   throw std::runtime_error("unknown file format: " + filename);
 }
+
+void DataSource::uvToLatLon(double u, double v, double& lat, double& lon) const
+{
+  // Default: interpolate inside the lat/lon bounding box. v=0 is the top
+  // (max-lat) edge so the image-coord convention matches projected backends.
+  const auto bbox = boundingBox();
+  lat = bbox.maxLat - v * (bbox.maxLat - bbox.minLat);
+  lon = bbox.minLon + u * (bbox.maxLon - bbox.minLon);
+}
+
+void DataSource::latLonToUV(double lat, double lon, double& u, double& v) const
+{
+  const auto bbox = boundingBox();
+  const double latSpan = bbox.maxLat - bbox.minLat;
+  const double lonSpan = bbox.maxLon - bbox.minLon;
+  u = lonSpan > 0 ? (lon - bbox.minLon) / lonSpan : 0.0;
+  v = latSpan > 0 ? (bbox.maxLat - lat) / latSpan : 0.0;
+}
 }  // namespace Qdless

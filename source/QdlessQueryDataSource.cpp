@@ -103,6 +103,41 @@ float QueryDataSource::interpolatedValue(double lat, double lon) const
   return itsInfo->InterpolatedValue(NFmiPoint(lon, lat));
 }
 
+void QueryDataSource::uvToLatLon(double u, double v, double& lat, double& lon) const
+{
+  // Render in the file's native projection: u,v are fractions of the
+  // NFmiArea's image-coordinate rectangle (XY image coords have y=0 at
+  // top = north for normal orientations). Falls back to bbox interpolation
+  // if the area is missing for any reason.
+  const auto* area = itsInfo->Area();
+  if (area == nullptr)
+  {
+    DataSource::uvToLatLon(u, v, lat, lon);
+    return;
+  }
+  const NFmiPoint xy(u * area->Width(), v * area->Height());
+  const NFmiPoint world = area->XYToWorldXY(xy);
+  const NFmiPoint ll = area->WorldXYToLatLon(world);
+  lat = ll.Y();
+  lon = ll.X();
+}
+
+void QueryDataSource::latLonToUV(double lat, double lon, double& u, double& v) const
+{
+  const auto* area = itsInfo->Area();
+  if (area == nullptr)
+  {
+    DataSource::latLonToUV(lat, lon, u, v);
+    return;
+  }
+  const NFmiPoint world = area->LatLonToWorldXY(NFmiPoint(lon, lat));
+  const NFmiPoint xy = area->WorldXYToXY(world);
+  const double w = area->Width();
+  const double h = area->Height();
+  u = w > 0 ? xy.X() / w : 0.0;
+  v = h > 0 ? xy.Y() / h : 0.0;
+}
+
 LatLonBox QueryDataSource::boundingBox() const
 {
   LatLonBox b;

@@ -401,7 +401,6 @@ App::App(Options opts) : itsOpts(std::move(opts))
 {
   itsSource = DataSource::open(itsOpts.filename);
   buildIndices();
-  itsBbox = itsSource->boundingBox();
 
   // Apply parameter override.
   if (!itsOpts.parameterOverride.empty())
@@ -509,17 +508,18 @@ void App::loadPalette()
       }
     }
   }
-  // Derive a built-in ramp by sampling the current slice on a coarse lat/lon
-  // lattice. Cheap (~O(40*40) calls) and works regardless of backend.
+  // Derive a built-in ramp by sampling the current slice on a coarse lattice
+  // in the source's native (u, v) coordinates. Cheap (~O(40*40) calls).
   float lo = std::numeric_limits<float>::infinity();
   float hi = -std::numeric_limits<float>::infinity();
   constexpr int N = 40;
   for (int j = 0; j < N; ++j)
   {
-    const double lat = itsBbox.minLat + (j + 0.5) / N * (itsBbox.maxLat - itsBbox.minLat);
     for (int i = 0; i < N; ++i)
     {
-      const double lon = itsBbox.minLon + (i + 0.5) / N * (itsBbox.maxLon - itsBbox.minLon);
+      double lat = 0;
+      double lon = 0;
+      itsSource->uvToLatLon((i + 0.5) / N, (j + 0.5) / N, lat, lon);
       const float v = transform(itsSource->interpolatedValue(lat, lon));
       if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F) continue;
       lo = std::min(lo, v);
@@ -531,12 +531,25 @@ void App::loadPalette()
 
 void App::loadCoastlines()
 {
-  // Viewport lat/lon span = fraction of the bbox.
-  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
-  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
-  const double latSpan = (itsViewport.vMax - itsViewport.vMin) * bboxLatSpan;
-  const double lonSpan = (itsViewport.uMax - itsViewport.uMin) * bboxLonSpan;
-  const auto span = static_cast<float>(std::max(lonSpan, latSpan));
+  // Estimate the visible lat/lon extent for picking GSHHS resolution by
+  // sampling the four viewport corners through the projection. Works for
+  // both lat/lon and projected backends.
+  double minLat = 90;
+  double maxLat = -90;
+  double minLon = 180;
+  double maxLon = -180;
+  for (double u : {itsViewport.uMin, itsViewport.uMax})
+    for (double v : {itsViewport.vMin, itsViewport.vMax})
+    {
+      double lat = 0;
+      double lon = 0;
+      itsSource->uvToLatLon(u, v, lat, lon);
+      minLat = std::min(minLat, lat);
+      maxLat = std::max(maxLat, lat);
+      minLon = std::min(minLon, lon);
+      maxLon = std::max(maxLon, lon);
+    }
+  const auto span = static_cast<float>(std::max(maxLon - minLon, maxLat - minLat));
 
   if (!itsOpts.noCoastline)
   {
@@ -568,18 +581,19 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
 
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
-  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
 
-  // viewport (u,v) ∈ [0..1]² of bbox; v=0 north → screen y=0 north. No flip.
+  // Viewport (u,v) ∈ [0..1]² of the source's native rectangle (NFmiArea XY
+  // for projected sources, lat/lon bbox otherwise). Image-coord convention
+  // (v=0 = top = north) so no row flip on screen.
   for (int sy = 0; sy < subHeight; ++sy)
   {
     const float vp = itsViewport.vMin + (static_cast<float>(sy) + 0.5F) / subHeight * spanV;
-    const double lat = itsBbox.maxLat - vp * bboxLatSpan;
     for (int sx = 0; sx < subWidth; ++sx)
     {
       const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / subWidth * spanU;
-      const double lon = itsBbox.minLon + up * bboxLonSpan;
+      double lat = 0;
+      double lon = 0;
+      itsSource->uvToLatLon(up, vp, lat, lon);
       const float val = transform(itsSource->interpolatedValue(lat, lon));
       if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e6F)
       {
@@ -816,12 +830,12 @@ void App::openPlaceSearch(UI& ui)
   if (picked < 0 || picked >= static_cast<int>(lastMatchIds.size())) return;
   const auto& city = itsCityIndex.at(lastMatchIds[picked]);
 
-  // Recentre viewport on the city in [0..1]² of the lat/lon bbox.
-  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
-  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
-  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return;
-  const auto u = static_cast<float>((city.lon - itsBbox.minLon) / bboxLonSpan);
-  const auto v = static_cast<float>((itsBbox.maxLat - city.lat) / bboxLatSpan);
+  // Recentre viewport on the city in [0..1]² of the source's native space.
+  double uD = 0;
+  double vD = 0;
+  itsSource->latLonToUV(city.lat, city.lon, uD, vD);
+  const auto u = static_cast<float>(uD);
+  const auto v = static_cast<float>(vD);
 
   const float halfSpan = 0.15F;  // 30% of full extent on each axis
   itsViewport.uMin = u - halfSpan;
@@ -837,14 +851,13 @@ std::string App::exportPng(std::string& err) const
 {
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
-  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
-  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) { err = "empty bbox"; return {}; }
+  if (spanU <= 0 || spanV <= 0) { err = "empty viewport"; return {}; }
 
-  // Output size: aspect-ratio-correct (in lat/lon, ignoring projection
-  // distortion), target ~720 px tall.
+  // Output size: aspect-ratio of the visible rectangle in the source's
+  // native space (which preserves the native projection's shape), target
+  // ~720 px tall. For unprojected backends this equals the lat/lon aspect.
   constexpr int targetH = 720;
-  const double aspect = (bboxLonSpan * spanU) / (bboxLatSpan * spanV);
+  const double aspect = spanU / spanV;
   const int height = targetH;
   const int width = std::max(100, static_cast<int>(targetH * aspect));
 
@@ -854,11 +867,12 @@ std::string App::exportPng(std::string& err) const
   for (int py = 0; py < height; ++py)
   {
     const float v = itsViewport.vMin + (static_cast<float>(py) + 0.5F) / height * spanV;
-    const double lat = itsBbox.maxLat - v * bboxLatSpan;
     for (int px = 0; px < width; ++px)
     {
       const float u = itsViewport.uMin + (static_cast<float>(px) + 0.5F) / width * spanU;
-      const double lon = itsBbox.minLon + u * bboxLonSpan;
+      double lat = 0;
+      double lon = 0;
+      itsSource->uvToLatLon(u, v, lat, lon);
       const float val = transform(itsSource->interpolatedValue(lat, lon));
       Rgb c = itsPalette.lookup(val);
       if (c.transparent) continue;  // leave white for "no data"
@@ -871,10 +885,11 @@ std::string App::exportPng(std::string& err) const
                              Imagine::NFmiColorTools::Color color) {
     if (polys.empty()) return;
     auto toPixel = [&](float lon, float lat) -> std::pair<int, int> {
-      double u = (lon - itsBbox.minLon) / bboxLonSpan;
-      double v = (itsBbox.maxLat - lat) / bboxLatSpan;
-      double u01 = (u - itsViewport.uMin) / spanU;
-      double v01 = (v - itsViewport.vMin) / spanV;
+      double u = 0;
+      double v = 0;
+      itsSource->latLonToUV(lat, lon, u, v);
+      const double u01 = (u - itsViewport.uMin) / spanU;
+      const double v01 = (v - itsViewport.vMin) / spanV;
       return {static_cast<int>(u01 * width), static_cast<int>(v01 * height)};
     };
     auto plot = [&](int x, int y) {
@@ -943,17 +958,37 @@ std::string App::exportPng(std::string& err) const
 
 void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
 {
-  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
-  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
-  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return;
-
-  // Viewport corners in lat/lon.
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  const double minLon = itsBbox.minLon + itsViewport.uMin * bboxLonSpan;
-  const double maxLon = itsBbox.minLon + itsViewport.uMax * bboxLonSpan;
-  const double maxLat = itsBbox.maxLat - itsViewport.vMin * bboxLatSpan;
-  const double minLat = itsBbox.maxLat - itsViewport.vMax * bboxLatSpan;
+  if (spanU <= 0 || spanV <= 0) return;
+
+  // Estimate the visible lat/lon extent by sampling along the viewport
+  // border. With projected sources the extent is generally not rectilinear
+  // in lat/lon (e.g. polar stereo), so sample densely enough to catch
+  // off-axis extrema.
+  double minLat = 90;
+  double maxLat = -90;
+  double minLon = 180;
+  double maxLon = -180;
+  constexpr int kEdgeSamples = 32;
+  auto observe = [&](double u, double v) {
+    double lat = 0;
+    double lon = 0;
+    itsSource->uvToLatLon(u, v, lat, lon);
+    minLat = std::min(minLat, lat);
+    maxLat = std::max(maxLat, lat);
+    minLon = std::min(minLon, lon);
+    maxLon = std::max(maxLon, lon);
+  };
+  for (int i = 0; i <= kEdgeSamples; ++i)
+  {
+    const double t = static_cast<double>(i) / kEdgeSamples;
+    observe(itsViewport.uMin + t * spanU, itsViewport.vMin);  // top
+    observe(itsViewport.uMin + t * spanU, itsViewport.vMax);  // bottom
+    observe(itsViewport.uMin, itsViewport.vMin + t * spanV);  // left
+    observe(itsViewport.uMax, itsViewport.vMin + t * spanV);  // right
+  }
+  if (maxLat <= minLat || maxLon <= minLon) return;
 
   const double lonStep = niceStep(maxLon - minLon, 6);
   const double latStep = niceStep(maxLat - minLat, 6);
@@ -961,13 +996,12 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
   const Rgb gridColor{120, 120, 120};
 
   auto toSub = [&](double lat, double lon) -> std::pair<int, int> {
-    double u = (lon - itsBbox.minLon) / bboxLonSpan;
-    double v = (itsBbox.maxLat - lat) / bboxLatSpan;
-    double u01 = (u - itsViewport.uMin) / spanU;
-    double v01 = (v - itsViewport.vMin) / spanV;
-    int x = static_cast<int>(u01 * subWidth);
-    int y = static_cast<int>(v01 * subHeight);
-    return {x, y};
+    double u = 0;
+    double v = 0;
+    itsSource->latLonToUV(lat, lon, u, v);
+    const double u01 = (u - itsViewport.uMin) / spanU;
+    const double v01 = (v - itsViewport.vMin) / spanV;
+    return {static_cast<int>(u01 * subWidth), static_cast<int>(v01 * subHeight)};
   };
 
   auto plot = [&](int x, int y) {
@@ -1040,11 +1074,9 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
   // Save current param to restore at the end.
   const int savedParam = itsSource->currentParamId();
 
-  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
-  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
-  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return {};
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
+  if (spanU <= 0 || spanV <= 0) return {};
 
   // Place arrows on a sparser grid so they don't crowd. Aim ~1 arrow per
   // 4×2 cells (cells are roughly 1:2 aspect ratio in most fonts).
@@ -1071,12 +1103,13 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
   itsSource->selectParamId(uEnum);
   for (int cy = stepY / 2; cy < cellH; cy += stepY)
   {
-    const float v = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
-    const double lat = itsBbox.maxLat - v * bboxLatSpan;
+    const float vp = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
     for (int cx = stepX / 2; cx < cellW; cx += stepX)
     {
-      const float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
-      const double lon = itsBbox.minLon + u * bboxLonSpan;
+      const float up = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
+      double lat = 0;
+      double lon = 0;
+      itsSource->uvToLatLon(up, vp, lat, lon);
       const float val = transform(itsSource->interpolatedValue(lat, lon));
       samples.push_back({cx, cy, val, 0.0F});
     }
@@ -1085,12 +1118,13 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
   std::size_t i = 0;
   for (int cy = stepY / 2; cy < cellH; cy += stepY)
   {
-    const float v = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
-    const double lat = itsBbox.maxLat - v * bboxLatSpan;
+    const float vp = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
     for (int cx = stepX / 2; cx < cellW; cx += stepX)
     {
-      const float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
-      const double lon = itsBbox.minLon + u * bboxLonSpan;
+      const float up = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
+      double lat = 0;
+      double lon = 0;
+      itsSource->uvToLatLon(up, vp, lat, lon);
       samples[i++].v = itsSource->interpolatedValue(lat, lon);
       // Wind components are not unit-shifted (m/s expected); skip transform.
     }
@@ -1137,11 +1171,9 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
                            const std::vector<Polyline>& polylines, Rgb color) const
 {
   if (polylines.empty()) return;
-  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
-  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
-  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return;
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
+  if (spanU <= 0 || spanV <= 0) return;
 
   auto plot = [&](int x, int y) {
     if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
@@ -1173,13 +1205,12 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
   };
 
   auto toSub = [&](float lon, float lat) -> std::pair<int, int> {
-    double u = (lon - itsBbox.minLon) / bboxLonSpan;
-    double v = (itsBbox.maxLat - lat) / bboxLatSpan;
-    double u01 = (u - itsViewport.uMin) / spanU;
-    double v01 = (v - itsViewport.vMin) / spanV;
-    int x = static_cast<int>(u01 * subWidth);
-    int y = static_cast<int>(v01 * subHeight);
-    return {x, y};
+    double u = 0;
+    double v = 0;
+    itsSource->latLonToUV(lat, lon, u, v);
+    const double u01 = (u - itsViewport.uMin) / spanU;
+    const double v01 = (v - itsViewport.vMin) / spanV;
+    return {static_cast<int>(u01 * subWidth), static_cast<int>(v01 * subHeight)};
   };
 
   for (const auto& pl : polylines)
@@ -1256,11 +1287,7 @@ bool App::cellToLatLon(const UI& ui, int cellX, int cellY, double& lat, double& 
   float u = 0;
   float v = 0;
   if (!cellToViewport(ui, cellX, cellY, u, v)) return false;
-  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
-  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
-  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return false;
-  lat = itsBbox.maxLat - v * bboxLatSpan;
-  lon = itsBbox.minLon + u * bboxLonSpan;
+  itsSource->uvToLatLon(u, v, lat, lon);
   return true;
 }
 

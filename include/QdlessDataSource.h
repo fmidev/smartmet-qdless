@@ -57,5 +57,15 @@ class DataSource
   // Lat/lon bounding box of the data extent (rectangle covering all grid
   // points; exact for lat/lon grids, approximate for projected grids).
   virtual LatLonBox boundingBox() const = 0;
+
+  // Map a viewport position (u, v) ∈ [0, 1]² to a geographic lat/lon, and
+  // back. The viewport rectangle is the source's "natural" rendering
+  // surface: native projection XY for projected sources (QueryData with
+  // an NFmiArea, GRIB/NetCDF with a known projection), and lat/lon bbox
+  // for unprojected sources. Convention: v=0 is the top (north / max-lat)
+  // edge to match image coordinates. Default implementations interpolate
+  // over `boundingBox()` so unprojected backends work without overrides.
+  virtual void uvToLatLon(double u, double v, double& lat, double& lon) const;
+  virtual void latLonToUV(double lat, double lon, double& u, double& v) const;
 };
 }  // namespace Qdless
