@@ -981,6 +981,10 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
     prevValid = true;
   }
 
+  // First chart row offset (logical, relative to popup top): top border +
+  // paramName + latlonBuf + optional timeBuf + rangeBuf.
+  const int chartTopOffset = 3 + (showTimeRow ? 1 : 0) + 1;
+
   // Helper to render one full popup frame with a given marker index.
   auto renderFrame = [&](int markerIdx) {
     // Vertical marker at the current time step.
@@ -1030,7 +1034,7 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
       writeRow(rowCursor++, timeStr, false);
     }
     writeRow(rowCursor++, rangeBuf, false);
-    const int chartTopOffset = rowCursor;  // chart starts at top + chartTopOffset
+    // chart starts at top + chartTopOffset (computed outside this lambda).
 
     // Chart rows.
     for (int cy = 0; cy < chartH; ++cy)
@@ -1080,7 +1084,8 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
     }
 
     writeRow(chartTopOffset + chartH,
-             "\xe2\x86\x90\xe2\x86\x92 step time   any other key closes", false);
+             "\xe2\x86\x90\xe2\x86\x92 / click / drag step time   any other key closes",
+             false);
 
     putAt(os, top + height - 1, left);
     os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
@@ -1093,6 +1098,17 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   };
 
   int idx = std::clamp(currentIndex, 0, static_cast<int>(series.size()) - 1);
+  bool dragging = false;
+
+  // Translate a screen cell column to a series index, or -1 if outside the
+  // chart's horizontal span. The chart starts at left + 1 + chartLeftPad
+  // (after the box border and Y-axis label area) and is `chartW` cells wide.
+  auto cellToIdx = [&](int cellX) -> int {
+    const int rel = cellX - (left + 1 + chartLeftPad);
+    if (rel < 0 || rel >= chartW) return -1;
+    if (n <= 1) return 0;
+    return std::clamp(rel * (n - 1) / std::max(1, chartW - 1), 0, n - 1);
+  };
 
   while (true)
   {
@@ -1135,6 +1151,45 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
         idx = static_cast<int>(series.size()) - 1;
         invokeChange();
       }
+      continue;
+    }
+    if (ch == KEY_MOUSE)
+    {
+      MEVENT ev;
+      if (getmouse(&ev) != OK) continue;
+      const int hitIdx = cellToIdx(ev.x);
+      const bool inChart = hitIdx >= 0 && ev.y >= top + chartTopOffset &&
+                           ev.y < top + chartTopOffset + chartH;
+      if ((ev.bstate & BUTTON1_PRESSED) != 0U)
+      {
+        if (inChart)
+        {
+          dragging = true;
+          if (idx != hitIdx)
+          {
+            idx = hitIdx;
+            invokeChange();
+          }
+          continue;
+        }
+        // Click anywhere outside the chart (border, padding, or off-popup)
+        // dismisses, matching the existing "any other key closes" behaviour.
+        break;
+      }
+      if ((ev.bstate & BUTTON1_RELEASED) != 0U)
+      {
+        dragging = false;
+        continue;
+      }
+      if (dragging && hitIdx >= 0 && hitIdx != idx)
+      {
+        // Mouse moved while held: scrub the timeline live.
+        idx = hitIdx;
+        invokeChange();
+        continue;
+      }
+      // Other mouse events (other buttons, motion without drag) are
+      // ignored so the popup doesn't close on stray hover reports.
       continue;
     }
     // Any other key dismisses.
