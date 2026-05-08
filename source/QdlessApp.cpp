@@ -816,11 +816,19 @@ void App::openPlaceSearch(UI& ui)
     return;
   }
 
+  // Viewport centre — used to bias city search toward nearby places, so
+  // typing "kou" while looking at Scandinavia surfaces Kouvola ahead of
+  // every Chinese city ending in "kou".
+  double centerLat = 0;
+  double centerLon = 0;
+  itsSource->uvToLatLon((itsViewport.uMin + itsViewport.uMax) * 0.5,
+                        (itsViewport.vMin + itsViewport.vMax) * 0.5, centerLat, centerLon);
+
   // The popup calls this lambda each keystroke; we keep the latest match
   // list outside so we can resolve the picked index back to a city.
   std::vector<std::size_t> lastMatchIds;
   auto matcher = [&](const std::string& q) -> std::vector<std::string> {
-    lastMatchIds = itsCityIndex.search(q, 12);
+    lastMatchIds = itsCityIndex.search(q, 12, centerLat, centerLon);
     std::vector<std::string> rows;
     rows.reserve(lastMatchIds.size());
     for (std::size_t i : lastMatchIds)

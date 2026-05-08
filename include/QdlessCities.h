@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -25,8 +26,18 @@ class CityIndex
   std::size_t size() const { return itsCities.size(); }
 
   // Returns city indices matching `query` (case-insensitive substring on
-  // name/asciiname), ranked by population descending, capped at maxResults.
-  std::vector<std::size_t> search(const std::string& query, std::size_t maxResults) const;
+  // name/asciiname), capped at maxResults. Ranking:
+  //   * If `centerLat` / `centerLon` are finite, score by
+  //     log(pop+1) − 2·log(1 + d_km/100) — population minus a logarithmic
+  //     penalty for great-circle distance from (centerLat, centerLon).
+  //     This biases the result toward places near the current viewport,
+  //     so typing "kou" while looking at Scandinavia surfaces Kouvola
+  //     ahead of every Chinese metropolis ending in "kou".
+  //   * If the centre is left as NaN (default), rank by population alone.
+  std::vector<std::size_t> search(
+      const std::string& query, std::size_t maxResults,
+      double centerLat = std::numeric_limits<double>::quiet_NaN(),
+      double centerLon = std::numeric_limits<double>::quiet_NaN()) const;
 
   const City& at(std::size_t i) const { return itsCities[i]; }
 

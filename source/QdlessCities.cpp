@@ -1,6 +1,7 @@
 #include "QdlessCities.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 
@@ -14,6 +15,19 @@ std::string lowercased(std::string_view s)
   std::transform(s.begin(), s.end(), out.begin(),
                  [](unsigned char c) { return std::tolower(c); });
   return out;
+}
+
+// Great-circle distance in km between two lat/lon points.
+double haversineKm(double lat1, double lon1, double lat2, double lon2)
+{
+  constexpr double R = 6371.0;
+  constexpr double deg = M_PI / 180.0;
+  const double dLat = (lat2 - lat1) * deg;
+  const double dLon = (lon2 - lon1) * deg;
+  const double a = std::sin(dLat / 2) * std::sin(dLat / 2) +
+                   std::cos(lat1 * deg) * std::cos(lat2 * deg) *
+                       std::sin(dLon / 2) * std::sin(dLon / 2);
+  return R * 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
 }
 }  // namespace
 
@@ -52,16 +66,27 @@ bool CityIndex::load(const std::string& path)
   return !itsCities.empty();
 }
 
-std::vector<std::size_t> CityIndex::search(const std::string& query,
-                                           std::size_t maxResults) const
+std::vector<std::size_t> CityIndex::search(const std::string& query, std::size_t maxResults,
+                                           double centerLat, double centerLon) const
 {
   std::vector<std::size_t> hits;
   if (query.empty() || itsCities.empty()) return hits;
   const std::string needle = lowercased(query);
+  const bool useDistance = std::isfinite(centerLat) && std::isfinite(centerLon);
+
+  // Score = log(pop+1) − 2·log(1 + d/100). With a 100 km reference scale
+  // and α=2, regional matches dominate when the viewport is regional and
+  // population dominates when the viewport is global (every match is
+  // ~equally far). Negate so lower-is-better suits std::partial_sort.
+  auto score = [&](const City& c) -> double {
+    const double lp = std::log(static_cast<double>(c.population) + 1.0);
+    if (!useDistance) return lp;
+    const double dKm = haversineKm(centerLat, centerLon, c.lat, c.lon);
+    return lp - 2.0 * std::log1p(dKm / 100.0);
+  };
 
   // Linear scan: for ~170k cities this is well below 100 ms on modern CPUs.
-  // Collect matches with population for ranking.
-  std::vector<std::pair<int, std::size_t>> ranked;  // -population, idx
+  std::vector<std::pair<double, std::size_t>> ranked;  // -score, idx
   ranked.reserve(256);
   for (std::size_t i = 0; i < itsCities.size(); ++i)
   {
@@ -70,7 +95,7 @@ std::vector<std::size_t> CityIndex::search(const std::string& query,
     const std::string lascii = lowercased(c.asciiname);
     if (lname.find(needle) != std::string::npos ||
         lascii.find(needle) != std::string::npos)
-      ranked.emplace_back(-c.population, i);
+      ranked.emplace_back(-score(c), i);
   }
   std::partial_sort(ranked.begin(),
                     ranked.begin() + std::min(maxResults, ranked.size()), ranked.end());
