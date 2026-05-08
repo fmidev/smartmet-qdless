@@ -67,7 +67,12 @@ class GridFilesSource : public DataSource
   std::unique_ptr<SmartMet::GRID::GridFile> itsFile;
   std::vector<int> itsParamIds;        // newbase IDs (resolved via name)
   std::vector<std::string> itsParamUnits;  // parallel to itsParamIds
-  std::vector<NFmiMetTime> itsTimes;   // sorted, unique
+  // Native parameter name from the file (NetCDF variable name / GRIB
+  // shortName) — used as a display + detection fallback when the FMI ID
+  // didn't resolve to a known newbase enum.
+  std::vector<std::string> itsParamNativeNames;
+  std::vector<NFmiMetTime> itsTimes;   // sorted, unique (for display)
+  std::vector<long> itsTimesT;         // parallel: unix seconds (for indexing)
   std::vector<float> itsLevels;        // sorted, unique
   // Map (newbaseParamId, timeIdx, levelIdx) → message index.
   std::map<std::tuple<int, std::size_t, std::size_t>, std::size_t> itsIndex;

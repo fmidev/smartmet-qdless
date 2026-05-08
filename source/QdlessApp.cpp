@@ -136,6 +136,141 @@ double niceStep(double range, int maxTicks)
   return nf * power;
 }
 
+// Lower-case copy.
+std::string toLower(std::string s)
+{
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return s;
+}
+
+// Returns true if any of `needles` (already lowercase) appears in `text`
+// (compared case-insensitively).
+bool nameContains(const std::string& text, std::initializer_list<const char*> needles)
+{
+  const std::string lower = toLower(text);
+  return std::any_of(needles.begin(), needles.end(),
+                     [&](const char* n) { return lower.find(n) != std::string::npos; });
+}
+
+// Output of the unit-and-name auto-detection: the value transform that
+// brings the data into the palette's expected unit system, plus the
+// proposed palette name. Empty palette = no automatic suggestion.
+struct UnitGuess
+{
+  float scale = 1.0F;
+  float offset = 0.0F;
+  std::string palette;
+};
+
+// Map (parameter name + unit string) → suggested palette and value transform.
+// Detection is conservative: we only propose a palette when the unit AND
+// the name agree on the parameter's nature, so e.g. a m/s ocean current
+// doesn't accidentally pick up the atmospheric wind palette.
+UnitGuess guessFromUnits(const std::string& shortName, const std::string& longName,
+                         const std::string& units)
+{
+  UnitGuess g;
+  const std::string both = shortName + " " + longName;
+
+  // Temperature: K → °C
+  if (units == "K" || units == "Kelvin" || units == "kelvin")
+  {
+    if (nameContains(both, {"temperature", "dewpoint", "dew point"}) || shortName == "T" ||
+        shortName == "T-K" || shortName == "TD" || shortName == "TD-K" ||
+        shortName == "T2m")
+    {
+      g.offset = -273.15F;
+      g.palette = "temperature";
+    }
+  }
+  // Pressure: Pa → hPa (palette is in hPa)
+  else if (units == "Pa" || units == "pascal" || units == "Pascal")
+  {
+    if (nameContains(both, {"pressure", "msl"}))
+    {
+      g.scale = 0.01F;
+      g.palette = "pressure";
+    }
+  }
+  // Wind speed: m/s
+  else if (units == "m/s" || units == "m s-1" || units == "m s**-1" ||
+           units == "ms-1" || units == "ms**-1")
+  {
+    if (nameContains(both, {"gust"}))
+      g.palette = "windgust";
+    else if (shortName == "WindUMS" || shortName == "WindVMS" ||
+             nameContains(both, {"u-component of wind", "v-component of wind",
+                                 "u component of wind", "v component of wind"}))
+      g.palette = "wind_component";
+    else if (nameContains(both, {"wind"}) || shortName == "WS" || shortName == "FF")
+      g.palette = "wind";
+  }
+  // Percent: humidity / cloud cover / probability — name disambiguates.
+  else if (units == "%" || units == "percent")
+  {
+    if (nameContains(both, {"humidity"}))
+      g.palette = "humidity";
+    else if (nameContains(both, {"cloud"}))
+      g.palette = "totalcloudcover_color";
+    else if (nameContains(both, {"probability", "pop", "thunderstorm"}))
+      g.palette = "probability";
+  }
+  // Fraction (0..1): scale by 100 to become percent.
+  else if (units == "1" || units == "0-1" || units == "fraction" || units == "(0 - 1)")
+  {
+    if (nameContains(both, {"humidity"}))
+    {
+      g.scale = 100.0F;
+      g.palette = "humidity";
+    }
+    else if (nameContains(both, {"cloud"}))
+    {
+      g.scale = 100.0F;
+      g.palette = "totalcloudcover_color";
+    }
+    else if (nameContains(both, {"probability"}))
+    {
+      g.scale = 100.0F;
+      g.palette = "probability";
+    }
+  }
+  // Precipitation: mm, mm/h, kg/m² (1 kg/m² ≈ 1 mm rain)
+  else if (units == "mm" || units == "mm/h" || units == "mm/hr" || units == "kg/m^2" ||
+           units == "kg m-2" || units == "kg m**-2" || units == "kg m^-2")
+  {
+    if (nameContains(both, {"precipitation", "rain", "snow"}) || shortName == "RR-1H" ||
+        shortName == "RR-KGM2")
+      g.palette = "precipitation";
+  }
+
+  // Name-only fallback: when the file's units string is missing or the
+  // unit didn't match any branch above, but the parameter name strongly
+  // suggests a known type, propose the palette anyway with no transform.
+  // The user can override with --palette.
+  if (g.palette.empty())
+  {
+    if (nameContains(both, {"temperature", "dewpoint", "dew_point"}))
+      g.palette = "temperature";
+    else if (nameContains(both, {"gust"}))
+      g.palette = "windgust";
+    else if (nameContains(both, {"wind"}) &&
+             !nameContains(both, {"u-component", "v-component", "u_component", "v_component",
+                                  "windums", "windvms"}))
+      g.palette = "wind";
+    else if (nameContains(both, {"humidity"}))
+      g.palette = "humidity";
+    else if (nameContains(both, {"cloud_cover", "cloudcover", "cloudiness"}))
+      g.palette = "totalcloudcover_color";
+    else if (nameContains(both, {"precipitation", "rainfall", "snowfall"}))
+      g.palette = "precipitation";
+    else if (nameContains(both, {"pressure"}))
+      g.palette = "pressure";
+  }
+
+  return g;
+}
+
 std::string paletteForParam(const std::string& cfgPath, const std::string& paramName)
 {
   // Try the user-configurable JSON map first.
@@ -291,28 +426,26 @@ void App::loadPalette()
   const std::string longName = itsSource->paramLongName(id);
   const std::string units = itsSource->paramUnits(id);
 
-  // Auto-detect Kelvin and shift to Celsius so the temperature palette (which
-  // is expressed in °C) lights up correctly. Triggered when units == "K" AND
-  // the parameter has temperature-flavoured naming.
-  itsValueScale = 1.0F;
-  itsValueOffset = 0.0F;
-  if (units == "K" || units == "kelvin" || units == "Kelvin")
+  // Auto-detect units. Result has a value transform (scale/offset) to bring
+  // the data into the palette's canonical unit system, plus a palette name
+  // suggestion (used only as a last-resort fallback).
+  const UnitGuess guess = guessFromUnits(shortName, longName, units);
+  itsValueScale = guess.scale;
+  itsValueOffset = guess.offset;
+  if (guess.scale != 1.0F || guess.offset != 0.0F)
   {
-    auto isTempLike = [](const std::string& n) {
-      return n.find("emperature") != std::string::npos ||
-             n.find("DewPoint") != std::string::npos || n == "T" || n == "TD" ||
-             n == "T-K" || n == "T2m";
-    };
-    if (isTempLike(shortName) || isTempLike(longName))
-    {
-      itsValueOffset = -273.15F;
-      itsLastMessage = "Auto-shift: K → °C";
-    }
+    char msg[80];
+    if (guess.scale == 1.0F)
+      std::snprintf(msg, sizeof(msg), "Auto-shift: %s + %g", units.c_str(), guess.offset);
+    else
+      std::snprintf(msg, sizeof(msg), "Auto-shift: %s × %g", units.c_str(), guess.scale);
+    itsLastMessage = msg;
   }
 
   std::string paletteName = itsOpts.paletteOverride;
   if (paletteName.empty()) paletteName = paletteForParam(itsOpts.configFile, shortName);
   if (paletteName.empty()) paletteName = paletteForParam(itsOpts.configFile, longName);
+  if (paletteName.empty()) paletteName = guess.palette;
 
   if (!paletteName.empty())
   {
@@ -365,7 +498,7 @@ void App::loadPalette()
     {
       const double lon = itsBbox.minLon + (i + 0.5) / N * (itsBbox.maxLon - itsBbox.minLon);
       const float v = transform(itsSource->interpolatedValue(lat, lon));
-      if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e10F) continue;
+      if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F) continue;
       lo = std::min(lo, v);
       hi = std::max(hi, v);
     }

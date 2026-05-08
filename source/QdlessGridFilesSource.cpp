@@ -131,9 +131,16 @@ void GridFilesSource::indexMessages()
   };
 
   std::map<int, std::string> idToUnits;  // remember units for each id
+  std::map<int, std::string> idToNative;  // first non-empty native name
   std::set<int> paramSet;
   std::set<long> timeSet;  // unix timestamps
   std::set<float> levelSet;
+
+  auto firstNonEmpty = [](std::initializer_list<const char*> ss) -> std::string {
+    for (const char* s : ss)
+      if (s != nullptr && *s != '\0') return s;
+    return {};
+  };
 
   const std::size_t n = itsFile->getNumberOfMessages();
   for (std::size_t i = 0; i < n; ++i)
@@ -142,17 +149,28 @@ void GridFilesSource::indexMessages()
     const int id = resolveId(m);
     paramSet.insert(id);
     if (idToUnits.find(id) == idToUnits.end()) idToUnits[id] = resolveUnits(m);
+    if (idToNative.find(id) == idToNative.end())
+      idToNative[id] = firstNonEmpty(
+          {m->getNewbaseParameterName(), m->getFmiParameterName(),
+           m->getNetCdfParameterName(), m->getGribParameterName()});
     timeSet.insert(static_cast<long>(m->getForecastTimeT()));
     levelSet.insert(static_cast<float>(m->getGridParameterLevel()));
   }
   itsParamIds.assign(paramSet.begin(), paramSet.end());
   itsParamUnits.clear();
+  itsParamNativeNames.clear();
   itsParamUnits.reserve(itsParamIds.size());
-  for (int id : itsParamIds) itsParamUnits.push_back(idToUnits[id]);
+  itsParamNativeNames.reserve(itsParamIds.size());
+  for (int id : itsParamIds)
+  {
+    itsParamUnits.push_back(idToUnits[id]);
+    itsParamNativeNames.push_back(idToNative[id]);
+  }
   itsLevels.assign(levelSet.begin(), levelSet.end());
+  itsTimesT.assign(timeSet.begin(), timeSet.end());
   itsTimes.clear();
-  itsTimes.reserve(timeSet.size());
-  for (long ts : timeSet)
+  itsTimes.reserve(itsTimesT.size());
+  for (long ts : itsTimesT)
   {
     std::tm utc{};
     gmtime_r(&ts, &utc);
@@ -173,19 +191,12 @@ void GridFilesSource::indexMessages()
     const long ts = static_cast<long>(m->getForecastTimeT());
     const float lv = static_cast<float>(m->getGridParameterLevel());
 
-    auto tIt = std::find_if(itsTimes.begin(), itsTimes.end(), [&](const NFmiMetTime& t) {
-      std::tm tm{};
-      tm.tm_year = t.GetYear() - 1900;
-      tm.tm_mon = t.GetMonth() - 1;
-      tm.tm_mday = t.GetDay();
-      tm.tm_hour = t.GetHour();
-      tm.tm_min = t.GetMin();
-      tm.tm_sec = t.GetSec();
-      return timegm(&tm) == ts;
-    });
+    // Match against the raw time_t we stored — NFmiMetTime can snap to
+    // an internal time-step resolution and break round-trip equality.
+    auto tIt = std::find(itsTimesT.begin(), itsTimesT.end(), ts);
     auto lIt = std::find(itsLevels.begin(), itsLevels.end(), lv);
-    if (tIt == itsTimes.end() || lIt == itsLevels.end()) continue;
-    const std::size_t tIdx = static_cast<std::size_t>(tIt - itsTimes.begin());
+    if (tIt == itsTimesT.end() || lIt == itsLevels.end()) continue;
+    const std::size_t tIdx = static_cast<std::size_t>(tIt - itsTimesT.begin());
     const std::size_t lIdx = static_cast<std::size_t>(lIt - itsLevels.begin());
     itsIndex[std::make_tuple(pId, tIdx, lIdx)] = i;
   }
@@ -214,6 +225,16 @@ std::string GridFilesSource::paramShortName(int paramId) const
   NFmiEnumConverter conv;
   std::string name = conv.ToString(paramId);
   if (!name.empty()) return name;
+  // Fall back to the native name we cached from the file (NetCDF variable
+  // name / GRIB shortName), useful for parameters that grid-files / newbase
+  // don't have a config table entry for.
+  auto it = std::find(itsParamIds.begin(), itsParamIds.end(), paramId);
+  if (it != itsParamIds.end())
+  {
+    const std::size_t idx = static_cast<std::size_t>(it - itsParamIds.begin());
+    if (idx < itsParamNativeNames.size() && !itsParamNativeNames[idx].empty())
+      return itsParamNativeNames[idx];
+  }
   return std::to_string(paramId);
 }
 
