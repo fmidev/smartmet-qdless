@@ -276,6 +276,17 @@ NFmiMetTime GridFilesSource::currentValidTime() const
   return itsTimes.empty() ? NFmiMetTime() : itsTimes[itsCurrentTime];
 }
 
+NFmiMetTime GridFilesSource::originTime() const
+{
+  // GRIB / NetCDF call this the "reference time" or "analysis time" — the
+  // moment the forecast was issued. All messages in one file share it; ask
+  // any message we have indexed.
+  if (itsFile == nullptr || itsFile->getNumberOfMessages() == 0) return NFmiMetTime();
+  auto* msg = itsFile->getMessageByIndex(0);
+  if (msg == nullptr) return NFmiMetTime();
+  return parseForecastTime(msg->getReferenceTime().c_str());
+}
+
 std::size_t GridFilesSource::levelCount() const { return itsLevels.size(); }
 std::size_t GridFilesSource::currentLevelIndex() const { return itsCurrentLevel; }
 void GridFilesSource::selectLevelIndex(std::size_t i)

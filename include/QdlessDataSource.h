@@ -44,6 +44,11 @@ class DataSource
   virtual void selectTimeIndex(std::size_t i) = 0;
   virtual NFmiMetTime currentValidTime() const = 0;
 
+  // Model run / analysis / reference time — when the forecast was issued.
+  // QueryData calls this "origin time"; GRIB calls it "analysis time" or
+  // "reference time". Returns an invalid (year=0) NFmiMetTime if unknown.
+  virtual NFmiMetTime originTime() const { return NFmiMetTime(0, 0, 0, 0, 0); }
+
   // Level axis.
   virtual std::size_t levelCount() const = 0;
   virtual std::size_t currentLevelIndex() const = 0;

@@ -843,9 +843,13 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   // Header lines that don't change as the marker moves.
   const std::string latlonBuf = fmt::format("{:.4f}°N  {:.4f}°E", lat, lon);
 
-  // Layout.
-  const int desiredChartW = std::min(60, COLS - 16);
-  const int desiredChartH = std::min(10, std::max(4, (LINES - 10) / 2));
+  // Layout. The chart auto-scales with terminal size so the popup keeps a
+  // similar physical size when the user shrinks the font (more cells, same
+  // screen area). The 75% / 42% fractions reproduce the previous 60×10 cap
+  // on an 80×24 terminal; larger terminals get a proportionally bigger
+  // chart, capped at COLS-16 and (LINES-10)/2 so it doesn't drown the map.
+  const int desiredChartW = std::min(std::max(20, COLS - 16), COLS * 75 / 100);
+  const int desiredChartH = std::min(std::max(4, (LINES - 10) / 2), LINES * 42 / 100);
   const int chartW = std::max(20, desiredChartW);
   const int chartH = std::max(4, desiredChartH);
 

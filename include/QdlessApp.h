@@ -81,6 +81,7 @@ class App
   bool handleKey(int key, UI& ui, bool& quit);
   void drawMap(UI& ui);
   std::string currentTimeLabel() const;
+  std::string originTimeLabel() const;
   std::vector<std::string> paramLabels() const;
   std::vector<std::string> levelLabels() const;
 

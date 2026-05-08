@@ -35,6 +35,7 @@ class QueryDataSource : public DataSource
   std::size_t currentTimeIndex() const override;
   void selectTimeIndex(std::size_t i) override;
   NFmiMetTime currentValidTime() const override;
+  NFmiMetTime originTime() const override;
 
   std::size_t levelCount() const override;
   std::size_t currentLevelIndex() const override;

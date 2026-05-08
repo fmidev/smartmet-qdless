@@ -77,6 +77,8 @@ void QueryDataSource::selectTimeIndex(std::size_t i)
 
 NFmiMetTime QueryDataSource::currentValidTime() const { return itsInfo->ValidTime(); }
 
+NFmiMetTime QueryDataSource::originTime() const { return itsInfo->OriginTime(); }
+
 std::size_t QueryDataSource::levelCount() const { return itsInfo->SizeLevels(); }
 
 std::size_t QueryDataSource::currentLevelIndex() const

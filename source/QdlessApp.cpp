@@ -1421,6 +1421,19 @@ std::string App::currentTimeLabel() const
                      static_cast<int>(t.GetMin()), static_cast<int>(t.GetSec()));
 }
 
+std::string App::originTimeLabel() const
+{
+  NFmiMetTime t = itsSource->originTime();
+  // Year 0 = explicit "no origin time"; pre-2000 = grid-files placeholder
+  // (NetCDF without a reference-time attribute parses as ~1970-10-01).
+  // Either way, suppress the suffix rather than displaying obvious noise.
+  if (t.GetYear() < 2000) return {};
+  return fmt::format("{:04}-{:02}-{:02} {:02}:{:02} UTC",
+                     static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
+                     static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
+                     static_cast<int>(t.GetMin()));
+}
+
 std::vector<std::string> App::paramLabels() const
 {
   std::vector<std::string> out;
@@ -1940,10 +1953,12 @@ int App::runOnce()
 
   const int id = itsSource->currentParamId();
   std::string shortName = itsSource->paramShortName(id);
+  const std::string origLabel = originTimeLabel();
   std::cout << "[qdless] " << itsOpts.filename << " | param: " << shortName << " | time: "
             << currentTimeLabel() << " (" << (itsSource->currentTimeIndex() + 1) << "/"
-            << itsSource->timeCount() << ") | level: "
-            << itsSource->levelValueAt(itsSource->currentLevelIndex())
+            << itsSource->timeCount() << ")";
+  if (!origLabel.empty()) std::cout << " | analysis: " << origLabel;
+  std::cout << " | level: " << itsSource->levelValueAt(itsSource->currentLevelIndex())
             << " (" << (itsSource->currentLevelIndex() + 1) << "/" << itsSource->levelCount()
             << ") | range: [" << dataMin << ", " << dataMax << "] | palette: " << itsPalette.name()
             << " | coast: " << itsCoastlines.size() << "+" << itsBorders.size() << " polylines\n";
@@ -1974,6 +1989,8 @@ int App::runInteractive()
       std::string label = itsSource->paramShortName(id);
       label += "  ";
       label += currentTimeLabel();
+      if (const std::string orig = originTimeLabel(); !orig.empty())
+        label += "   (analysis " + orig + ")";
       if (itsAnimating)
         label += fmt::format("  [{} ms]", itsAnimationDelayMs);
       if (!itsLastMessage.empty())
