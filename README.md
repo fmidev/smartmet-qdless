@@ -2,6 +2,8 @@
 
 Part of [SmartMet Server](https://github.com/fmidev/smartmet-server). See the [SmartMet Server documentation](https://github.com/fmidev/smartmet-server) for an overview of the ecosystem.
 
+![qdless rendering 2-m temperature over Scandinavia](docs/images/qdless.png)
+
 ## Overview
 
 `qdless` is an interactive UTF-8 terminal viewer for gridded weather data.
@@ -44,8 +46,20 @@ adapter.
 - Place search via GeoNames `cities1000`
 - Animation (play/pause + speed control)
 - PNG export
-- Cross-section view across pressure / height levels
+- Cross-section view across pressure / height (model) levels
 - Mouse drag-pan and double-click zoom
+
+## Gallery
+
+| | |
+| --- | --- |
+| ![global temperature](docs/images/global.png) <br/>Global temperature, ECMWF | ![Himalaya zoom](docs/images/zoom_himalaya.png) <br/>Zoom into the Himalaya |
+| ![graticule overlay](docs/images/graticule.png) <br/>Lat/lon graticule on a stereographic grid | ![wind arrows](docs/images/wind.png) <br/>Wind arrows over a temperature field |
+| ![GRIB with K→°C](docs/images/grib_celsius.png) <br/>GRIB temperature with K → °C auto-conversion and a click-to-probe sparkline | ![sea-temperature palette](docs/images/temperature_sea_own_legend.png) <br/>Sea-surface temperature using the dedicated `seatemperature` palette |
+| ![parameter menu](docs/images/params.png) <br/>Parameter selection menu | ![place search](docs/images/search.png) <br/>Place search via GeoNames |
+| ![legend popup](docs/images/legend.png) <br/>Legend popup | ![help popup](docs/images/help.png) <br/>Help popup |
+| ![pressure-level cross-section](docs/images/pressurelevel_cross_section.png) <br/>Cross-section across pressure levels | ![model-level cross-section](docs/images/model_level_cross_section.png) <br/>Cross-section across model (hybrid) levels |
+| ![timeseries probe](docs/images/timeseries.png) <br/>Click-to-probe braille time series | |
 
 ## Build
 
