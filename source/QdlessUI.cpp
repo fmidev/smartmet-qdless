@@ -843,15 +843,15 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   // Header lines that don't change as the marker moves.
   const std::string latlonBuf = fmt::format("{:.4f}°N  {:.4f}°E", lat, lon);
 
-  // Layout. The popup stays at 30×5 cells on "normal" terminals (up to
-  // ~120 cols × 40 lines) and only scales up on much larger terminals,
-  // typically because the font has been shrunk to fit more content. The
-  // growth ratio (one chart cell per four terminal cells horizontally,
-  // eight vertically) keeps the popup roughly the same physical size on
-  // screen as the font shrinks, without overgrowing on wide normal-font
-  // terminals.
-  const int desiredChartW = std::min(std::max(20, COLS - 16), std::max(30, COLS / 4));
-  const int desiredChartH = std::min(std::max(4, (LINES - 10) / 2), std::max(5, LINES / 8));
+  // Layout. Average of the previous two attempts: 75% of terminal (too
+  // big) and 25%-with-30/5-floor (too small) lands at a comfortable
+  // ~45×7 on 80×24, ~60×10 on 120×40, and ~100×16 on 200×60 — readable
+  // at typical zoom levels and still scaling up enough that a tiny-font
+  // window doesn't render a postage-stamp popup.
+  const int avgW = (COLS * 75 / 100 + std::max(30, COLS / 4)) / 2;
+  const int avgH = (LINES * 42 / 100 + std::max(5, LINES / 8)) / 2;
+  const int desiredChartW = std::min(std::max(20, COLS - 16), avgW);
+  const int desiredChartH = std::min(std::max(4, (LINES - 10) / 2), avgH);
   const int chartW = std::max(20, desiredChartW);
   const int chartH = std::max(4, desiredChartH);
 
