@@ -1,5 +1,7 @@
 #include "QdlessUI.h"
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -649,11 +651,9 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
   const auto& bands = palette.bands();
   if (bands.empty()) return;
 
-  auto fmt = [](std::optional<float> v) -> std::string {
+  auto formatBound = [](std::optional<float> v) -> std::string {
     if (!v.has_value()) return "*";
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "%g", *v);
-    return buf;
+    return fmt::format("{:g}", *v);
   };
 
   std::vector<std::string> labels;
@@ -661,7 +661,7 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
   int maxLabel = 0;
   for (const auto& b : bands)
   {
-    std::string s = fmt(b.lo) + " .. " + fmt(b.hi);
+    std::string s = formatBound(b.lo) + " .. " + formatBound(b.hi);
     maxLabel = std::max(maxLabel, utf8Width(s));
     labels.push_back(std::move(s));
   }
@@ -832,8 +832,7 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   const int decimals = std::max(0, -stepExp);
 
   // Header lines that don't change as the marker moves.
-  char latlonBuf[80];
-  std::snprintf(latlonBuf, sizeof(latlonBuf), "%.4f°N  %.4f°E", lat, lon);
+  const std::string latlonBuf = fmt::format("{:.4f}°N  {:.4f}°E", lat, lon);
 
   // Layout.
   const int desiredChartW = std::min(60, COLS - 16);
@@ -843,12 +842,11 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
 
   // Format axis labels with the precision dictated by the chosen step.
   auto fmtAxis = [decimals](double v) {
-    char tmp[32];
-    std::snprintf(tmp, sizeof(tmp), "%.*f", decimals, v);
+    std::string tmp = fmt::format("{:.{}f}", v, decimals);
     // Avoid "-0" output.
-    if (std::string(tmp) == std::string("-") + std::string(decimals + 1, '0').replace(1, 1, "."))
-      std::snprintf(tmp, sizeof(tmp), "%.*f", decimals, 0.0);
-    return std::string(tmp);
+    if (tmp == std::string("-") + std::string(decimals + 1, '0').replace(1, 1, "."))
+      tmp = fmt::format("{:.{}f}", 0.0, decimals);
+    return tmp;
   };
   int labelW = std::max(utf8Width(fmtAxis(niceMin)), utf8Width(fmtAxis(niceMax)));
   labelW = std::max(labelW, 3);
@@ -959,20 +957,17 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
     if (markerIdx >= 0 && markerIdx < n) markerSubX = sampleSubX(markerIdx);
 
     // "now" value depends on marker.
-    char rangeBuf[96];
     const float curVal =
         (markerIdx >= 0 && markerIdx < static_cast<int>(series.size()))
             ? series[markerIdx]
             : std::numeric_limits<float>::quiet_NaN();
-    if (finiteValue(curVal))
-      std::snprintf(rangeBuf, sizeof(rangeBuf),
-                    "min %.*f  max %.*f  step %d/%d  now %.*f", decimals, dataLo,
-                    decimals, dataHi, markerIdx + 1, static_cast<int>(series.size()),
-                    decimals, curVal);
-    else
-      std::snprintf(rangeBuf, sizeof(rangeBuf),
-                    "min %.*f  max %.*f  step %d/%d  now -", decimals, dataLo, decimals,
-                    dataHi, markerIdx + 1, static_cast<int>(series.size()));
+    const std::string rangeBuf =
+        finiteValue(curVal)
+            ? fmt::format("min {:.{}f}  max {:.{}f}  step {}/{}  now {:.{}f}", dataLo, decimals,
+                          dataHi, decimals, markerIdx + 1, static_cast<int>(series.size()),
+                          curVal, decimals)
+            : fmt::format("min {:.{}f}  max {:.{}f}  step {}/{}  now -", dataLo, decimals, dataHi,
+                          decimals, markerIdx + 1, static_cast<int>(series.size()));
 
     std::ostringstream os;
 

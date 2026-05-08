@@ -11,6 +11,8 @@
 
 #include <ncurses.h>
 
+#include <fmt/format.h>
+#include <fmt/ostream.h>
 #include <json/json.h>
 
 #include <algorithm>
@@ -457,12 +459,10 @@ void App::loadPalette()
   itsValueOffset = guess.offset;
   if (guess.scale != 1.0F || guess.offset != 0.0F)
   {
-    char msg[80];
     if (guess.scale == 1.0F)
-      std::snprintf(msg, sizeof(msg), "Auto-shift: %s + %g", units.c_str(), guess.offset);
+      itsLastMessage = fmt::format("Auto-shift: {} + {:g}", units, guess.offset);
     else
-      std::snprintf(msg, sizeof(msg), "Auto-shift: %s × %g", units.c_str(), guess.scale);
-    itsLastMessage = msg;
+      itsLastMessage = fmt::format("Auto-shift: {} × {:g}", units, guess.scale);
   }
 
   std::string paletteName = itsOpts.paletteOverride;
@@ -629,11 +629,7 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   // Compute label width for level labels.
   int labelW = 0;
   for (float v : levelValues)
-  {
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%g", v);
-    labelW = std::max(labelW, static_cast<int>(std::strlen(buf)));
-  }
+    labelW = std::max(labelW, static_cast<int>(fmt::format("{:g}", v).size()));
   labelW = std::max(labelW, 4);
 
   // Haversine distance for the X-axis scale.
@@ -701,9 +697,7 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
     pos(1 + cy);
     os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m ";
     // Label.
-    char lbuf[16];
-    std::snprintf(lbuf, sizeof(lbuf), "%*g", labelW, levelValues[levelOrder[cy]]);
-    os << lbuf << " \xe2\x94\xa4";
+    os << fmt::format("{:>{}g}", levelValues[levelOrder[cy]], labelW) << " \xe2\x94\xa4";
 
     // Render this row's chart cells using a tiny Renderer call.
     // Build the slice: 2 sub-rows of pixels for this level.
@@ -725,25 +719,24 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
 
   // Distance axis.
   pos(1 + chartH);
-  char distLine[256];
-  std::snprintf(distLine, sizeof(distLine), " 0 km %*.*f km %*.*f km",
-                std::max(1, chartW / 2 - 6), 1, totalKm / 2,
-                std::max(1, chartW / 2 - 6), 1, totalKm);
+  const int distW = std::max(1, chartW / 2 - 6);
+  const std::string distLine =
+      fmt::format(" 0 km {:>{}.{}f} km {:>{}.{}f} km", totalKm / 2, distW, 1, totalKm, distW, 1);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m";
   padSpaces(os, labelW + 3);  // align under chart
   os << distLine;
   // Pad to right border.
-  int consumed = labelW + 3 + static_cast<int>(std::strlen(distLine));
+  int consumed = labelW + 3 + static_cast<int>(distLine.size());
   padSpaces(os, interiorW - consumed);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
 
   // Endpoints row.
   pos(2 + chartH);
-  char endpts[200];
-  std::snprintf(endpts, sizeof(endpts), " %.2f°N %.2f°E  ->  %.2f°N %.2f°E   total %.1f km",
-                lat1, lon1, lat2, lon2, totalKm);
+  const std::string endpts =
+      fmt::format(" {:.2f}°N {:.2f}°E  ->  {:.2f}°N {:.2f}°E   total {:.1f} km", lat1, lon1, lat2,
+                  lon2, totalKm);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m" << endpts;
-  padSpaces(os, interiorW - static_cast<int>(std::strlen(endpts)));
+  padSpaces(os, interiorW - static_cast<int>(endpts.size()));
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
 
   // Footer.
@@ -813,10 +806,8 @@ void App::openPlaceSearch(UI& ui)
     for (std::size_t i : lastMatchIds)
     {
       const auto& c = itsCityIndex.at(i);
-      char buf[160];
-      std::snprintf(buf, sizeof(buf), "%s, %s  (%.2f, %.2f)  pop %d", c.name.c_str(),
-                    c.country.c_str(), c.lat, c.lon, c.population);
-      rows.emplace_back(buf);
+      rows.push_back(fmt::format("{}, {}  ({:.2f}, {:.2f})  pop {}", c.name, c.country, c.lat,
+                                 c.lon, c.population));
     }
     return rows;
   };
@@ -927,11 +918,11 @@ std::string App::exportPng(std::string& err) const
   const std::string base = inputPath.stem().string();
   const std::string param = itsSource->paramShortName(itsSource->currentParamId());
   NFmiMetTime t = itsSource->currentValidTime();
-  char tbuf[32];
-  std::snprintf(tbuf, sizeof(tbuf), "%04d%02d%02d_%02d%02d", static_cast<int>(t.GetYear()),
-                static_cast<int>(t.GetMonth()), static_cast<int>(t.GetDay()),
-                static_cast<int>(t.GetHour()), static_cast<int>(t.GetMin()));
-  std::string filename = base + "_" + param + "_" + tbuf + ".png";
+  const std::string filename =
+      fmt::format("{}_{}_{:04}{:02}{:02}_{:02}{:02}.png", base, param,
+                  static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
+                  static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
+                  static_cast<int>(t.GetMin()));
 
 #ifdef IMAGINE_IGNORE_FORMATS
   err = "PNG support disabled in imagine build";
@@ -1209,12 +1200,10 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
 std::string App::currentTimeLabel() const
 {
   NFmiMetTime t = itsSource->currentValidTime();
-  char buf[32];
-  std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d UTC",
-                static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
-                static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
-                static_cast<int>(t.GetMin()), static_cast<int>(t.GetSec()));
-  return buf;
+  return fmt::format("{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+                     static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
+                     static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
+                     static_cast<int>(t.GetMin()), static_cast<int>(t.GetSec()));
 }
 
 std::vector<std::string> App::paramLabels() const
@@ -1230,11 +1219,7 @@ std::vector<std::string> App::levelLabels() const
   std::vector<std::string> out;
   out.reserve(itsSource->levelCount());
   for (std::size_t i = 0; i < itsSource->levelCount(); ++i)
-  {
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "%g", itsSource->levelValueAt(i));
-    out.emplace_back(buf);
-  }
+    out.push_back(fmt::format("{:g}", itsSource->levelValueAt(i)));
   return out;
 }
 
@@ -1512,8 +1497,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         FILE* f = std::fopen("/tmp/qdless-mouse.log", "a");
         if (f != nullptr)
         {
-          std::fprintf(f, "mouse x=%d y=%d bstate=0x%lx\n", ev.x, ev.y,
-                       static_cast<unsigned long>(ev.bstate));
+          fmt::print(f, "mouse x={} y={} bstate=0x{:x}\n", ev.x, ev.y,
+                     static_cast<unsigned long>(ev.bstate));
           std::fclose(f);
         }
       }
@@ -1712,11 +1697,7 @@ int App::runInteractive()
       label += "  ";
       label += currentTimeLabel();
       if (itsAnimating)
-      {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "  [%d ms]", itsAnimationDelayMs);
-        label += buf;
-      }
+        label += fmt::format("  [{} ms]", itsAnimationDelayMs);
       if (!itsLastMessage.empty())
       {
         label += "   ";

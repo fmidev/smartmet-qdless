@@ -67,7 +67,7 @@ qdless: $(MAINOBJ) $(OBJFILES)
 clean:
 	rm -f qdless source/*~ include/*~ main/*~
 	rm -rf obj
-	$(MAKE) -C test $@
+	@if [ -f test/Makefile ]; then $(MAKE) -C test $@; fi
 
 format:
 	clang-format -i -style=file include/*.h source/*.cpp main/*.cpp
@@ -86,7 +86,8 @@ install:
 	$(INSTALL_DATA) data/cities1000.tsv $(datadir)/smartmet/qdless/cities1000.tsv
 
 test:
-	cd test && make test
+	@if [ -f test/Makefile ]; then cd test && $(MAKE) test; \
+	else echo "no test/Makefile — skipping"; fi
 
 objdir:
 	@mkdir -p $(objdir)
