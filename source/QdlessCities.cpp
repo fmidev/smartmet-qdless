@@ -74,15 +74,16 @@ std::vector<std::size_t> CityIndex::search(const std::string& query, std::size_t
   const std::string needle = lowercased(query);
   const bool useDistance = std::isfinite(centerLat) && std::isfinite(centerLon);
 
-  // Score = log(pop+1) − 2·log(1 + d/100). With a 100 km reference scale
-  // and α=2, regional matches dominate when the viewport is regional and
-  // population dominates when the viewport is global (every match is
-  // ~equally far). Negate so lower-is-better suits std::partial_sort.
+  // Score = log(pop+1) − 3·log(1 + d/100). With a 100 km reference scale
+  // and α=3, regional matches dominate strongly when the viewport is
+  // regional (a 32k city at 100 km beats a 4M city at 2000 km), and
+  // population still wins in a global view (every match is ~equally far).
+  // Negate so lower-is-better suits std::partial_sort.
   auto score = [&](const City& c) -> double {
     const double lp = std::log(static_cast<double>(c.population) + 1.0);
     if (!useDistance) return lp;
     const double dKm = haversineKm(centerLat, centerLon, c.lat, c.lon);
-    return lp - 2.0 * std::log1p(dKm / 100.0);
+    return lp - 3.0 * std::log1p(dKm / 100.0);
   };
 
   // Two-tier ranking: prefix matches win over infix matches first, then
