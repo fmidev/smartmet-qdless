@@ -1371,9 +1371,33 @@ void App::openProbeAt(double lat, double lon, UI& ui)
     drawMap(ui);
   };
 
+  // Translate the marker lat/lon into a terminal cell so the popup can
+  // shift to the opposite quadrant and keep the crosshair visible.
+  int avoidRow = -1;
+  int avoidCol = -1;
+  if (itsMarker.has_value())
+  {
+    const auto& l = ui.layout();
+    const float spanU = itsViewport.uMax - itsViewport.uMin;
+    const float spanV = itsViewport.vMax - itsViewport.vMin;
+    if (spanU > 0 && spanV > 0 && l.map.width > 0 && l.map.height > 0)
+    {
+      double u = 0;
+      double v = 0;
+      itsSource->latLonToUV(itsMarker->first, itsMarker->second, u, v);
+      const double u01 = (u - itsViewport.uMin) / spanU;
+      const double v01 = (v - itsViewport.vMin) / spanV;
+      if (u01 >= 0 && u01 <= 1 && v01 >= 0 && v01 <= 1)
+      {
+        avoidCol = l.map.col + static_cast<int>(u01 * l.map.width);
+        avoidRow = l.map.row + static_cast<int>(v01 * l.map.height);
+      }
+    }
+  }
+
   int finalIdx = ui.popupTimeseries(param, lat, lon, series,
                                     static_cast<int>(savedTime), itsRenderer, itsPalette,
-                                    onTimeChange);
+                                    onTimeChange, avoidRow, avoidCol);
   itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
 }
 

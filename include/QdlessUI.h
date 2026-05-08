@@ -79,10 +79,14 @@ class UI
   // `onTimeChange(newIdx)` is invoked so the caller can update the time on
   // the underlying map while the popup stays visible. Any other key
   // dismisses. Returns the final time index.
+  // `avoidCellRow` / `avoidCellCol` (-1 = ignore): if both ≥ 0, the popup
+  // shifts into the opposite quadrant so a map marker at that cell stays
+  // visible behind the popup.
   int popupTimeseries(const std::string& paramName, double lat, double lon,
                       const std::vector<float>& series, int currentIndex,
                       const Renderer& renderer, const Palette& palette,
-                      std::function<void(int)> onTimeChange = {});
+                      std::function<void(int)> onTimeChange = {},
+                      int avoidCellRow = -1, int avoidCellCol = -1);
 
  private:
   void writeLabel(WINDOW* w, int y, int x, const std::string& label, int hotPos);

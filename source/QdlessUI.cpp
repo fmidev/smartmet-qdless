@@ -793,7 +793,8 @@ bool finiteValue(float v)
 int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
                         const std::vector<float>& series, int currentIndex,
                         const Renderer& renderer, const Palette& palette,
-                        std::function<void(int)> onTimeChange)
+                        std::function<void(int)> onTimeChange, int avoidCellRow,
+                        int avoidCellCol)
 {
   (void)palette;  // reserved for future colour-by-band line rendering
   if (series.empty()) return currentIndex;
@@ -872,8 +873,15 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
                               utf8Width(latlonBuf) + 6,
                               40});
   const int height = chartH + 6;  // border + 3 header rows + chart + footer + border
-  const int top = std::max(0, (LINES - height) / 2);
-  const int left = std::max(0, (COLS - width) / 2);
+  // Place the popup in the quadrant opposite the marker if known, so the
+  // crosshair on the map stays visible. Falls back to centred placement.
+  int top = std::max(0, (LINES - height) / 2);
+  int left = std::max(0, (COLS - width) / 2);
+  if (avoidCellRow >= 0 && avoidCellCol >= 0)
+  {
+    top = (avoidCellRow < LINES / 2) ? std::max(0, LINES - height - 2) : 1;
+    left = (avoidCellCol < COLS / 2) ? std::max(0, COLS - width - 2) : 1;
+  }
   const int interiorW = width - 2;
 
   // Build the braille bitmask grid.
