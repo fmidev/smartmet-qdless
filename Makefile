@@ -27,6 +27,7 @@ LIBS += $(PREFIX_LDFLAGS) \
 	-lboost_program_options \
 	-lboost_iostreams \
 	-lboost_thread \
+	-lboost_filesystem \
 	$(REQUIRED_LIBS) \
 	-lhdf5 \
 	-lbz2 -ljpeg -lpng -lz -lrt \

@@ -11,6 +11,7 @@
 
 #include <ncurses.h>
 
+#include <boost/dll/runtime_symbol_info.hpp>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <json/json.h>
@@ -484,14 +485,16 @@ void App::loadPalette()
     };
     try
     {
-      auto exeDir = std::filesystem::canonical("/proc/self/exe").parent_path();
+      // Cross-platform exe path: Linux /proc, macOS _NSGetExecutablePath, etc.
+      const std::filesystem::path exeDir =
+          boost::dll::program_location().parent_path().string();
       candidates.push_back(exeDir / "palettes" / (paletteName + ".json"));
       candidates.push_back(exeDir / ".." / "share" / "smartmet" / "qdless" / "palettes" /
                            (paletteName + ".json"));
     }
     catch (const std::exception&)
     {
-      // /proc/self/exe not available — skip
+      // exe path not resolvable (no /proc on Linux, dyld lookup failed, …)
     }
     if (const char* home = std::getenv("HOME"))
       candidates.push_back(std::filesystem::path(home) / ".config" / "qdless" / "palettes" /
@@ -788,7 +791,8 @@ bool App::ensureCityIndex() const
   };
   try
   {
-    auto exeDir = std::filesystem::canonical("/proc/self/exe").parent_path();
+    const std::filesystem::path exeDir =
+        boost::dll::program_location().parent_path().string();
     candidates.push_back(exeDir / "data" / "cities1000.tsv");
   }
   catch (const std::exception&)

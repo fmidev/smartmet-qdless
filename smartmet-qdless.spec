@@ -48,6 +48,7 @@ BuildRequires: smartmet-library-smarttools-devel >= 26.4.13
 BuildRequires: smartmet-timezones
 BuildRequires: zlib-devel
 
+Requires: %{smartmet_boost}-filesystem
 Requires: %{smartmet_boost}-iostreams
 Requires: %{smartmet_boost}-program-options
 Requires: %{smartmet_boost}-regex
