@@ -369,6 +369,13 @@ int UI::popupSearch(const std::string& title,
 {
   std::string query;
   int sel = 0;
+  // Per-session sticky dimensions. Each keystroke recomputes the natural
+  // popup size from the current matches, but we never shrink within one
+  // invocation — otherwise a smaller popup leaves the previous frame's
+  // borders behind because we render directly to stdout (no window
+  // manager underneath us). Growth is fine; shrinkage produces artifacts.
+  int stickyWidth = 0;
+  int stickyHeight = 0;
 
   while (true)
   {
@@ -383,12 +390,16 @@ int UI::popupSearch(const std::string& title,
     for (const auto& s : matches) maxLabel = std::max(maxLabel, utf8Width(s));
     int width = std::max(maxLabel + 8, std::max(40, utf8Width(title) + 8));
     width = std::min(width, COLS - 4);
+    width = std::max(width, stickyWidth);
+    stickyWidth = width;
     const int interiorW = width - 2;
 
     constexpr int kFooterRows = 1;
     const int maxRows = std::max(1, LINES - 8 - kFooterRows);
     const int innerH = std::min(static_cast<int>(matches.size()), maxRows);
-    const int height = innerH + 4 + kFooterRows;  // top + query + sep + body + footer + bottom
+    int height = innerH + 4 + kFooterRows;  // top + query + sep + body + footer + bottom
+    height = std::max(height, stickyHeight);
+    stickyHeight = height;
     const int top = std::max(0, (LINES - height) / 2);
     const int left = std::max(0, (COLS - width) / 2);
 
