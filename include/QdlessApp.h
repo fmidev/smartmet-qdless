@@ -82,6 +82,10 @@ class App
   void drawMap(UI& ui);
   std::string currentTimeLabel() const;
   std::string originTimeLabel() const;
+  // Build the timeline header label and push it to the ncurses windows.
+  // Used by the main draw loop and by the time-series probe so the bottom
+  // panel updates live as the user steps through times inside the popup.
+  void renderTimeline(UI& ui);
   std::vector<std::string> paramLabels() const;
   std::vector<std::string> levelLabels() const;
 

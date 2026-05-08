@@ -1421,6 +1421,27 @@ std::string App::currentTimeLabel() const
                      static_cast<int>(t.GetMin()), static_cast<int>(t.GetSec()));
 }
 
+void App::renderTimeline(UI& ui)
+{
+  const int id = itsSource->currentParamId();
+  std::string label = itsSource->paramShortName(id);
+  label += "  ";
+  label += currentTimeLabel();
+  if (const std::string orig = originTimeLabel(); !orig.empty())
+    label += "   (analysis " + orig + ")";
+  if (itsAnimating) label += fmt::format("  [{} ms]", itsAnimationDelayMs);
+  if (!itsLastMessage.empty())
+  {
+    label += "   ";
+    label += itsLastMessage;
+    itsLastMessage.clear();
+  }
+  ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
+                  static_cast<int>(itsSource->timeCount()));
+  ui.drawStatusBar();
+  doupdate();
+}
+
 std::string App::originTimeLabel() const
 {
   NFmiMetTime t = itsSource->originTime();
@@ -1502,12 +1523,15 @@ void App::openProbeAt(double lat, double lon, UI& ui)
   // Sample the current parameter at this lat/lon for every time step.
   // Save and restore the time index so the rest of the UI keeps its state.
   std::vector<float> series;
+  std::vector<std::string> timeLabels;
   series.reserve(itsSource->timeCount());
+  timeLabels.reserve(itsSource->timeCount());
   const std::size_t savedTime = itsSource->currentTimeIndex();
   for (std::size_t i = 0; i < itsSource->timeCount(); ++i)
   {
     itsSource->selectTimeIndex(i);
     series.push_back(transform(itsSource->interpolatedValue(lat, lon)));
+    timeLabels.push_back(currentTimeLabel());
   }
   itsSource->selectTimeIndex(savedTime);
 
@@ -1515,10 +1539,12 @@ void App::openProbeAt(double lat, double lon, UI& ui)
   std::string param = itsSource->paramShortName(itsSource->currentParamId());
 
   // Callback: when the user presses an arrow inside the popup, update the
-  // querydata's time index and redraw the map underneath. The popup loop
-  // will then re-emit its own raw-ANSI on top, so the popup stays visible.
+  // querydata's time index, refresh the bottom timeline label so the time
+  // there tracks the popup marker, then redraw the map underneath. The
+  // popup loop re-emits its raw-ANSI on top, so the popup stays visible.
   auto onTimeChange = [&](int newIdx) {
     itsSource->selectTimeIndex(static_cast<unsigned long>(newIdx));
+    renderTimeline(ui);
     drawMap(ui);
   };
 
@@ -1546,7 +1572,7 @@ void App::openProbeAt(double lat, double lon, UI& ui)
     }
   }
 
-  int finalIdx = ui.popupTimeseries(param, lat, lon, series,
+  int finalIdx = ui.popupTimeseries(param, lat, lon, series, timeLabels,
                                     static_cast<int>(savedTime), itsRenderer, itsPalette,
                                     onTimeChange, avoidRow, avoidCol);
   itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
@@ -1985,24 +2011,7 @@ int App::runInteractive()
       // screen with blanks, which would clobber a raw-ANSI map written
       // beforehand. So commit ncurses windows first, then draw the map
       // on top via raw escapes.
-      const int id = itsSource->currentParamId();
-      std::string label = itsSource->paramShortName(id);
-      label += "  ";
-      label += currentTimeLabel();
-      if (const std::string orig = originTimeLabel(); !orig.empty())
-        label += "   (analysis " + orig + ")";
-      if (itsAnimating)
-        label += fmt::format("  [{} ms]", itsAnimationDelayMs);
-      if (!itsLastMessage.empty())
-      {
-        label += "   ";
-        label += itsLastMessage;
-        itsLastMessage.clear();
-      }
-      ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
-                      static_cast<int>(itsSource->timeCount()));
-      ui.drawStatusBar();
-      doupdate();
+      renderTimeline(ui);
       drawMap(ui);
       needRedraw = false;
     }

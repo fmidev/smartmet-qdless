@@ -799,7 +799,8 @@ bool finiteValue(float v)
 }  // namespace
 
 int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
-                        const std::vector<float>& series, int currentIndex,
+                        const std::vector<float>& series,
+                        const std::vector<std::string>& timeLabels, int currentIndex,
                         const Renderer& renderer, const Palette& palette,
                         std::function<void(int)> onTimeChange, int avoidCellRow,
                         int avoidCellCol)
@@ -882,11 +883,19 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
     }
   }
 
+  const bool showTimeRow = !timeLabels.empty();
+  // Width must also fit the time label if present (e.g. "2026-05-08 12:00 UTC").
+  int timeMaxW = 0;
+  if (showTimeRow)
+    for (const auto& t : timeLabels) timeMaxW = std::max(timeMaxW, utf8Width(t));
   const int width = std::max({chartW + chartLeftPad + 4,
                               utf8Width(paramName) + 6,
                               utf8Width(latlonBuf) + 6,
+                              timeMaxW + 6,
                               40});
-  const int height = chartH + 6;  // border + 3 header rows + chart + footer + border
+  // border + (param, latlon, [time], range) header rows + chart + footer + border
+  const int headerRows = showTimeRow ? 4 : 3;
+  const int height = chartH + headerRows + 3;
   // Place the popup in the quadrant opposite the marker if known, so the
   // crosshair on the map stays visible. Falls back to centred placement.
   int top = std::max(0, (LINES - height) / 2);
@@ -1011,12 +1020,22 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
 
     writeRow(1, paramName, true);
     writeRow(2, latlonBuf, false);
-    writeRow(3, rangeBuf, false);
+    int rowCursor = 3;
+    if (showTimeRow)
+    {
+      const std::string& timeStr =
+          (markerIdx >= 0 && markerIdx < static_cast<int>(timeLabels.size()))
+              ? timeLabels[markerIdx]
+              : timeLabels.front();
+      writeRow(rowCursor++, timeStr, false);
+    }
+    writeRow(rowCursor++, rangeBuf, false);
+    const int chartTopOffset = rowCursor;  // chart starts at top + chartTopOffset
 
     // Chart rows.
     for (int cy = 0; cy < chartH; ++cy)
     {
-      putAt(os, top + 4 + cy, left);
+      putAt(os, top + chartTopOffset + cy, left);
       os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
          << kEscFgWhite;
 
@@ -1060,7 +1079,8 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
       os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
     }
 
-    writeRow(4 + chartH, "\xe2\x86\x90\xe2\x86\x92 step time   any other key closes", false);
+    writeRow(chartTopOffset + chartH,
+             "\xe2\x86\x90\xe2\x86\x92 step time   any other key closes", false);
 
     putAt(os, top + height - 1, left);
     os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
