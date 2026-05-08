@@ -48,7 +48,11 @@ adapter.
   GeoNames `cities1000`
 - Place search with auto-marker and time-series probe at the picked
   location
-- Click-to-probe braille-sparkline time series at any point on the map
+- Click-to-probe braille-sparkline time series at any point on the map.
+  Popup auto-scales with terminal size, so the chart keeps a similar
+  physical size when the font shrinks
+- Valid time and model-run time both shown — labelled "analysis" to
+  match GRIB terminology; omitted when the file has no reference time
 - Animation (play/pause + speed control)
 - PNG export
 - Cross-section view across pressure / height (model) levels
