@@ -83,6 +83,7 @@ The full list is in the in-app help popup (`?`). Quick reference:
 | `w` | Toggle wind arrows |
 | `i` | Toggle city overlay |
 | `PgDn` / `PgUp` | Cities: denser / sparser (5 → 500) |
+| `t` | Probe popup text 1× / 2× (DECDHL big text for tiny fonts) |
 | `/` | Place search (auto-opens probe at the pick) |
 | `x` | Cross-section (click two endpoints) |
 | `e` | Export PNG |

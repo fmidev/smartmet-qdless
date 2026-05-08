@@ -84,12 +84,17 @@ class UI
   // `avoidCellRow` / `avoidCellCol` (-1 = ignore): if both ≥ 0, the popup
   // shifts into the opposite quadrant so a map marker at that cell stays
   // visible behind the popup.
+  // `textZoom` (1 or 2): at 2, the popup is rendered using DECDHL
+  // (double-width, double-height per line) so it occupies 2× screen
+  // dimensions and the text becomes legible on a tiny-font terminal.
+  // Requires a terminal that honours ESC#3 / ESC#4 (xterm, kitty,
+  // GNOME Terminal, iTerm2, Konsole).
   int popupTimeseries(const std::string& paramName, double lat, double lon,
                       const std::vector<float>& series,
                       const std::vector<std::string>& timeLabels, int currentIndex,
                       const Renderer& renderer, const Palette& palette,
                       std::function<void(int)> onTimeChange = {},
-                      int avoidCellRow = -1, int avoidCellCol = -1);
+                      int avoidCellRow = -1, int avoidCellCol = -1, int textZoom = 1);
 
  private:
   void writeLabel(WINDOW* w, int y, int x, const std::string& label, int hotPos);

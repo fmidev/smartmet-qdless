@@ -1574,7 +1574,7 @@ void App::openProbeAt(double lat, double lon, UI& ui)
 
   int finalIdx = ui.popupTimeseries(param, lat, lon, series, timeLabels,
                                     static_cast<int>(savedTime), itsRenderer, itsPalette,
-                                    onTimeChange, avoidRow, avoidCol);
+                                    onTimeChange, avoidRow, avoidCol, itsTextZoom);
   itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
 }
 
@@ -1700,6 +1700,13 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       itsLastMessage = itsShowCities
                            ? fmt::format("Cities: top {} visible", itsCityOverlayN)
                            : "Cities off";
+      return true;
+
+    case 't':
+    case 'T':
+      itsTextZoom = (itsTextZoom == 1) ? 2 : 1;
+      itsLastMessage = (itsTextZoom == 2) ? "Probe text: 2× (DECDHL)"
+                                          : "Probe text: 1×";
       return true;
 
     case KEY_NPAGE:

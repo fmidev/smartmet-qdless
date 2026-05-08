@@ -119,6 +119,11 @@ class App
   bool itsAnimating = false;
   int itsAnimationDelayMs = 250;
 
+  // Time-series popup text zoom: 1 = native font, 2 = DECDHL doubled
+  // (terminals that honour ESC#3 / ESC#4 render the popup at 2× width
+  // and 2× height so text stays legible at very small font sizes).
+  int itsTextZoom = 1;
+
   // Overlay toggles.
   bool itsShowGraticule = false;
   bool itsShowWindArrows = false;
