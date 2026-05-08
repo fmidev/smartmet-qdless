@@ -176,44 +176,31 @@ void Viewport::reset()
 
 void Viewport::clamp()
 {
-  float spanU = uMax - uMin;
-  float spanV = vMax - vMin;
-  if (spanU > 1.0F)
-  {
-    uMin = 0;
-    uMax = 1;
-  }
-  else
-  {
-    if (uMin < 0)
+  // Allow the viewport to extend beyond the data bounding box (negative or
+  // > 1 fractions). This is essential for projected data — e.g. polar
+  // stereographic grids whose lat/lon bbox underestimates the actual
+  // coverage near the pole. Out-of-bbox samples render as missing
+  // (transparent), letting the user zoom out to see the whole data.
+  // We only clamp the span itself: keep it positive and bounded.
+  constexpr float kMinSpan = 1e-4F;  // prevent zooming in past 0.01%
+  constexpr float kMaxSpan = 3.0F;   // cap zoom-out at 3× bbox
+  auto bound = [&](float& lo, float& hi) {
+    float span = hi - lo;
+    if (span < kMinSpan)
     {
-      uMax -= uMin;
-      uMin = 0;
+      const float c = (lo + hi) * 0.5F;
+      lo = c - kMinSpan * 0.5F;
+      hi = c + kMinSpan * 0.5F;
     }
-    if (uMax > 1)
+    else if (span > kMaxSpan)
     {
-      uMin -= (uMax - 1);
-      uMax = 1;
+      const float c = (lo + hi) * 0.5F;
+      lo = c - kMaxSpan * 0.5F;
+      hi = c + kMaxSpan * 0.5F;
     }
-  }
-  if (spanV > 1.0F)
-  {
-    vMin = 0;
-    vMax = 1;
-  }
-  else
-  {
-    if (vMin < 0)
-    {
-      vMax -= vMin;
-      vMin = 0;
-    }
-    if (vMax > 1)
-    {
-      vMin -= (vMax - 1);
-      vMax = 1;
-    }
-  }
+  };
+  bound(uMin, uMax);
+  bound(vMin, vMax);
 }
 
 void Viewport::zoom(float factor)

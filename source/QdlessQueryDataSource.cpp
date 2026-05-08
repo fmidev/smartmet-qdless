@@ -108,19 +108,37 @@ LatLonBox QueryDataSource::boundingBox() const
   LatLonBox b;
   const auto* area = itsInfo->Area();
   if (area == nullptr) return b;
-  // Walk the four corners in case the projection is rotated/oblique so the
-  // axis-aligned lat/lon bbox correctly encloses the grid.
-  NFmiPoint corners[4] = {
-      area->TopLeftLatLon(), area->TopRightLatLon(), area->BottomLeftLatLon(),
-      area->BottomRightLatLon()};
-  b.minLat = b.maxLat = corners[0].Y();
-  b.minLon = b.maxLon = corners[0].X();
-  for (int i = 1; i < 4; ++i)
+
+  // For non-rectilinear projections (polar stereographic, lambert, rotated
+  // lat/lon, …) the lat/lon at the four corners can underestimate the
+  // axis-aligned bbox: e.g. a polar-stereographic grid centered on the pole
+  // covers latitude 90° at its midpoint, but never at the corners. Sample
+  // along the perimeter at fine granularity to capture the true extent.
+  b.minLat = std::numeric_limits<double>::infinity();
+  b.maxLat = -std::numeric_limits<double>::infinity();
+  b.minLon = std::numeric_limits<double>::infinity();
+  b.maxLon = -std::numeric_limits<double>::infinity();
+
+  const double w = area->Width();
+  const double h = area->Height();
+
+  auto addPoint = [&](double x, double y) {
+    NFmiPoint world = area->XYToWorldXY(NFmiPoint(x, y));
+    NFmiPoint ll = area->WorldXYToLatLon(world);
+    b.minLat = std::min(b.minLat, ll.Y());
+    b.maxLat = std::max(b.maxLat, ll.Y());
+    b.minLon = std::min(b.minLon, ll.X());
+    b.maxLon = std::max(b.maxLon, ll.X());
+  };
+
+  constexpr int kSamples = 60;
+  for (int i = 0; i <= kSamples; ++i)
   {
-    b.minLat = std::min(b.minLat, corners[i].Y());
-    b.maxLat = std::max(b.maxLat, corners[i].Y());
-    b.minLon = std::min(b.minLon, corners[i].X());
-    b.maxLon = std::max(b.maxLon, corners[i].X());
+    const double t = static_cast<double>(i) / kSamples;
+    addPoint(0, t * h);          // left edge
+    addPoint(w, t * h);          // right edge
+    addPoint(t * w, 0);          // top edge
+    addPoint(t * w, h);          // bottom edge
   }
   return b;
 }
