@@ -1,0 +1,1630 @@
+#include "QdlessApp.h"
+
+#include "QdlessUI.h"
+
+#include <newbase/NFmiArea.h>
+#include <newbase/NFmiEnumConverter.h>
+#include <newbase/NFmiFastQueryInfo.h>
+#include <newbase/NFmiGlobals.h>
+#include <newbase/NFmiPoint.h>
+#include <newbase/NFmiQueryData.h>
+
+#include <imagine/NFmiColorTools.h>
+#include <imagine/NFmiImage.h>
+
+#include <ncurses.h>
+
+#include <json/json.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <numeric>
+#include <stdexcept>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+namespace Qdless
+{
+namespace
+{
+struct TerminalSize
+{
+  int cols;
+  int rows;
+};
+
+TerminalSize terminalSize()
+{
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  struct winsize ws{};
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0)
+    return {ws.ws_col, ws.ws_row};
+  return {80, 24};
+}
+
+// Built-in fallback when qdless.conf isn't installed. Mirrors cnf/qdless.conf;
+// keep them in sync. Lookup is case-insensitive.
+const std::vector<std::pair<const char*, const char*>>& builtinPaletteMap()
+{
+  static const std::vector<std::pair<const char*, const char*>> kMap = {
+      {"T", "temperature"},
+      {"Temperature", "temperature"},
+      {"T-K", "temperature"},
+      {"T2m", "temperature"},
+      {"TemperatureF", "temperature"},
+      {"DewPoint", "temperature"},
+      {"TD", "temperature"},
+      {"GroundTemperature", "temperature"},
+      {"Pressure", "pressure"},
+      {"MeanSeaLevelPressure", "pressure"},
+      {"MSLPressure", "pressure"},
+      {"MSL", "pressure"},
+      {"P", "pressure"},
+      {"Humidity", "humidity"},
+      {"RelativeHumidity", "humidity"},
+      {"RH", "humidity"},
+      {"Precipitation1h", "precipitation"},
+      {"Precipitation", "precipitation"},
+      {"RR-1H", "precipitation"},
+      {"RR-KGM2", "precipitation"},
+      {"PrecipitationAmount", "precipitation"},
+      {"PrecipitationForm", "precipitation_form"},
+      {"PotentialPrecipitationForm", "precipitation_form"},
+      {"PrecipitationType", "precipitation_type"},
+      {"PotentialPrecipitationType", "precipitation_type"},
+      {"WindSpeedMS", "wind"},
+      {"TotalWindMS", "wind"},
+      {"WS", "wind"},
+      {"WindSpeed", "wind"},
+      {"FF", "wind"},
+      {"WindUMS", "wind_component"},
+      {"WindVMS", "wind_component"},
+      {"WindGust", "windgust"},
+      {"WG", "windgust"},
+      {"HourlyMaximumGust", "windgust"},
+      {"TotalCloudCover", "totalcloudcover_color"},
+      {"MiddleAndLowCloudCover", "totalcloudcover_color"},
+      {"LowCloudCover", "totalcloudcover_color"},
+      {"MediumCloudCover", "totalcloudcover_color"},
+      {"HighCloudCover", "totalcloudcover_color"},
+      {"FogIntensity", "fog_intensity"},
+      {"SnowDepth", "snowdepth"},
+      {"SD", "snowdepth"},
+      {"ProbabilityOfPrecipitation", "probability"},
+      {"PoP", "probability"},
+      {"ProbabilityThunderstorm", "probability"},
+      {"ThermalSum", "thermalsum"},
+      {"CurrentSpeed", "currentspeed"},
+      {"WaterCurrentSpeed", "currentspeed"},
+  };
+  return kMap;
+}
+
+std::string lowercased(const std::string& s)
+{
+  std::string out = s;
+  std::transform(out.begin(), out.end(), out.begin(), ::tolower);
+  return out;
+}
+
+// Stream `n` space chars (no-op if n <= 0).
+void padSpaces(std::ostream& os, int n)
+{
+  if (n > 0) os << std::string(static_cast<std::size_t>(n), ' ');
+}
+
+// "Nice" tick step for an axis spanning `range`: one of {1,2,5}*10^k.
+double niceStep(double range, int maxTicks)
+{
+  if (range <= 0 || maxTicks < 1) return 1.0;
+  const double rough = range / maxTicks;
+  const double exponent = std::floor(std::log10(rough));
+  const double power = std::pow(10.0, exponent);
+  const double fraction = rough / power;
+  double nf = 1.0;
+  if (fraction < 1.5)
+    nf = 1.0;
+  else if (fraction < 3.5)
+    nf = 2.0;
+  else if (fraction < 7.5)
+    nf = 5.0;
+  else
+    nf = 10.0;
+  return nf * power;
+}
+
+std::string paletteForParam(const std::string& cfgPath, const std::string& paramName)
+{
+  // Try the user-configurable JSON map first.
+  std::ifstream in(cfgPath);
+  if (in)
+  {
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errs;
+    if (Json::parseFromStream(builder, in, &root, &errs))
+    {
+      const auto& palettes = root["palettes"];
+      if (palettes.isObject())
+      {
+        std::string needle = lowercased(paramName);
+        for (const auto& key : palettes.getMemberNames())
+        {
+          if (lowercased(key) == needle) return palettes[key].asString();
+        }
+      }
+    }
+  }
+  // Fall back to the built-in defaults so it works without an installed conf.
+  std::string needle = lowercased(paramName);
+  for (const auto& [param, palette] : builtinPaletteMap())
+    if (lowercased(param) == needle) return palette;
+  return {};
+}
+}  // namespace
+
+void Viewport::reset()
+{
+  uMin = 0;
+  uMax = 1;
+  vMin = 0;
+  vMax = 1;
+}
+
+void Viewport::clamp()
+{
+  float spanU = uMax - uMin;
+  float spanV = vMax - vMin;
+  if (spanU > 1.0F)
+  {
+    uMin = 0;
+    uMax = 1;
+  }
+  else
+  {
+    if (uMin < 0)
+    {
+      uMax -= uMin;
+      uMin = 0;
+    }
+    if (uMax > 1)
+    {
+      uMin -= (uMax - 1);
+      uMax = 1;
+    }
+  }
+  if (spanV > 1.0F)
+  {
+    vMin = 0;
+    vMax = 1;
+  }
+  else
+  {
+    if (vMin < 0)
+    {
+      vMax -= vMin;
+      vMin = 0;
+    }
+    if (vMax > 1)
+    {
+      vMin -= (vMax - 1);
+      vMax = 1;
+    }
+  }
+}
+
+void Viewport::zoom(float factor)
+{
+  zoomAt(factor, (uMin + uMax) * 0.5F, (vMin + vMax) * 0.5F);
+}
+
+void Viewport::zoomAt(float factor, float anchorU, float anchorV)
+{
+  // After zoom, the anchor (in area coords) stays at the same fractional
+  // position within the viewport — i.e. the point under the cursor doesn't
+  // move on screen.
+  const float oldSpanU = uMax - uMin;
+  const float oldSpanV = vMax - vMin;
+  const float relU = (oldSpanU > 0) ? (anchorU - uMin) / oldSpanU : 0.5F;
+  const float relV = (oldSpanV > 0) ? (anchorV - vMin) / oldSpanV : 0.5F;
+  const float newSpanU = oldSpanU * factor;
+  const float newSpanV = oldSpanV * factor;
+  uMin = anchorU - relU * newSpanU;
+  uMax = uMin + newSpanU;
+  vMin = anchorV - relV * newSpanV;
+  vMax = vMin + newSpanV;
+  clamp();
+}
+
+void Viewport::pan(float duFrac, float dvFrac)
+{
+  float spanU = uMax - uMin;
+  float spanV = vMax - vMin;
+  uMin += spanU * duFrac;
+  uMax += spanU * duFrac;
+  vMin += spanV * dvFrac;
+  vMax += spanV * dvFrac;
+  clamp();
+}
+
+App::App(Options opts) : itsOpts(std::move(opts))
+{
+  itsData = std::make_unique<NFmiQueryData>(itsOpts.filename);
+  itsInfo = std::make_unique<NFmiFastQueryInfo>(itsData.get());
+  if (!itsInfo->IsGrid())
+    throw std::runtime_error("qdless: input is not gridded data: " + itsOpts.filename);
+
+  buildIndices();
+
+  // Apply parameter override.
+  itsInfo->FirstParam();
+  if (!itsOpts.parameterOverride.empty())
+  {
+    NFmiEnumConverter conv;
+    int id = conv.ToEnum(itsOpts.parameterOverride);
+    if (id == kFmiBadParameter || !itsInfo->Param(static_cast<FmiParameterName>(id)))
+      throw std::runtime_error("qdless: parameter not found: " + itsOpts.parameterOverride);
+    int curId = itsInfo->Param().GetParamIdent();
+    auto it = std::find(itsParamIds.begin(), itsParamIds.end(), curId);
+    if (it != itsParamIds.end()) itsParamIndex = static_cast<int>(it - itsParamIds.begin());
+  }
+
+  auto resolveIndex = [](int requested, unsigned long size) -> unsigned long {
+    if (size == 0) return 0;
+    if (requested < 0) return size - 1;
+    if (static_cast<unsigned long>(requested) >= size)
+      throw std::runtime_error("qdless: index " + std::to_string(requested) +
+                               " out of range (size " + std::to_string(size) + ")");
+    return static_cast<unsigned long>(requested);
+  };
+  itsInfo->TimeIndex(resolveIndex(itsOpts.timeIndex, itsInfo->SizeTimes()));
+  itsInfo->LevelIndex(resolveIndex(itsOpts.levelIndex, itsInfo->SizeLevels()));
+
+  loadPalette();
+  loadCoastlines();
+}
+
+App::~App() = default;
+
+void App::buildIndices()
+{
+  itsParamIds.clear();
+  itsInfo->FirstParam();
+  do
+  {
+    itsParamIds.push_back(itsInfo->Param().GetParamIdent());
+  } while (itsInfo->NextParam(true));
+  itsInfo->FirstParam();
+  itsParamIndex = 0;
+}
+
+void App::loadPalette()
+{
+  NFmiEnumConverter conv;
+  int id = itsInfo->Param().GetParamIdent();
+  std::string shortName = conv.ToString(id);
+  std::string longName(itsInfo->Param().GetParamName().CharPtr());
+
+  std::string paletteName = itsOpts.paletteOverride;
+  if (paletteName.empty()) paletteName = paletteForParam(itsOpts.configFile, shortName);
+  if (paletteName.empty()) paletteName = paletteForParam(itsOpts.configFile, longName);
+
+  if (!paletteName.empty())
+  {
+    // Try several palette locations so the tool works without `make install`
+    // and regardless of cwd:
+    //   1. --palette-dir (default /usr/share/smartmet/qdtools/palettes)
+    //   2. palettes/ next to the binary (build-tree layout)
+    //   3. ../share/smartmet/qdtools/palettes/ relative to binary (install)
+    //   4. $HOME/.config/qdless/palettes/
+    std::vector<std::filesystem::path> candidates{
+        std::filesystem::path(itsOpts.paletteDir) / (paletteName + ".json"),
+    };
+    try
+    {
+      auto exeDir = std::filesystem::canonical("/proc/self/exe").parent_path();
+      candidates.push_back(exeDir / "palettes" / (paletteName + ".json"));
+      candidates.push_back(exeDir / ".." / "share" / "smartmet" / "qdtools" / "palettes" /
+                           (paletteName + ".json"));
+    }
+    catch (const std::exception&)
+    {
+      // /proc/self/exe not available — skip
+    }
+    if (const char* home = std::getenv("HOME"))
+      candidates.push_back(std::filesystem::path(home) / ".config" / "qdless" / "palettes" /
+                           (paletteName + ".json"));
+
+    for (const auto& path : candidates)
+    {
+      try
+      {
+        itsPalette = Palette::loadFromFile(path.string());
+        return;
+      }
+      catch (const std::exception&)
+      {
+        // try next candidate
+      }
+    }
+  }
+  // Derive a built-in ramp from the current slice's data range.
+  float lo = std::numeric_limits<float>::infinity();
+  float hi = -std::numeric_limits<float>::infinity();
+  itsInfo->ResetLocation();
+  while (itsInfo->NextLocation())
+  {
+    float v = itsInfo->FloatValue();
+    if (v == kFloatMissing || !std::isfinite(v)) continue;
+    lo = std::min(lo, v);
+    hi = std::max(hi, v);
+  }
+  itsPalette = Palette::builtinRamp(lo, hi);
+}
+
+void App::loadCoastlines()
+{
+  const auto* area = itsInfo->Area();
+  if (area == nullptr) return;
+
+  // Compute the viewport's lat/lon span by sampling its four corners.
+  auto corner = [&](float u, float v) {
+    NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * area->Width(), v * area->Height()));
+    return area->WorldXYToLatLon(world);
+  };
+  NFmiPoint c1 = corner(itsViewport.uMin, itsViewport.vMin);
+  NFmiPoint c2 = corner(itsViewport.uMax, itsViewport.vMin);
+  NFmiPoint c3 = corner(itsViewport.uMin, itsViewport.vMax);
+  NFmiPoint c4 = corner(itsViewport.uMax, itsViewport.vMax);
+  double minLon = std::min({c1.X(), c2.X(), c3.X(), c4.X()});
+  double maxLon = std::max({c1.X(), c2.X(), c3.X(), c4.X()});
+  double minLat = std::min({c1.Y(), c2.Y(), c3.Y(), c4.Y()});
+  double maxLat = std::max({c1.Y(), c2.Y(), c3.Y(), c4.Y()});
+  const auto span = static_cast<float>(std::max(maxLon - minLon, maxLat - minLat));
+
+  if (!itsOpts.noCoastline)
+  {
+    auto path = Coastline::pickFile(itsOpts.coastlineDir, "GSHHS", span);
+    if (!path.empty() && path != itsCoastlinePath)
+    {
+      itsCoastlines = Coastline::read(path, itsOpts.minLakeAreaKm2, itsOpts.minLakeRoundness,
+                                      itsOpts.minIslandAreaKm2);
+      itsCoastlinePath = path;
+    }
+  }
+  if (!itsOpts.noBorders)
+  {
+    auto path = Coastline::pickFile(itsOpts.coastlineDir, "border", span);
+    if (!path.empty() && path != itsBorderPath)
+    {
+      itsBorders = Coastline::read(path);
+      itsBorderPath = path;
+    }
+  }
+}
+
+std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
+                                  float& dataMax) const
+{
+  std::vector<Rgb> out(static_cast<std::size_t>(subWidth) * subHeight, Palette::missingColor());
+  dataMin = std::numeric_limits<float>::infinity();
+  dataMax = -std::numeric_limits<float>::infinity();
+
+  const auto* area = itsInfo->Area();
+  if (area == nullptr) return out;
+
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+
+  // NFmiArea XY is image-coords: Y=0 is the top (north). No flip.
+  for (int sy = 0; sy < subHeight; ++sy)
+  {
+    float v = itsViewport.vMin + (static_cast<float>(sy) + 0.5F) / subHeight * spanV;
+    for (int sx = 0; sx < subWidth; ++sx)
+    {
+      float u = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / subWidth * spanU;
+      NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * area->Width(), v * area->Height()));
+      NFmiPoint latlon = area->WorldXYToLatLon(world);
+      float val = itsInfo->InterpolatedValue(latlon);
+      if (val != kFloatMissing && std::isfinite(val))
+      {
+        dataMin = std::min(dataMin, val);
+        dataMax = std::max(dataMax, val);
+      }
+      out[static_cast<std::size_t>(sy) * subWidth + sx] = itsPalette.lookup(val);
+    }
+  }
+  return out;
+}
+
+void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
+{
+  double lat1 = 0;
+  double lon1 = 0;
+  double lat2 = 0;
+  double lon2 = 0;
+  if (!cellToLatLon(ui, x1, y1, lat1, lon1) || !cellToLatLon(ui, x2, y2, lat2, lon2))
+    return;
+
+  const int nLevels = static_cast<int>(itsInfo->SizeLevels());
+  if (nLevels < 2)
+  {
+    itsLastMessage = "Cross-section needs >= 2 levels in the file";
+    return;
+  }
+
+  // Collect level values + sort indices so the popup shows high altitude /
+  // low pressure on top.
+  std::vector<float> levelValues(nLevels);
+  const unsigned long savedLevel = itsInfo->LevelIndex();
+  for (int i = 0; i < nLevels; ++i)
+  {
+    itsInfo->LevelIndex(i);
+    levelValues[i] = itsInfo->Level()->LevelValue();
+  }
+  std::vector<int> levelOrder(nLevels);
+  std::iota(levelOrder.begin(), levelOrder.end(), 0);
+  // Pressure level: smaller value = higher altitude; show smallest at top.
+  std::sort(levelOrder.begin(), levelOrder.end(),
+            [&](int a, int b) { return levelValues[a] < levelValues[b]; });
+
+  // Layout: chartW columns x nLevels rows.
+  const int desiredW = std::min(80, COLS - 16);
+  const int chartW = std::max(20, desiredW);
+  const int chartH = nLevels;
+  const int subW = chartW * 2;
+  const int subH = chartH * 2;
+
+  // Compute label width for level labels.
+  int labelW = 0;
+  for (float v : levelValues)
+  {
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%g", v);
+    labelW = std::max(labelW, static_cast<int>(std::strlen(buf)));
+  }
+  labelW = std::max(labelW, 4);
+
+  // Haversine distance for the X-axis scale.
+  auto haversineKm = [](double la1, double lo1, double la2, double lo2) {
+    const double r1 = la1 * M_PI / 180.0;
+    const double r2 = la2 * M_PI / 180.0;
+    const double dla = (la2 - la1) * M_PI / 180.0;
+    const double dlo = (lo2 - lo1) * M_PI / 180.0;
+    const double a = std::sin(dla / 2) * std::sin(dla / 2) +
+                     std::cos(r1) * std::cos(r2) * std::sin(dlo / 2) * std::sin(dlo / 2);
+    return 2.0 * 6371.0 * std::atan2(std::sqrt(a), std::sqrt(1 - a));
+  };
+  const double totalKm = haversineKm(lat1, lon1, lat2, lon2);
+
+  // Sample.
+  std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH);
+  for (int li = 0; li < nLevels; ++li)
+  {
+    const int srcLevel = levelOrder[li];  // model index
+    itsInfo->LevelIndex(static_cast<unsigned long>(srcLevel));
+    for (int sx = 0; sx < subW; ++sx)
+    {
+      const double frac = (static_cast<double>(sx) + 0.5) / subW;
+      const double lat = lat1 + frac * (lat2 - lat1);
+      const double lon = lon1 + frac * (lon2 - lon1);
+      const float val = itsInfo->InterpolatedValue(NFmiPoint(lon, lat));
+      const Rgb c = itsPalette.lookup(val);
+      pixels[static_cast<std::size_t>(li * 2) * subW + sx] = c;
+      pixels[static_cast<std::size_t>(li * 2 + 1) * subW + sx] = c;
+    }
+  }
+  itsInfo->LevelIndex(savedLevel);
+
+  // Build raw-ANSI popup.
+  // Width: border + label + " ┤ " + chart + border = 2 + labelW + 3 + chartW
+  const int width = std::min(COLS - 4, labelW + chartW + 6);
+  // Height: border + title + chart + axis + endpoints + footer + border
+  const int height = chartH + 6;
+  const int top = std::max(0, (LINES - height) / 2);
+  const int left = std::max(0, (COLS - width) / 2);
+  const int interiorW = width - 2;
+
+  NFmiEnumConverter conv;
+  std::string title = "Cross-section: " + std::string(conv.ToString(itsInfo->Param().GetParamIdent()));
+
+  std::ostringstream os;
+
+  auto pos = [&](int row, int col = 0) {
+    os << "\x1b[" << (top + row + 1) << ';' << (left + col + 1) << 'H';
+  };
+
+  // Top border with title.
+  pos(0);
+  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m"
+     << "\xe2\x94\x8c\xe2\x94\x80[\x1b[38;5;15m" << title << "\x1b[38;5;14m]";
+  int titleConsumed = 4 + static_cast<int>(title.size());
+  for (int i = 0; i < width - titleConsumed - 1; ++i) os << "\xe2\x94\x80";
+  os << "\xe2\x94\x90\x1b[0m";
+
+  // Chart rows: label │ <data row>.
+  // Render each chart row as one cell-row of quadrant blocks via Renderer.
+  // We do row-by-row to interleave with labels.
+  for (int cy = 0; cy < chartH; ++cy)
+  {
+    pos(1 + cy);
+    os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m ";
+    // Label.
+    char lbuf[16];
+    std::snprintf(lbuf, sizeof(lbuf), "%*g", labelW, levelValues[levelOrder[cy]]);
+    os << lbuf << " \xe2\x94\xa4";
+
+    // Render this row's chart cells using a tiny Renderer call.
+    // Build the slice: 2 sub-rows of pixels for this level.
+    std::vector<Rgb> rowPixels(static_cast<std::size_t>(subW) * 2);
+    for (int sx = 0; sx < subW; ++sx)
+    {
+      rowPixels[sx] = pixels[static_cast<std::size_t>(cy * 2) * subW + sx];
+      rowPixels[static_cast<std::size_t>(subW) + sx] =
+          pixels[static_cast<std::size_t>(cy * 2 + 1) * subW + sx];
+    }
+    // Render at the chart column origin.
+    itsRenderer.render(os, rowPixels, subW, 2, top + 1 + cy, left + 1 + labelW + 2 + 1);
+
+    // Right padding inside the box.
+    pos(1 + cy, interiorW + 1);  // not used; we just close the right border below.
+    pos(1 + cy, width - 1);
+    os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
+  }
+
+  // Distance axis.
+  pos(1 + chartH);
+  char distLine[256];
+  std::snprintf(distLine, sizeof(distLine), " 0 km %*.*f km %*.*f km",
+                std::max(1, chartW / 2 - 6), 1, totalKm / 2,
+                std::max(1, chartW / 2 - 6), 1, totalKm);
+  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m";
+  padSpaces(os, labelW + 3);  // align under chart
+  os << distLine;
+  // Pad to right border.
+  int consumed = labelW + 3 + static_cast<int>(std::strlen(distLine));
+  padSpaces(os, interiorW - consumed);
+  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
+
+  // Endpoints row.
+  pos(2 + chartH);
+  char endpts[200];
+  std::snprintf(endpts, sizeof(endpts), " %.2f°N %.2f°E  ->  %.2f°N %.2f°E   total %.1f km",
+                lat1, lon1, lat2, lon2, totalKm);
+  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m" << endpts;
+  padSpaces(os, interiorW - static_cast<int>(std::strlen(endpts)));
+  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
+
+  // Footer.
+  pos(3 + chartH);
+  std::string_view footer = " any key to close";
+  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m"
+     << footer;
+  padSpaces(os, interiorW - static_cast<int>(footer.size()));
+  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
+
+  // Bottom border.
+  pos(height - 1);
+  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x94";
+  for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
+  os << "\xe2\x94\x98\x1b[0m";
+
+  const std::string s = os.str();
+  std::fwrite(s.data(), 1, s.size(), stdout);
+  std::fflush(stdout);
+
+  // Wait for keypress to dismiss.
+  // Direct ncurses wgetch on stdscr would refresh stdscr; route through UI.
+  ui.waitInput();
+}
+
+bool App::ensureCityIndex() const
+{
+  if (itsCityIndexAttempted) return !itsCityIndex.empty();
+  itsCityIndexAttempted = true;
+
+  std::vector<std::filesystem::path> candidates{
+      std::filesystem::path("/usr/share/smartmet/qdless/cities1000.tsv"),
+  };
+  try
+  {
+    auto exeDir = std::filesystem::canonical("/proc/self/exe").parent_path();
+    candidates.push_back(exeDir / "data" / "cities1000.tsv");
+  }
+  catch (const std::exception&)
+  {
+  }
+  if (const char* home = std::getenv("HOME"))
+    candidates.push_back(std::filesystem::path(home) / ".config" / "qdless" /
+                         "cities1000.tsv");
+  for (const auto& path : candidates)
+  {
+    if (std::filesystem::exists(path) && itsCityIndex.load(path.string())) return true;
+  }
+  return false;
+}
+
+void App::openPlaceSearch(UI& ui)
+{
+  if (!ensureCityIndex())
+  {
+    itsLastMessage = "Place search: cities1000.tsv not found";
+    return;
+  }
+
+  // The popup calls this lambda each keystroke; we keep the latest match
+  // list outside so we can resolve the picked index back to a city.
+  std::vector<std::size_t> lastMatchIds;
+  auto matcher = [&](const std::string& q) -> std::vector<std::string> {
+    lastMatchIds = itsCityIndex.search(q, 12);
+    std::vector<std::string> rows;
+    rows.reserve(lastMatchIds.size());
+    for (std::size_t i : lastMatchIds)
+    {
+      const auto& c = itsCityIndex.at(i);
+      char buf[160];
+      std::snprintf(buf, sizeof(buf), "%s, %s  (%.2f, %.2f)  pop %d", c.name.c_str(),
+                    c.country.c_str(), c.lat, c.lon, c.population);
+      rows.emplace_back(buf);
+    }
+    return rows;
+  };
+
+  const int picked = ui.popupSearch("Place search", matcher);
+  if (picked < 0 || picked >= static_cast<int>(lastMatchIds.size())) return;
+  const auto& city = itsCityIndex.at(lastMatchIds[picked]);
+
+  // Recentre viewport on the city. Pick a default span: ~5° if the data
+  // covers it, else min(currentSpan, dataSpan) / 2.
+  const auto* area = itsInfo->Area();
+  if (area == nullptr) return;
+  NFmiPoint world = area->LatLonToWorldXY(NFmiPoint(city.lon, city.lat));
+  NFmiPoint xy = area->WorldXYToXY(world);
+  const float u = static_cast<float>(xy.X() / area->Width());
+  const float v = static_cast<float>(xy.Y() / area->Height());
+
+  // Choose a fixed zoom (regional view) — keep it simple.
+  const float halfSpan = 0.15F;  // 30% of full extent on each axis
+  itsViewport.uMin = u - halfSpan;
+  itsViewport.uMax = u + halfSpan;
+  itsViewport.vMin = v - halfSpan;
+  itsViewport.vMax = v + halfSpan;
+  itsViewport.clamp();
+
+  itsLastMessage = std::string("Centred on ") + city.name + ", " + city.country;
+}
+
+std::string App::exportPng(std::string& err) const
+{
+  const auto* area = itsInfo->Area();
+  if (area == nullptr) { err = "no area"; return {}; }
+
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  const double areaW = area->Width();
+  const double areaH = area->Height();
+
+  // Output size: aspect-ratio-correct, target ~720 px tall.
+  constexpr int targetH = 720;
+  const double aspect = (areaW * spanU) / (areaH * spanV);
+  const int height = targetH;
+  const int width = std::max(100, static_cast<int>(targetH * aspect));
+
+  Imagine::NFmiImage image(width, height);
+  image.Erase(Imagine::NFmiColorTools::MakeColor(255, 255, 255));
+
+  for (int py = 0; py < height; ++py)
+  {
+    const float v = itsViewport.vMin + (static_cast<float>(py) + 0.5F) / height * spanV;
+    for (int px = 0; px < width; ++px)
+    {
+      const float u = itsViewport.uMin + (static_cast<float>(px) + 0.5F) / width * spanU;
+      NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * areaW, v * areaH));
+      NFmiPoint latlon = area->WorldXYToLatLon(world);
+      // const_cast: InterpolatedValue is non-const but doesn't actually
+      // modify visible state for our usage.
+      const float val = const_cast<NFmiFastQueryInfo*>(itsInfo.get())->InterpolatedValue(latlon);
+      Rgb c = itsPalette.lookup(val);
+      if (c.transparent) continue;  // leave white for "no data"
+      image(px, py) = Imagine::NFmiColorTools::MakeColor(c.r, c.g, c.b);
+    }
+  }
+
+  // Coastline + border overlay (Bresenham into image pixels).
+  auto drawPolylineImg = [&](const std::vector<Polyline>& polys,
+                             Imagine::NFmiColorTools::Color color) {
+    if (polys.empty()) return;
+    auto toPixel = [&](float lon, float lat) -> std::pair<int, int> {
+      NFmiPoint world = area->LatLonToWorldXY(NFmiPoint(lon, lat));
+      NFmiPoint xy = area->WorldXYToXY(world);
+      double u01 = (xy.X() / areaW - itsViewport.uMin) / spanU;
+      double v01 = (xy.Y() / areaH - itsViewport.vMin) / spanV;
+      return {static_cast<int>(u01 * width), static_cast<int>(v01 * height)};
+    };
+    auto plot = [&](int x, int y) {
+      if (x >= 0 && x < width && y >= 0 && y < height) image(x, y) = color;
+    };
+    auto line = [&](int x0, int y0, int x1, int y1) {
+      int dx = std::abs(x1 - x0);
+      int dy = -std::abs(y1 - y0);
+      int sx = x0 < x1 ? 1 : -1;
+      int sy = y0 < y1 ? 1 : -1;
+      int err2 = dx + dy;
+      while (true)
+      {
+        plot(x0, y0);
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err2;
+        if (e2 >= dy) { err2 += dy; x0 += sx; }
+        if (e2 <= dx) { err2 += dx; y0 += sy; }
+      }
+    };
+    for (const auto& pl : polys)
+    {
+      if (pl.lons.size() < 2) continue;
+      auto prev = toPixel(pl.lons[0], pl.lats[0]);
+      for (std::size_t i = 1; i < pl.lons.size(); ++i)
+      {
+        auto cur = toPixel(pl.lons[i], pl.lats[i]);
+        if (std::abs(cur.first - prev.first) < width &&
+            std::abs(cur.second - prev.second) < height)
+          line(prev.first, prev.second, cur.first, cur.second);
+        prev = cur;
+      }
+    }
+  };
+  drawPolylineImg(itsCoastlines, Imagine::NFmiColorTools::MakeColor(0, 0, 0));
+  drawPolylineImg(itsBorders, Imagine::NFmiColorTools::MakeColor(90, 90, 90));
+
+  // Build filename: <basename>_<param>_<YYYYMMDD_HHMM>.png in cwd.
+  NFmiEnumConverter conv;
+  std::filesystem::path inputPath(itsOpts.filename);
+  const std::string base = inputPath.stem().string();
+  const std::string param = conv.ToString(itsInfo->Param().GetParamIdent());
+  NFmiMetTime t = itsInfo->ValidTime();
+  char tbuf[32];
+  std::snprintf(tbuf, sizeof(tbuf), "%04d%02d%02d_%02d%02d", static_cast<int>(t.GetYear()),
+                static_cast<int>(t.GetMonth()), static_cast<int>(t.GetDay()),
+                static_cast<int>(t.GetHour()), static_cast<int>(t.GetMin()));
+  std::string filename = base + "_" + param + "_" + tbuf + ".png";
+
+#ifdef IMAGINE_IGNORE_FORMATS
+  err = "PNG support disabled in imagine build";
+  return {};
+#else
+  try
+  {
+    image.WritePng(filename);
+    return filename;
+  }
+  catch (const std::exception& e)
+  {
+    err = e.what();
+    return {};
+  }
+#endif
+}
+
+void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
+{
+  const auto* area = itsInfo->Area();
+  if (area == nullptr) return;
+
+  // Viewport corners → lat/lon range.
+  auto corner = [&](float u, float v) {
+    NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * area->Width(), v * area->Height()));
+    return area->WorldXYToLatLon(world);
+  };
+  NFmiPoint c1 = corner(itsViewport.uMin, itsViewport.vMin);
+  NFmiPoint c2 = corner(itsViewport.uMax, itsViewport.vMin);
+  NFmiPoint c3 = corner(itsViewport.uMin, itsViewport.vMax);
+  NFmiPoint c4 = corner(itsViewport.uMax, itsViewport.vMax);
+  const double minLon = std::min({c1.X(), c2.X(), c3.X(), c4.X()});
+  const double maxLon = std::max({c1.X(), c2.X(), c3.X(), c4.X()});
+  const double minLat = std::min({c1.Y(), c2.Y(), c3.Y(), c4.Y()});
+  const double maxLat = std::max({c1.Y(), c2.Y(), c3.Y(), c4.Y()});
+
+  const double lonStep = niceStep(maxLon - minLon, 6);
+  const double latStep = niceStep(maxLat - minLat, 6);
+
+  const Rgb gridColor{120, 120, 120};
+  const double areaW = area->Width();
+  const double areaH = area->Height();
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+
+  auto toSub = [&](double lat, double lon) -> std::pair<int, int> {
+    NFmiPoint world = area->LatLonToWorldXY(NFmiPoint(lon, lat));
+    NFmiPoint xy = area->WorldXYToXY(world);
+    double u01 = (xy.X() / areaW - itsViewport.uMin) / spanU;
+    double v01 = (xy.Y() / areaH - itsViewport.vMin) / spanV;
+    int x = static_cast<int>(u01 * subWidth);
+    int y = static_cast<int>(v01 * subHeight);
+    return {x, y};
+  };
+
+  auto plot = [&](int x, int y) {
+    if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
+      pixels[static_cast<std::size_t>(y) * subWidth + x] = gridColor;
+  };
+
+  auto drawLine = [&](int x0, int y0, int x1, int y1) {
+    int dx = std::abs(x1 - x0);
+    int dy = -std::abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    while (true)
+    {
+      plot(x0, y0);
+      if (x0 == x1 && y0 == y1) break;
+      int e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  };
+
+  constexpr int kSamplesPerLine = 60;
+
+  // Meridians (constant lon). Snap start to nearest multiple of step.
+  const double startLon = std::ceil(minLon / lonStep) * lonStep;
+  for (double lon = startLon; lon <= maxLon + lonStep * 0.5; lon += lonStep)
+  {
+    auto prev = toSub(minLat, lon);
+    for (int s = 1; s <= kSamplesPerLine; ++s)
+    {
+      double lat = minLat + (maxLat - minLat) * s / kSamplesPerLine;
+      auto cur = toSub(lat, lon);
+      if (std::abs(cur.first - prev.first) < subWidth &&
+          std::abs(cur.second - prev.second) < subHeight)
+        drawLine(prev.first, prev.second, cur.first, cur.second);
+      prev = cur;
+    }
+  }
+  // Parallels (constant lat).
+  const double startLat = std::ceil(minLat / latStep) * latStep;
+  for (double lat = startLat; lat <= maxLat + latStep * 0.5; lat += latStep)
+  {
+    auto prev = toSub(lat, minLon);
+    for (int s = 1; s <= kSamplesPerLine; ++s)
+    {
+      double lon = minLon + (maxLon - minLon) * s / kSamplesPerLine;
+      auto cur = toSub(lat, lon);
+      if (std::abs(cur.first - prev.first) < subWidth &&
+          std::abs(cur.second - prev.second) < subHeight)
+        drawLine(prev.first, prev.second, cur.first, cur.second);
+      prev = cur;
+    }
+  }
+}
+
+std::string App::buildWindArrows(int cellW, int cellH, int originRow, int originCol)
+{
+  // Find U and V param IDs in this file. If either is missing, render nothing.
+  NFmiEnumConverter conv;
+  const int uEnum = conv.ToEnum("WindUMS");
+  const int vEnum = conv.ToEnum("WindVMS");
+  if (uEnum == kFmiBadParameter || vEnum == kFmiBadParameter) return {};
+  auto hasParam = [this](int e) {
+    return std::find(itsParamIds.begin(), itsParamIds.end(), e) != itsParamIds.end();
+  };
+  if (!hasParam(uEnum) || !hasParam(vEnum)) return {};
+
+  // Save current param to restore at the end.
+  const int savedParam = itsInfo->Param().GetParamIdent();
+
+  const auto* area = itsInfo->Area();
+  if (area == nullptr) return {};
+
+  const double areaW = area->Width();
+  const double areaH = area->Height();
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+
+  // Place arrows on a sparser grid so they don't crowd. Aim ~1 arrow per
+  // 4×2 cells (cells are roughly 1:2 aspect ratio in most fonts).
+  const int stepX = 4;
+  const int stepY = 2;
+
+  // 8-directional arrow glyphs (UTF-8). Index 0 = →, ccw to 7 = ↘.
+  static const std::array<const char*, 8> kArrows = {
+      "\xe2\x86\x92",  // →
+      "\xe2\x86\x97",  // ↗
+      "\xe2\x86\x91",  // ↑
+      "\xe2\x86\x96",  // ↖
+      "\xe2\x86\x90",  // ←
+      "\xe2\x86\x99",  // ↙
+      "\xe2\x86\x93",  // ↓
+      "\xe2\x86\x98",  // ↘
+  };
+
+  // Collect samples for all marker positions. We need U then V.
+  struct Sample { int cx, cy; float u, v; };
+  std::vector<Sample> samples;
+  samples.reserve(static_cast<std::size_t>(cellW * cellH) / (stepX * stepY) + 1);
+
+  itsInfo->Param(static_cast<FmiParameterName>(uEnum));
+  for (int cy = stepY / 2; cy < cellH; cy += stepY)
+  {
+    float v = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
+    for (int cx = stepX / 2; cx < cellW; cx += stepX)
+    {
+      float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
+      NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * areaW, v * areaH));
+      NFmiPoint latlon = area->WorldXYToLatLon(world);
+      float val = itsInfo->InterpolatedValue(latlon);
+      samples.push_back({cx, cy, val, 0.0F});
+    }
+  }
+  itsInfo->Param(static_cast<FmiParameterName>(vEnum));
+  std::size_t i = 0;
+  for (int cy = stepY / 2; cy < cellH; cy += stepY)
+  {
+    float v = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
+    for (int cx = stepX / 2; cx < cellW; cx += stepX)
+    {
+      float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
+      NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * areaW, v * areaH));
+      NFmiPoint latlon = area->WorldXYToLatLon(world);
+      samples[i++].v = itsInfo->InterpolatedValue(latlon);
+    }
+  }
+
+  // Restore the original param so the rest of the UI stays consistent.
+  itsInfo->Param(static_cast<FmiParameterName>(savedParam));
+
+  // Compose arrow output as raw ANSI: each arrow positioned absolutely.
+  std::ostringstream os;
+  for (const auto& s : samples)
+  {
+    if (!std::isfinite(s.u) || !std::isfinite(s.v)) continue;
+    if (std::abs(s.u) > 1e10F || std::abs(s.v) > 1e10F) continue;
+    const float speed = std::sqrt(s.u * s.u + s.v * s.v);
+    if (speed < 0.5F) continue;  // skip near-calm cells
+
+    // Direction: meteorological u/v have u>0=eastward, v>0=northward.
+    // atan2(v, u) gives angle from east axis CCW.
+    const double angle = std::atan2(s.v, s.u);
+    int idx = static_cast<int>(std::lround(angle / (M_PI / 4)));
+    idx = ((idx % 8) + 8) % 8;
+
+    // Colour by speed using the wind palette range (3..32 m/s).
+    Rgb color{255, 255, 255};  // default bright white
+    if (speed < 5)
+      color = Rgb{200, 230, 255};
+    else if (speed < 10)
+      color = Rgb{120, 180, 255};
+    else if (speed < 17)
+      color = Rgb{255, 100, 200};
+    else if (speed < 26)
+      color = Rgb{255, 60, 60};
+    else
+      color = Rgb{255, 170, 0};
+
+    os << "\x1b[" << (originRow + s.cy + 1) << ';' << (originCol + s.cx + 1) << 'H'
+       << itsRenderer.fgEscape(color) << "\x1b[1m" << kArrows[idx] << "\x1b[0m";
+  }
+  return os.str();
+}
+
+void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight,
+                           const std::vector<Polyline>& polylines, Rgb color) const
+{
+  if (polylines.empty()) return;
+  const auto* area = itsInfo->Area();
+  if (area == nullptr) return;
+
+  const double areaW = area->Width();
+  const double areaH = area->Height();
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+
+  auto plot = [&](int x, int y) {
+    if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
+      pixels[static_cast<std::size_t>(y) * subWidth + x] = color;
+  };
+
+  auto drawLine = [&](int x0, int y0, int x1, int y1) {
+    int dx = std::abs(x1 - x0);
+    int dy = -std::abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    while (true)
+    {
+      plot(x0, y0);
+      if (x0 == x1 && y0 == y1) break;
+      int e2 = 2 * err;
+      if (e2 >= dy)
+      {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx)
+      {
+        err += dx;
+        y0 += sy;
+      }
+    }
+  };
+
+  auto toSub = [&](float lon, float lat) -> std::pair<int, int> {
+    NFmiPoint world = area->LatLonToWorldXY(NFmiPoint(lon, lat));
+    NFmiPoint xy = area->WorldXYToXY(world);
+    double u = xy.X() / areaW;
+    double v = xy.Y() / areaH;
+    double u01 = (u - itsViewport.uMin) / spanU;
+    double v01 = (v - itsViewport.vMin) / spanV;
+    int x = static_cast<int>(u01 * subWidth);
+    int y = static_cast<int>(v01 * subHeight);
+    return {x, y};
+  };
+
+  for (const auto& pl : polylines)
+  {
+    if (pl.lons.size() < 2) continue;
+    auto prev = toSub(pl.lons[0], pl.lats[0]);
+    for (std::size_t i = 1; i < pl.lons.size(); ++i)
+    {
+      auto cur = toSub(pl.lons[i], pl.lats[i]);
+      if (std::abs(cur.first - prev.first) < subWidth &&
+          std::abs(cur.second - prev.second) < subHeight)
+        drawLine(prev.first, prev.second, cur.first, cur.second);
+      prev = cur;
+    }
+  }
+}
+
+std::string App::currentTimeLabel() const
+{
+  NFmiMetTime t = itsInfo->ValidTime();
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d UTC",
+                static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
+                static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
+                static_cast<int>(t.GetMin()), static_cast<int>(t.GetSec()));
+  return buf;
+}
+
+std::vector<std::string> App::paramLabels() const
+{
+  NFmiEnumConverter conv;
+  std::vector<std::string> out;
+  out.reserve(itsParamIds.size());
+  for (int id : itsParamIds) out.push_back(conv.ToString(id));
+  return out;
+}
+
+std::vector<std::string> App::levelLabels() const
+{
+  std::vector<std::string> out;
+  out.reserve(itsInfo->SizeLevels());
+  // Iterate without disturbing current level: save and restore.
+  const unsigned long save = itsInfo->LevelIndex();
+  itsInfo->FirstLevel();
+  do
+  {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%g", itsInfo->Level()->LevelValue());
+    out.emplace_back(buf);
+  } while (itsInfo->NextLevel());
+  itsInfo->LevelIndex(save);
+  return out;
+}
+
+void App::selectParam(int newIndex)
+{
+  if (newIndex < 0 || newIndex >= static_cast<int>(itsParamIds.size())) return;
+  itsParamIndex = newIndex;
+  itsInfo->Param(static_cast<FmiParameterName>(itsParamIds[newIndex]));
+  loadPalette();  // re-resolve palette for the new parameter
+}
+
+void App::selectLevel(int newIndex)
+{
+  if (newIndex < 0 || newIndex >= static_cast<int>(itsInfo->SizeLevels())) return;
+  itsInfo->LevelIndex(static_cast<unsigned long>(newIndex));
+  itsOpts.levelIndex = newIndex;
+}
+
+bool App::cellToViewport(const UI& ui, int cellX, int cellY, float& u, float& v) const
+{
+  const auto& l = ui.layout();
+  if (cellX < l.map.col || cellX >= l.map.col + l.map.width || cellY < l.map.row ||
+      cellY >= l.map.row + l.map.height || l.map.width <= 0 || l.map.height <= 0)
+    return false;
+  const float relX = (static_cast<float>(cellX - l.map.col) + 0.5F) / l.map.width;
+  const float relY = (static_cast<float>(cellY - l.map.row) + 0.5F) / l.map.height;
+  u = itsViewport.uMin + relX * (itsViewport.uMax - itsViewport.uMin);
+  v = itsViewport.vMin + relY * (itsViewport.vMax - itsViewport.vMin);
+  return true;
+}
+
+bool App::cellToLatLon(const UI& ui, int cellX, int cellY, double& lat, double& lon) const
+{
+  float u = 0;
+  float v = 0;
+  if (!cellToViewport(ui, cellX, cellY, u, v)) return false;
+  const auto* area = itsInfo->Area();
+  if (area == nullptr) return false;
+  NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * area->Width(), v * area->Height()));
+  NFmiPoint ll = area->WorldXYToLatLon(world);
+  lon = ll.X();
+  lat = ll.Y();
+  return true;
+}
+
+void App::openProbe(int cellX, int cellY, UI& ui)
+{
+  double lat = 0;
+  double lon = 0;
+  if (!cellToLatLon(ui, cellX, cellY, lat, lon)) return;
+
+  // Sample the current parameter at this lat/lon for every time step.
+  // Save and restore the time index so the rest of the UI keeps its state.
+  std::vector<float> series;
+  series.reserve(itsInfo->SizeTimes());
+  const unsigned long savedTime = itsInfo->TimeIndex();
+  NFmiPoint pt(lon, lat);
+  itsInfo->FirstTime();
+  do
+  {
+    series.push_back(itsInfo->InterpolatedValue(pt));
+  } while (itsInfo->NextTime());
+  itsInfo->TimeIndex(savedTime);
+
+  NFmiEnumConverter conv;
+  std::string param = conv.ToString(itsInfo->Param().GetParamIdent());
+
+  // Callback: when the user presses an arrow inside the popup, update the
+  // querydata's time index and redraw the map underneath. The popup loop
+  // will then re-emit its own raw-ANSI on top, so the popup stays visible.
+  auto onTimeChange = [&](int newIdx) {
+    itsInfo->TimeIndex(static_cast<unsigned long>(newIdx));
+    drawMap(ui);
+  };
+
+  int finalIdx = ui.popupTimeseries(param, lat, lon, series,
+                                    static_cast<int>(savedTime), itsRenderer, itsPalette,
+                                    onTimeChange);
+  itsInfo->TimeIndex(static_cast<unsigned long>(finalIdx));
+}
+
+bool App::handleKey(int key, UI& ui, bool& quit)
+{
+  switch (key)
+  {
+    case 'q':
+    case 'Q':
+    case 27:  // Esc
+      quit = true;
+      return false;
+
+    case KEY_LEFT:
+    {
+      auto idx = itsInfo->TimeIndex();
+      if (idx > 0)
+      {
+        itsInfo->TimeIndex(idx - 1);
+        return true;
+      }
+      return false;
+    }
+    case KEY_RIGHT:
+    {
+      auto idx = itsInfo->TimeIndex();
+      if (idx + 1 < itsInfo->SizeTimes())
+      {
+        itsInfo->TimeIndex(idx + 1);
+        return true;
+      }
+      return false;
+    }
+    case KEY_HOME:
+      itsInfo->FirstTime();
+      return true;
+    case KEY_END:
+      itsInfo->LastTime();
+      return true;
+
+    case 'p':
+    case 'P':
+    {
+      int picked = ui.popupMenu("Parameters", paramLabels(), itsParamIndex);
+      if (picked >= 0) selectParam(picked);
+      return true;  // even on cancel, we need to repaint over the popup
+    }
+    case 'L':  // uppercase only — lowercase 'l' is reserved for pan-right
+    {
+      int picked = ui.popupMenu("Levels", levelLabels(),
+                                static_cast<int>(itsInfo->LevelIndex()));
+      if (picked >= 0) selectLevel(picked);
+      return true;
+    }
+
+    case '+':
+    case '=':
+      itsViewport.zoom(0.7F);
+      return true;
+    case '-':
+    case '_':
+      itsViewport.zoom(1.0F / 0.7F);
+      return true;
+    case '0':
+      itsViewport.reset();
+      return true;
+
+    case 'g':
+    case 'G':
+    {
+      NFmiEnumConverter conv;
+      std::string param = conv.ToString(itsInfo->Param().GetParamIdent());
+      ui.popupLegend(param, itsPalette.name(), itsPalette, itsRenderer);
+      return true;
+    }
+
+    case '?':
+      ui.popupHelp();
+      return true;
+
+    case 'b':
+    case 'B':
+      itsOpts.noBorders = !itsOpts.noBorders;
+      if (itsOpts.noBorders)
+      {
+        itsBorders.clear();
+        itsBorderPath.clear();
+      }
+      else
+      {
+        itsBorderPath.clear();  // force reload on next drawMap
+      }
+      return true;
+
+    case 'c':
+    case 'C':
+      itsOpts.noCoastline = !itsOpts.noCoastline;
+      if (itsOpts.noCoastline)
+      {
+        itsCoastlines.clear();
+        itsCoastlinePath.clear();
+      }
+      else
+      {
+        itsCoastlinePath.clear();
+      }
+      return true;
+
+    case 'n':
+    case 'N':
+      itsShowGraticule = !itsShowGraticule;
+      return true;
+
+    case 'w':
+    case 'W':
+      itsShowWindArrows = !itsShowWindArrows;
+      return true;
+
+    case 'e':
+    case 'E':
+    {
+      std::string err;
+      const std::string fname = exportPng(err);
+      // Show the result on the timeline header next refresh.
+      if (!fname.empty())
+        itsLastMessage = "Saved " + fname;
+      else
+        itsLastMessage = "Export failed: " + err;
+      return true;
+    }
+
+    case '/':
+      openPlaceSearch(ui);
+      return true;
+
+    case 'x':
+    case 'X':
+      if (itsCrossPicks == 0)
+      {
+        itsCrossPicks = 2;
+        itsLastMessage = "Cross-section: click first endpoint";
+      }
+      else
+      {
+        itsCrossPicks = 0;
+        itsLastMessage = "Cross-section cancelled";
+      }
+      return true;
+
+    // Pan: vim-style hjkl (lowercase) or shift-arrow.
+    case 'h':
+    case KEY_SLEFT:
+      itsViewport.pan(-0.2F, 0);
+      return true;
+    case 'l':
+    case KEY_SRIGHT:
+      itsViewport.pan(0.2F, 0);
+      return true;
+    case 'j':
+    case KEY_SR:  // shift+down → view shifts south
+      itsViewport.pan(0, 0.2F);
+      return true;
+    case 'k':
+    case KEY_SF:  // shift+up → view shifts north
+      itsViewport.pan(0, -0.2F);
+      return true;
+
+    case KEY_RESIZE:
+      ui.recomputeLayout();
+      itsDragging = false;
+      return true;
+
+    case ' ':  // Space: toggle animation
+      itsAnimating = !itsAnimating;
+      return true;
+
+    case KEY_UP:
+      // Faster: shrink delay by ~30% per press, floor at 50 ms (~20 fps).
+      itsAnimationDelayMs = std::max(50, static_cast<int>(itsAnimationDelayMs * 0.7));
+      return true;
+
+    case KEY_DOWN:
+      // Slower: grow delay by ~30%, cap at 2000 ms (0.5 fps).
+      itsAnimationDelayMs = std::min(2000, static_cast<int>(itsAnimationDelayMs / 0.7));
+      return true;
+
+    case KEY_MOUSE:
+    {
+      MEVENT ev;
+      if (getmouse(&ev) != OK) return false;
+
+      // Optional debug log so we can inspect what the terminal actually
+      // sends. Set QDLESS_DEBUG_MOUSE=1 in the environment to enable.
+      static const bool kMouseDebug = std::getenv("QDLESS_DEBUG_MOUSE") != nullptr;
+      if (kMouseDebug)
+      {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+        FILE* f = std::fopen("/tmp/qdless-mouse.log", "a");
+        if (f != nullptr)
+        {
+          std::fprintf(f, "mouse x=%d y=%d bstate=0x%lx\n", ev.x, ev.y,
+                       static_cast<unsigned long>(ev.bstate));
+          std::fclose(f);
+        }
+      }
+
+      const auto& l = ui.layout();
+      const bool inMap =
+          ev.x >= l.map.col && ev.x < l.map.col + l.map.width && ev.y >= l.map.row &&
+          ev.y < l.map.row + l.map.height;
+
+      // Wheel-up / wheel-down: kept for terminals that deliver wheel events
+      // as BUTTON4/5 through ncurses. (Many don't, so double-click is the
+      // primary zoom gesture.)
+      const auto kWheelUp =
+          static_cast<mmask_t>(BUTTON4_PRESSED | BUTTON4_RELEASED | BUTTON4_CLICKED);
+      const auto kWheelDown =
+          static_cast<mmask_t>(BUTTON5_PRESSED | BUTTON5_RELEASED | BUTTON5_CLICKED);
+      if (((ev.bstate & kWheelUp) != 0U) && inMap)
+      {
+        float u = 0;
+        float v = 0;
+        if (cellToViewport(ui, ev.x, ev.y, u, v)) itsViewport.zoomAt(0.85F, u, v);
+        return true;
+      }
+      if (((ev.bstate & kWheelDown) != 0U) && inMap)
+      {
+        float u = 0;
+        float v = 0;
+        if (cellToViewport(ui, ev.x, ev.y, u, v))
+          itsViewport.zoomAt(1.0F / 0.85F, u, v);
+        return true;
+      }
+
+      // Double-click: zoom in (left) or zoom out (right), anchored at the
+      // click position. Set BEFORE single-click probe handler so we don't
+      // also pop the probe.
+      if (((ev.bstate & BUTTON1_DOUBLE_CLICKED) != 0U) && inMap)
+      {
+        float u = 0;
+        float v = 0;
+        if (cellToViewport(ui, ev.x, ev.y, u, v)) itsViewport.zoomAt(0.7F, u, v);
+        itsDragging = false;  // double-click can be preceded by stray PRESS
+        return true;
+      }
+      if (((ev.bstate & BUTTON3_DOUBLE_CLICKED) != 0U) && inMap)
+      {
+        float u = 0;
+        float v = 0;
+        if (cellToViewport(ui, ev.x, ev.y, u, v))
+          itsViewport.zoomAt(1.0F / 0.7F, u, v);
+        itsDragging = false;
+        return true;
+      }
+
+      if (((ev.bstate & BUTTON1_PRESSED) != 0U) && inMap)
+      {
+        itsDragging = true;
+        itsDragStartX = ev.x;
+        itsDragStartY = ev.y;
+        return false;  // no redraw yet
+      }
+
+      if ((ev.bstate & BUTTON1_RELEASED) != 0U)
+      {
+        if (!itsDragging) return false;
+        itsDragging = false;
+        const int dx = ev.x - itsDragStartX;
+        const int dy = ev.y - itsDragStartY;
+        // < 2 cells of motion → click, not drag.
+        if (std::abs(dx) + std::abs(dy) < 2)
+        {
+          openProbe(itsDragStartX, itsDragStartY, ui);
+          return true;
+        }
+        // Drag → pan. Negative because dragging the map content right means
+        // the viewport "looks" further left.
+        if (l.map.width > 0 && l.map.height > 0)
+        {
+          itsViewport.pan(-static_cast<float>(dx) / l.map.width,
+                          -static_cast<float>(dy) / l.map.height);
+        }
+        return true;
+      }
+
+      // Cross-section pending pick: handle BEFORE the regular click→probe.
+      if (itsCrossPicks > 0 && ((ev.bstate & BUTTON1_CLICKED) != 0U) && inMap)
+      {
+        if (itsCrossPicks == 2)
+        {
+          itsCrossX1 = ev.x;
+          itsCrossY1 = ev.y;
+          itsCrossPicks = 1;
+          itsLastMessage = "Cross-section: click second endpoint";
+        }
+        else
+        {
+          renderCrossSection(itsCrossX1, itsCrossY1, ev.x, ev.y, ui);
+          itsCrossPicks = 0;
+          itsLastMessage.clear();
+        }
+        return true;
+      }
+
+      // Single-click (no drag) — some terminals deliver only CLICKED.
+      if (((ev.bstate & BUTTON1_CLICKED) != 0U) && inMap && !itsDragging)
+      {
+        openProbe(ev.x, ev.y, ui);
+        return true;
+      }
+
+      return false;
+    }
+
+    default:
+      return false;
+  }
+}
+
+void App::drawMap(UI& ui)
+{
+  const auto& l = ui.layout();
+  if (l.map.height < 2 || l.map.width < 2) return;
+  int subWidth = l.map.width * 2;
+  int subHeight = l.map.height * 2;
+
+  // Re-pick coastline resolution for the current viewport. Cheap when the
+  // selected file is unchanged; reads ~100ms at h-resolution worst case.
+  loadCoastlines();
+
+  float dataMin = 0;
+  float dataMax = 0;
+  auto pixels = sampleSlice(subWidth, subHeight, dataMin, dataMax);
+  if (itsShowGraticule) overlayGraticule(pixels, subWidth, subHeight);
+  overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
+  overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
+
+  // Bypass ncurses: write raw ANSI directly to stdout, positioned at map origin.
+  std::ostringstream os;
+  itsRenderer.render(os, pixels, subWidth, subHeight, l.map.row, l.map.col);
+
+  // Wind arrow overlay drawn AFTER the raster so glyphs sit on top.
+  if (itsShowWindArrows)
+    os << buildWindArrows(l.map.width, l.map.height, l.map.row, l.map.col);
+
+  std::string s = os.str();
+  std::fwrite(s.data(), 1, s.size(), stdout);
+  std::fflush(stdout);
+}
+
+int App::runOnce()
+{
+  TerminalSize ts = terminalSize();
+  int cellW = ts.cols;
+  int cellH = std::max(1, ts.rows - 1);
+  int subWidth = cellW * 2;
+  int subHeight = cellH * 2;
+
+  float dataMin = 0;
+  float dataMax = 0;
+  auto pixels = sampleSlice(subWidth, subHeight, dataMin, dataMax);
+  overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
+  overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
+
+  NFmiEnumConverter conv;
+  int id = itsInfo->Param().GetParamIdent();
+  std::string shortName = conv.ToString(id);
+  std::cout << "[qdless] " << itsOpts.filename << " | param: " << shortName << " | time: "
+            << currentTimeLabel() << " (" << (itsInfo->TimeIndex() + 1) << "/"
+            << itsInfo->SizeTimes() << ") | level: " << itsInfo->Level()->LevelValue()
+            << " (" << (itsInfo->LevelIndex() + 1) << "/" << itsInfo->SizeLevels()
+            << ") | range: [" << dataMin << ", " << dataMax << "] | palette: " << itsPalette.name()
+            << " | coast: " << itsCoastlines.size() << "+" << itsBorders.size() << " polylines\n";
+
+  std::ostringstream os;
+  itsRenderer.render(os, pixels, subWidth, subHeight, 1, 0);
+  std::cout << os.str() << "\x1b[" << ts.rows << ";1H" << '\n';
+  return 0;
+}
+
+int App::runInteractive()
+{
+  UI ui;
+
+  bool quit = false;
+  bool needRedraw = true;
+
+  while (!quit)
+  {
+    if (needRedraw)
+    {
+      // Order matters: ncurses' first doupdate() force-paints the whole
+      // screen with blanks, which would clobber a raw-ANSI map written
+      // beforehand. So commit ncurses windows first, then draw the map
+      // on top via raw escapes.
+      NFmiEnumConverter conv;
+      int id = itsInfo->Param().GetParamIdent();
+      std::string label = conv.ToString(id);
+      label += "  ";
+      label += currentTimeLabel();
+      if (itsAnimating)
+      {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "  [%d ms]", itsAnimationDelayMs);
+        label += buf;
+      }
+      if (!itsLastMessage.empty())
+      {
+        label += "   ";
+        label += itsLastMessage;
+        itsLastMessage.clear();
+      }
+      ui.drawTimeline(label, static_cast<int>(itsInfo->TimeIndex()),
+                      static_cast<int>(itsInfo->SizeTimes()));
+      ui.drawStatusBar();
+      doupdate();
+      drawMap(ui);
+      needRedraw = false;
+    }
+
+    int key = ui.waitInput(itsAnimating ? itsAnimationDelayMs : -1);
+    if (key == ERR)
+    {
+      // Timeout: advance to next frame.
+      auto idx = itsInfo->TimeIndex();
+      const auto n = itsInfo->SizeTimes();
+      itsInfo->TimeIndex((idx + 1) % n);
+      needRedraw = true;
+      continue;
+    }
+    needRedraw = handleKey(key, ui, quit);
+  }
+  return 0;
+}
+}  // namespace Qdless

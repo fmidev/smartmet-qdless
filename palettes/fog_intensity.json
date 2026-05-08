@@ -1,0 +1,23 @@
+{
+  "name": "fog_intensity",
+  "isobands": [
+    {
+      "lo": null,
+      "hi": null,
+      "rgb": [
+        245,
+        245,
+        115
+      ]
+    },
+    {
+      "lo": null,
+      "hi": null,
+      "rgb": [
+        242,
+        157,
+        46
+      ]
+    }
+  ]
+}

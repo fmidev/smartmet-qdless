@@ -1,0 +1,10 @@
+obj/
+qdless
+*.o
+*.d
+*.a
+*.tar.gz
+.cache/
+core
+*.swp
+*~

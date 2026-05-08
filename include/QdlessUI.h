@@ -1,0 +1,101 @@
+#pragma once
+
+#include "QdlessPalette.h"
+#include "QdlessRenderer.h"
+
+#include <ncurses.h>
+
+#include <functional>
+#include <string>
+#include <vector>
+
+namespace Qdless
+{
+struct Rect
+{
+  int row = 0;
+  int col = 0;
+  int height = 0;
+  int width = 0;
+};
+
+struct Layout
+{
+  Rect map;     // raw-ANSI map area
+  Rect time;    // 2 rows: label + bar
+  Rect status;  // 1 row at bottom
+};
+
+class UI
+{
+ public:
+  UI();
+  ~UI();
+  UI(const UI&) = delete;
+  UI& operator=(const UI&) = delete;
+  UI(UI&&) = delete;
+  UI& operator=(UI&&) = delete;
+
+  Layout layout() const { return itsLayout; }
+  void recomputeLayout();
+
+  // Wait for a key. timeoutMs < 0 = block forever; 0 = poll; > 0 = block
+  // up to that many ms then return ERR. Returns ncurses key code or ERR.
+  int waitInput(int timeoutMs = -1);
+
+  void drawTimeline(const std::string& label, int idx, int total);
+  void drawStatusBar();
+
+  // Re-blank ncurses windows (after popup close). Caller redraws map.
+  void touch();
+
+  // Centred popup menu. Returns 0-based index, or -1 if Esc cancelled.
+  // Items beyond hotkey-able count are reachable via arrow keys + Enter.
+  int popupMenu(const std::string& title, const std::vector<std::string>& items,
+                int currentIndex);
+
+  // Centred legend popup showing palette colour swatches and value ranges.
+  // The two title strings appear on two stacked rows so the popup can stay
+  // narrow. Dismissed by any key.
+  void popupLegend(const std::string& paramName, const std::string& paletteName,
+                   const Palette& palette, const Renderer& renderer);
+
+  // Centred help popup listing key bindings and mouse gestures.
+  // Dismissed by any key.
+  void popupHelp();
+
+  // Live-filter search popup. The matcher is invoked on every keystroke
+  // with the current query string and must return formatted display rows.
+  // Returns the 0-based index into the matcher's last result, or -1 on
+  // cancel (Esc).
+  int popupSearch(const std::string& title,
+                  std::function<std::vector<std::string>(const std::string&)> matcher);
+
+  // Timeseries probe popup: shows a braille-sparkline of `series` at the
+  // given lat/lon, with a vertical marker at currentIndex and numeric Y-axis
+  // labels along the left edge.
+  //
+  // Left/Right (and Home/End) arrows step the marker; on each step
+  // `onTimeChange(newIdx)` is invoked so the caller can update the time on
+  // the underlying map while the popup stays visible. Any other key
+  // dismisses. Returns the final time index.
+  int popupTimeseries(const std::string& paramName, double lat, double lon,
+                      const std::vector<float>& series, int currentIndex,
+                      const Renderer& renderer, const Palette& palette,
+                      std::function<void(int)> onTimeChange = {});
+
+ private:
+  void writeLabel(WINDOW* w, int y, int x, const std::string& label, int hotPos);
+
+  WINDOW* itsTimeWin = nullptr;
+  WINDOW* itsStatusWin = nullptr;
+  Layout itsLayout;
+
+  // Combined ncurses attribute masks (color pair + A_BOLD/etc).
+  chtype itsBaseAttr = 0;
+  chtype itsHotAttr = 0;
+  chtype itsSelAttr = 0;
+  chtype itsBoxAttr = 0;
+  chtype itsPopupAttr = 0;
+};
+}  // namespace Qdless
