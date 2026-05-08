@@ -16,6 +16,7 @@ LIBS += $(PREFIX_LDFLAGS) \
 	-lncursesw -ltinfo -lpanelw \
 	-ljsoncpp \
 	-lnetcdf_c++4 -lnetcdf \
+	-lsmartmet-grid-files \
 	-lsmartmet-calculator \
 	-lsmartmet-smarttools \
 	-lsmartmet-newbase \

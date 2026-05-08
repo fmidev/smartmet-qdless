@@ -2,12 +2,9 @@
 
 #include "QdlessUI.h"
 
-#include <newbase/NFmiArea.h>
 #include <newbase/NFmiEnumConverter.h>
-#include <newbase/NFmiFastQueryInfo.h>
 #include <newbase/NFmiGlobals.h>
 #include <newbase/NFmiPoint.h>
-#include <newbase/NFmiQueryData.h>
 
 #include <imagine/NFmiColorTools.h>
 #include <imagine/NFmiImage.h>
@@ -255,36 +252,31 @@ void Viewport::pan(float duFrac, float dvFrac)
 
 App::App(Options opts) : itsOpts(std::move(opts))
 {
-  itsData = std::make_unique<NFmiQueryData>(itsOpts.filename);
-  itsInfo = std::make_unique<NFmiFastQueryInfo>(itsData.get());
-  if (!itsInfo->IsGrid())
-    throw std::runtime_error("qdless: input is not gridded data: " + itsOpts.filename);
-
+  itsSource = DataSource::open(itsOpts.filename);
   buildIndices();
+  itsBbox = itsSource->boundingBox();
 
   // Apply parameter override.
-  itsInfo->FirstParam();
   if (!itsOpts.parameterOverride.empty())
   {
     NFmiEnumConverter conv;
     int id = conv.ToEnum(itsOpts.parameterOverride);
-    if (id == kFmiBadParameter || !itsInfo->Param(static_cast<FmiParameterName>(id)))
+    if (id == kFmiBadParameter || !itsSource->selectParamId(id))
       throw std::runtime_error("qdless: parameter not found: " + itsOpts.parameterOverride);
-    int curId = itsInfo->Param().GetParamIdent();
-    auto it = std::find(itsParamIds.begin(), itsParamIds.end(), curId);
+    auto it = std::find(itsParamIds.begin(), itsParamIds.end(), id);
     if (it != itsParamIds.end()) itsParamIndex = static_cast<int>(it - itsParamIds.begin());
   }
 
-  auto resolveIndex = [](int requested, unsigned long size) -> unsigned long {
+  auto resolveIndex = [](int requested, std::size_t size) -> std::size_t {
     if (size == 0) return 0;
     if (requested < 0) return size - 1;
-    if (static_cast<unsigned long>(requested) >= size)
+    if (static_cast<std::size_t>(requested) >= size)
       throw std::runtime_error("qdless: index " + std::to_string(requested) +
                                " out of range (size " + std::to_string(size) + ")");
-    return static_cast<unsigned long>(requested);
+    return static_cast<std::size_t>(requested);
   };
-  itsInfo->TimeIndex(resolveIndex(itsOpts.timeIndex, itsInfo->SizeTimes()));
-  itsInfo->LevelIndex(resolveIndex(itsOpts.levelIndex, itsInfo->SizeLevels()));
+  itsSource->selectTimeIndex(resolveIndex(itsOpts.timeIndex, itsSource->timeCount()));
+  itsSource->selectLevelIndex(resolveIndex(itsOpts.levelIndex, itsSource->levelCount()));
 
   loadPalette();
   loadCoastlines();
@@ -294,22 +286,15 @@ App::~App() = default;
 
 void App::buildIndices()
 {
-  itsParamIds.clear();
-  itsInfo->FirstParam();
-  do
-  {
-    itsParamIds.push_back(itsInfo->Param().GetParamIdent());
-  } while (itsInfo->NextParam(true));
-  itsInfo->FirstParam();
+  itsParamIds = itsSource->paramIds();
   itsParamIndex = 0;
 }
 
 void App::loadPalette()
 {
-  NFmiEnumConverter conv;
-  int id = itsInfo->Param().GetParamIdent();
-  std::string shortName = conv.ToString(id);
-  std::string longName(itsInfo->Param().GetParamName().CharPtr());
+  const int id = itsSource->currentParamId();
+  const std::string shortName = itsSource->paramShortName(id);
+  const std::string longName = itsSource->paramLongName(id);
 
   std::string paletteName = itsOpts.paletteOverride;
   if (paletteName.empty()) paletteName = paletteForParam(itsOpts.configFile, shortName);
@@ -319,9 +304,9 @@ void App::loadPalette()
   {
     // Try several palette locations so the tool works without `make install`
     // and regardless of cwd:
-    //   1. --palette-dir (default /usr/share/smartmet/qdtools/palettes)
+    //   1. --palette-dir (default /usr/share/smartmet/qdless/palettes)
     //   2. palettes/ next to the binary (build-tree layout)
-    //   3. ../share/smartmet/qdtools/palettes/ relative to binary (install)
+    //   3. ../share/smartmet/qdless/palettes/ relative to binary (install)
     //   4. $HOME/.config/qdless/palettes/
     std::vector<std::filesystem::path> candidates{
         std::filesystem::path(itsOpts.paletteDir) / (paletteName + ".json"),
@@ -330,7 +315,7 @@ void App::loadPalette()
     {
       auto exeDir = std::filesystem::canonical("/proc/self/exe").parent_path();
       candidates.push_back(exeDir / "palettes" / (paletteName + ".json"));
-      candidates.push_back(exeDir / ".." / "share" / "smartmet" / "qdtools" / "palettes" /
+      candidates.push_back(exeDir / ".." / "share" / "smartmet" / "qdless" / "palettes" /
                            (paletteName + ".json"));
     }
     catch (const std::exception&)
@@ -354,39 +339,34 @@ void App::loadPalette()
       }
     }
   }
-  // Derive a built-in ramp from the current slice's data range.
+  // Derive a built-in ramp by sampling the current slice on a coarse lat/lon
+  // lattice. Cheap (~O(40*40) calls) and works regardless of backend.
   float lo = std::numeric_limits<float>::infinity();
   float hi = -std::numeric_limits<float>::infinity();
-  itsInfo->ResetLocation();
-  while (itsInfo->NextLocation())
+  constexpr int N = 40;
+  for (int j = 0; j < N; ++j)
   {
-    float v = itsInfo->FloatValue();
-    if (v == kFloatMissing || !std::isfinite(v)) continue;
-    lo = std::min(lo, v);
-    hi = std::max(hi, v);
+    const double lat = itsBbox.minLat + (j + 0.5) / N * (itsBbox.maxLat - itsBbox.minLat);
+    for (int i = 0; i < N; ++i)
+    {
+      const double lon = itsBbox.minLon + (i + 0.5) / N * (itsBbox.maxLon - itsBbox.minLon);
+      const float v = itsSource->interpolatedValue(lat, lon);
+      if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e10F) continue;
+      lo = std::min(lo, v);
+      hi = std::max(hi, v);
+    }
   }
   itsPalette = Palette::builtinRamp(lo, hi);
 }
 
 void App::loadCoastlines()
 {
-  const auto* area = itsInfo->Area();
-  if (area == nullptr) return;
-
-  // Compute the viewport's lat/lon span by sampling its four corners.
-  auto corner = [&](float u, float v) {
-    NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * area->Width(), v * area->Height()));
-    return area->WorldXYToLatLon(world);
-  };
-  NFmiPoint c1 = corner(itsViewport.uMin, itsViewport.vMin);
-  NFmiPoint c2 = corner(itsViewport.uMax, itsViewport.vMin);
-  NFmiPoint c3 = corner(itsViewport.uMin, itsViewport.vMax);
-  NFmiPoint c4 = corner(itsViewport.uMax, itsViewport.vMax);
-  double minLon = std::min({c1.X(), c2.X(), c3.X(), c4.X()});
-  double maxLon = std::max({c1.X(), c2.X(), c3.X(), c4.X()});
-  double minLat = std::min({c1.Y(), c2.Y(), c3.Y(), c4.Y()});
-  double maxLat = std::max({c1.Y(), c2.Y(), c3.Y(), c4.Y()});
-  const auto span = static_cast<float>(std::max(maxLon - minLon, maxLat - minLat));
+  // Viewport lat/lon span = fraction of the bbox.
+  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
+  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
+  const double latSpan = (itsViewport.vMax - itsViewport.vMin) * bboxLatSpan;
+  const double lonSpan = (itsViewport.uMax - itsViewport.uMin) * bboxLonSpan;
+  const auto span = static_cast<float>(std::max(lonSpan, latSpan));
 
   if (!itsOpts.noCoastline)
   {
@@ -416,23 +396,22 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
   dataMin = std::numeric_limits<float>::infinity();
   dataMax = -std::numeric_limits<float>::infinity();
 
-  const auto* area = itsInfo->Area();
-  if (area == nullptr) return out;
-
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
+  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
+  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
 
-  // NFmiArea XY is image-coords: Y=0 is the top (north). No flip.
+  // viewport (u,v) ∈ [0..1]² of bbox; v=0 north → screen y=0 north. No flip.
   for (int sy = 0; sy < subHeight; ++sy)
   {
-    float v = itsViewport.vMin + (static_cast<float>(sy) + 0.5F) / subHeight * spanV;
+    const float vp = itsViewport.vMin + (static_cast<float>(sy) + 0.5F) / subHeight * spanV;
+    const double lat = itsBbox.maxLat - vp * bboxLatSpan;
     for (int sx = 0; sx < subWidth; ++sx)
     {
-      float u = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / subWidth * spanU;
-      NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * area->Width(), v * area->Height()));
-      NFmiPoint latlon = area->WorldXYToLatLon(world);
-      float val = itsInfo->InterpolatedValue(latlon);
-      if (val != kFloatMissing && std::isfinite(val))
+      const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / subWidth * spanU;
+      const double lon = itsBbox.minLon + up * bboxLonSpan;
+      const float val = itsSource->interpolatedValue(lat, lon);
+      if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e10F)
       {
         dataMin = std::min(dataMin, val);
         dataMax = std::max(dataMax, val);
@@ -452,7 +431,7 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   if (!cellToLatLon(ui, x1, y1, lat1, lon1) || !cellToLatLon(ui, x2, y2, lat2, lon2))
     return;
 
-  const int nLevels = static_cast<int>(itsInfo->SizeLevels());
+  const int nLevels = static_cast<int>(itsSource->levelCount());
   if (nLevels < 2)
   {
     itsLastMessage = "Cross-section needs >= 2 levels in the file";
@@ -462,12 +441,8 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   // Collect level values + sort indices so the popup shows high altitude /
   // low pressure on top.
   std::vector<float> levelValues(nLevels);
-  const unsigned long savedLevel = itsInfo->LevelIndex();
-  for (int i = 0; i < nLevels; ++i)
-  {
-    itsInfo->LevelIndex(i);
-    levelValues[i] = itsInfo->Level()->LevelValue();
-  }
+  const std::size_t savedLevel = itsSource->currentLevelIndex();
+  for (int i = 0; i < nLevels; ++i) levelValues[i] = itsSource->levelValueAt(i);
   std::vector<int> levelOrder(nLevels);
   std::iota(levelOrder.begin(), levelOrder.end(), 0);
   // Pressure level: smaller value = higher altitude; show smallest at top.
@@ -508,19 +483,19 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   for (int li = 0; li < nLevels; ++li)
   {
     const int srcLevel = levelOrder[li];  // model index
-    itsInfo->LevelIndex(static_cast<unsigned long>(srcLevel));
+    itsSource->selectLevelIndex(static_cast<unsigned long>(srcLevel));
     for (int sx = 0; sx < subW; ++sx)
     {
       const double frac = (static_cast<double>(sx) + 0.5) / subW;
       const double lat = lat1 + frac * (lat2 - lat1);
       const double lon = lon1 + frac * (lon2 - lon1);
-      const float val = itsInfo->InterpolatedValue(NFmiPoint(lon, lat));
+      const float val = itsSource->interpolatedValue(lat, lon);
       const Rgb c = itsPalette.lookup(val);
       pixels[static_cast<std::size_t>(li * 2) * subW + sx] = c;
       pixels[static_cast<std::size_t>(li * 2 + 1) * subW + sx] = c;
     }
   }
-  itsInfo->LevelIndex(savedLevel);
+  itsSource->selectLevelIndex(savedLevel);
 
   // Build raw-ANSI popup.
   // Width: border + label + " ┤ " + chart + border = 2 + labelW + 3 + chartW
@@ -532,7 +507,7 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   const int interiorW = width - 2;
 
   NFmiEnumConverter conv;
-  std::string title = "Cross-section: " + std::string(conv.ToString(itsInfo->Param().GetParamIdent()));
+  std::string title = "Cross-section: " + std::string(conv.ToString(itsSource->currentParamId()));
 
   std::ostringstream os;
 
@@ -680,16 +655,13 @@ void App::openPlaceSearch(UI& ui)
   if (picked < 0 || picked >= static_cast<int>(lastMatchIds.size())) return;
   const auto& city = itsCityIndex.at(lastMatchIds[picked]);
 
-  // Recentre viewport on the city. Pick a default span: ~5° if the data
-  // covers it, else min(currentSpan, dataSpan) / 2.
-  const auto* area = itsInfo->Area();
-  if (area == nullptr) return;
-  NFmiPoint world = area->LatLonToWorldXY(NFmiPoint(city.lon, city.lat));
-  NFmiPoint xy = area->WorldXYToXY(world);
-  const float u = static_cast<float>(xy.X() / area->Width());
-  const float v = static_cast<float>(xy.Y() / area->Height());
+  // Recentre viewport on the city in [0..1]² of the lat/lon bbox.
+  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
+  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
+  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return;
+  const auto u = static_cast<float>((city.lon - itsBbox.minLon) / bboxLonSpan);
+  const auto v = static_cast<float>((itsBbox.maxLat - city.lat) / bboxLatSpan);
 
-  // Choose a fixed zoom (regional view) — keep it simple.
   const float halfSpan = 0.15F;  // 30% of full extent on each axis
   itsViewport.uMin = u - halfSpan;
   itsViewport.uMax = u + halfSpan;
@@ -702,17 +674,16 @@ void App::openPlaceSearch(UI& ui)
 
 std::string App::exportPng(std::string& err) const
 {
-  const auto* area = itsInfo->Area();
-  if (area == nullptr) { err = "no area"; return {}; }
-
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  const double areaW = area->Width();
-  const double areaH = area->Height();
+  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
+  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
+  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) { err = "empty bbox"; return {}; }
 
-  // Output size: aspect-ratio-correct, target ~720 px tall.
+  // Output size: aspect-ratio-correct (in lat/lon, ignoring projection
+  // distortion), target ~720 px tall.
   constexpr int targetH = 720;
-  const double aspect = (areaW * spanU) / (areaH * spanV);
+  const double aspect = (bboxLonSpan * spanU) / (bboxLatSpan * spanV);
   const int height = targetH;
   const int width = std::max(100, static_cast<int>(targetH * aspect));
 
@@ -722,14 +693,12 @@ std::string App::exportPng(std::string& err) const
   for (int py = 0; py < height; ++py)
   {
     const float v = itsViewport.vMin + (static_cast<float>(py) + 0.5F) / height * spanV;
+    const double lat = itsBbox.maxLat - v * bboxLatSpan;
     for (int px = 0; px < width; ++px)
     {
       const float u = itsViewport.uMin + (static_cast<float>(px) + 0.5F) / width * spanU;
-      NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * areaW, v * areaH));
-      NFmiPoint latlon = area->WorldXYToLatLon(world);
-      // const_cast: InterpolatedValue is non-const but doesn't actually
-      // modify visible state for our usage.
-      const float val = const_cast<NFmiFastQueryInfo*>(itsInfo.get())->InterpolatedValue(latlon);
+      const double lon = itsBbox.minLon + u * bboxLonSpan;
+      const float val = itsSource->interpolatedValue(lat, lon);
       Rgb c = itsPalette.lookup(val);
       if (c.transparent) continue;  // leave white for "no data"
       image(px, py) = Imagine::NFmiColorTools::MakeColor(c.r, c.g, c.b);
@@ -741,10 +710,10 @@ std::string App::exportPng(std::string& err) const
                              Imagine::NFmiColorTools::Color color) {
     if (polys.empty()) return;
     auto toPixel = [&](float lon, float lat) -> std::pair<int, int> {
-      NFmiPoint world = area->LatLonToWorldXY(NFmiPoint(lon, lat));
-      NFmiPoint xy = area->WorldXYToXY(world);
-      double u01 = (xy.X() / areaW - itsViewport.uMin) / spanU;
-      double v01 = (xy.Y() / areaH - itsViewport.vMin) / spanV;
+      double u = (lon - itsBbox.minLon) / bboxLonSpan;
+      double v = (itsBbox.maxLat - lat) / bboxLatSpan;
+      double u01 = (u - itsViewport.uMin) / spanU;
+      double v01 = (v - itsViewport.vMin) / spanV;
       return {static_cast<int>(u01 * width), static_cast<int>(v01 * height)};
     };
     auto plot = [&](int x, int y) {
@@ -786,8 +755,8 @@ std::string App::exportPng(std::string& err) const
   NFmiEnumConverter conv;
   std::filesystem::path inputPath(itsOpts.filename);
   const std::string base = inputPath.stem().string();
-  const std::string param = conv.ToString(itsInfo->Param().GetParamIdent());
-  NFmiMetTime t = itsInfo->ValidTime();
+  const std::string param = conv.ToString(itsSource->currentParamId());
+  NFmiMetTime t = itsSource->currentValidTime();
   char tbuf[32];
   std::snprintf(tbuf, sizeof(tbuf), "%04d%02d%02d_%02d%02d", static_cast<int>(t.GetYear()),
                 static_cast<int>(t.GetMonth()), static_cast<int>(t.GetDay()),
@@ -813,37 +782,28 @@ std::string App::exportPng(std::string& err) const
 
 void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
 {
-  const auto* area = itsInfo->Area();
-  if (area == nullptr) return;
+  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
+  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
+  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return;
 
-  // Viewport corners → lat/lon range.
-  auto corner = [&](float u, float v) {
-    NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * area->Width(), v * area->Height()));
-    return area->WorldXYToLatLon(world);
-  };
-  NFmiPoint c1 = corner(itsViewport.uMin, itsViewport.vMin);
-  NFmiPoint c2 = corner(itsViewport.uMax, itsViewport.vMin);
-  NFmiPoint c3 = corner(itsViewport.uMin, itsViewport.vMax);
-  NFmiPoint c4 = corner(itsViewport.uMax, itsViewport.vMax);
-  const double minLon = std::min({c1.X(), c2.X(), c3.X(), c4.X()});
-  const double maxLon = std::max({c1.X(), c2.X(), c3.X(), c4.X()});
-  const double minLat = std::min({c1.Y(), c2.Y(), c3.Y(), c4.Y()});
-  const double maxLat = std::max({c1.Y(), c2.Y(), c3.Y(), c4.Y()});
+  // Viewport corners in lat/lon.
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  const double minLon = itsBbox.minLon + itsViewport.uMin * bboxLonSpan;
+  const double maxLon = itsBbox.minLon + itsViewport.uMax * bboxLonSpan;
+  const double maxLat = itsBbox.maxLat - itsViewport.vMin * bboxLatSpan;
+  const double minLat = itsBbox.maxLat - itsViewport.vMax * bboxLatSpan;
 
   const double lonStep = niceStep(maxLon - minLon, 6);
   const double latStep = niceStep(maxLat - minLat, 6);
 
   const Rgb gridColor{120, 120, 120};
-  const double areaW = area->Width();
-  const double areaH = area->Height();
-  const float spanU = itsViewport.uMax - itsViewport.uMin;
-  const float spanV = itsViewport.vMax - itsViewport.vMin;
 
   auto toSub = [&](double lat, double lon) -> std::pair<int, int> {
-    NFmiPoint world = area->LatLonToWorldXY(NFmiPoint(lon, lat));
-    NFmiPoint xy = area->WorldXYToXY(world);
-    double u01 = (xy.X() / areaW - itsViewport.uMin) / spanU;
-    double v01 = (xy.Y() / areaH - itsViewport.vMin) / spanV;
+    double u = (lon - itsBbox.minLon) / bboxLonSpan;
+    double v = (itsBbox.maxLat - lat) / bboxLatSpan;
+    double u01 = (u - itsViewport.uMin) / spanU;
+    double v01 = (v - itsViewport.vMin) / spanV;
     int x = static_cast<int>(u01 * subWidth);
     int y = static_cast<int>(v01 * subHeight);
     return {x, y};
@@ -917,13 +877,11 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
   if (!hasParam(uEnum) || !hasParam(vEnum)) return {};
 
   // Save current param to restore at the end.
-  const int savedParam = itsInfo->Param().GetParamIdent();
+  const int savedParam = itsSource->currentParamId();
 
-  const auto* area = itsInfo->Area();
-  if (area == nullptr) return {};
-
-  const double areaW = area->Width();
-  const double areaH = area->Height();
+  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
+  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
+  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return {};
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
 
@@ -949,35 +907,35 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
   std::vector<Sample> samples;
   samples.reserve(static_cast<std::size_t>(cellW * cellH) / (stepX * stepY) + 1);
 
-  itsInfo->Param(static_cast<FmiParameterName>(uEnum));
+  itsSource->selectParamId(uEnum);
   for (int cy = stepY / 2; cy < cellH; cy += stepY)
   {
-    float v = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
+    const float v = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
+    const double lat = itsBbox.maxLat - v * bboxLatSpan;
     for (int cx = stepX / 2; cx < cellW; cx += stepX)
     {
-      float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
-      NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * areaW, v * areaH));
-      NFmiPoint latlon = area->WorldXYToLatLon(world);
-      float val = itsInfo->InterpolatedValue(latlon);
+      const float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
+      const double lon = itsBbox.minLon + u * bboxLonSpan;
+      const float val = itsSource->interpolatedValue(lat, lon);
       samples.push_back({cx, cy, val, 0.0F});
     }
   }
-  itsInfo->Param(static_cast<FmiParameterName>(vEnum));
+  itsSource->selectParamId(vEnum);
   std::size_t i = 0;
   for (int cy = stepY / 2; cy < cellH; cy += stepY)
   {
-    float v = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
+    const float v = itsViewport.vMin + (static_cast<float>(cy) + 0.5F) / cellH * spanV;
+    const double lat = itsBbox.maxLat - v * bboxLatSpan;
     for (int cx = stepX / 2; cx < cellW; cx += stepX)
     {
-      float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
-      NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * areaW, v * areaH));
-      NFmiPoint latlon = area->WorldXYToLatLon(world);
-      samples[i++].v = itsInfo->InterpolatedValue(latlon);
+      const float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
+      const double lon = itsBbox.minLon + u * bboxLonSpan;
+      samples[i++].v = itsSource->interpolatedValue(lat, lon);
     }
   }
 
   // Restore the original param so the rest of the UI stays consistent.
-  itsInfo->Param(static_cast<FmiParameterName>(savedParam));
+  itsSource->selectParamId(savedParam);
 
   // Compose arrow output as raw ANSI: each arrow positioned absolutely.
   std::ostringstream os;
@@ -1017,11 +975,9 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
                            const std::vector<Polyline>& polylines, Rgb color) const
 {
   if (polylines.empty()) return;
-  const auto* area = itsInfo->Area();
-  if (area == nullptr) return;
-
-  const double areaW = area->Width();
-  const double areaH = area->Height();
+  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
+  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
+  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return;
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
 
@@ -1055,10 +1011,8 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
   };
 
   auto toSub = [&](float lon, float lat) -> std::pair<int, int> {
-    NFmiPoint world = area->LatLonToWorldXY(NFmiPoint(lon, lat));
-    NFmiPoint xy = area->WorldXYToXY(world);
-    double u = xy.X() / areaW;
-    double v = xy.Y() / areaH;
+    double u = (lon - itsBbox.minLon) / bboxLonSpan;
+    double v = (itsBbox.maxLat - lat) / bboxLatSpan;
     double u01 = (u - itsViewport.uMin) / spanU;
     double v01 = (v - itsViewport.vMin) / spanV;
     int x = static_cast<int>(u01 * subWidth);
@@ -1083,7 +1037,7 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
 
 std::string App::currentTimeLabel() const
 {
-  NFmiMetTime t = itsInfo->ValidTime();
+  NFmiMetTime t = itsSource->currentValidTime();
   char buf[32];
   std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d UTC",
                 static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
@@ -1104,17 +1058,13 @@ std::vector<std::string> App::paramLabels() const
 std::vector<std::string> App::levelLabels() const
 {
   std::vector<std::string> out;
-  out.reserve(itsInfo->SizeLevels());
-  // Iterate without disturbing current level: save and restore.
-  const unsigned long save = itsInfo->LevelIndex();
-  itsInfo->FirstLevel();
-  do
+  out.reserve(itsSource->levelCount());
+  for (std::size_t i = 0; i < itsSource->levelCount(); ++i)
   {
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "%g", itsInfo->Level()->LevelValue());
+    std::snprintf(buf, sizeof(buf), "%g", itsSource->levelValueAt(i));
     out.emplace_back(buf);
-  } while (itsInfo->NextLevel());
-  itsInfo->LevelIndex(save);
+  }
   return out;
 }
 
@@ -1122,14 +1072,14 @@ void App::selectParam(int newIndex)
 {
   if (newIndex < 0 || newIndex >= static_cast<int>(itsParamIds.size())) return;
   itsParamIndex = newIndex;
-  itsInfo->Param(static_cast<FmiParameterName>(itsParamIds[newIndex]));
+  itsSource->selectParamId(itsParamIds[newIndex]);
   loadPalette();  // re-resolve palette for the new parameter
 }
 
 void App::selectLevel(int newIndex)
 {
-  if (newIndex < 0 || newIndex >= static_cast<int>(itsInfo->SizeLevels())) return;
-  itsInfo->LevelIndex(static_cast<unsigned long>(newIndex));
+  if (newIndex < 0 || newIndex >= static_cast<int>(itsSource->levelCount())) return;
+  itsSource->selectLevelIndex(static_cast<unsigned long>(newIndex));
   itsOpts.levelIndex = newIndex;
 }
 
@@ -1151,12 +1101,11 @@ bool App::cellToLatLon(const UI& ui, int cellX, int cellY, double& lat, double& 
   float u = 0;
   float v = 0;
   if (!cellToViewport(ui, cellX, cellY, u, v)) return false;
-  const auto* area = itsInfo->Area();
-  if (area == nullptr) return false;
-  NFmiPoint world = area->XYToWorldXY(NFmiPoint(u * area->Width(), v * area->Height()));
-  NFmiPoint ll = area->WorldXYToLatLon(world);
-  lon = ll.X();
-  lat = ll.Y();
+  const double bboxLatSpan = itsBbox.maxLat - itsBbox.minLat;
+  const double bboxLonSpan = itsBbox.maxLon - itsBbox.minLon;
+  if (bboxLatSpan <= 0 || bboxLonSpan <= 0) return false;
+  lat = itsBbox.maxLat - v * bboxLatSpan;
+  lon = itsBbox.minLon + u * bboxLonSpan;
   return true;
 }
 
@@ -1169,31 +1118,30 @@ void App::openProbe(int cellX, int cellY, UI& ui)
   // Sample the current parameter at this lat/lon for every time step.
   // Save and restore the time index so the rest of the UI keeps its state.
   std::vector<float> series;
-  series.reserve(itsInfo->SizeTimes());
-  const unsigned long savedTime = itsInfo->TimeIndex();
-  NFmiPoint pt(lon, lat);
-  itsInfo->FirstTime();
-  do
+  series.reserve(itsSource->timeCount());
+  const std::size_t savedTime = itsSource->currentTimeIndex();
+  for (std::size_t i = 0; i < itsSource->timeCount(); ++i)
   {
-    series.push_back(itsInfo->InterpolatedValue(pt));
-  } while (itsInfo->NextTime());
-  itsInfo->TimeIndex(savedTime);
+    itsSource->selectTimeIndex(i);
+    series.push_back(itsSource->interpolatedValue(lat, lon));
+  }
+  itsSource->selectTimeIndex(savedTime);
 
   NFmiEnumConverter conv;
-  std::string param = conv.ToString(itsInfo->Param().GetParamIdent());
+  std::string param = conv.ToString(itsSource->currentParamId());
 
   // Callback: when the user presses an arrow inside the popup, update the
   // querydata's time index and redraw the map underneath. The popup loop
   // will then re-emit its own raw-ANSI on top, so the popup stays visible.
   auto onTimeChange = [&](int newIdx) {
-    itsInfo->TimeIndex(static_cast<unsigned long>(newIdx));
+    itsSource->selectTimeIndex(static_cast<unsigned long>(newIdx));
     drawMap(ui);
   };
 
   int finalIdx = ui.popupTimeseries(param, lat, lon, series,
                                     static_cast<int>(savedTime), itsRenderer, itsPalette,
                                     onTimeChange);
-  itsInfo->TimeIndex(static_cast<unsigned long>(finalIdx));
+  itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
 }
 
 bool App::handleKey(int key, UI& ui, bool& quit)
@@ -1208,29 +1156,30 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
     case KEY_LEFT:
     {
-      auto idx = itsInfo->TimeIndex();
+      auto idx = itsSource->currentTimeIndex();
       if (idx > 0)
       {
-        itsInfo->TimeIndex(idx - 1);
+        itsSource->selectTimeIndex(idx - 1);
         return true;
       }
       return false;
     }
     case KEY_RIGHT:
     {
-      auto idx = itsInfo->TimeIndex();
-      if (idx + 1 < itsInfo->SizeTimes())
+      auto idx = itsSource->currentTimeIndex();
+      if (idx + 1 < itsSource->timeCount())
       {
-        itsInfo->TimeIndex(idx + 1);
+        itsSource->selectTimeIndex(idx + 1);
         return true;
       }
       return false;
     }
     case KEY_HOME:
-      itsInfo->FirstTime();
+      itsSource->selectTimeIndex(0);
       return true;
     case KEY_END:
-      itsInfo->LastTime();
+      if (itsSource->timeCount() > 0)
+        itsSource->selectTimeIndex(itsSource->timeCount() - 1);
       return true;
 
     case 'p':
@@ -1243,7 +1192,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'L':  // uppercase only — lowercase 'l' is reserved for pan-right
     {
       int picked = ui.popupMenu("Levels", levelLabels(),
-                                static_cast<int>(itsInfo->LevelIndex()));
+                                static_cast<int>(itsSource->currentLevelIndex()));
       if (picked >= 0) selectLevel(picked);
       return true;
     }
@@ -1264,7 +1213,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'G':
     {
       NFmiEnumConverter conv;
-      std::string param = conv.ToString(itsInfo->Param().GetParamIdent());
+      std::string param = conv.ToString(itsSource->currentParamId());
       ui.popupLegend(param, itsPalette.name(), itsPalette, itsRenderer);
       return true;
     }
@@ -1558,12 +1507,13 @@ int App::runOnce()
   overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
 
   NFmiEnumConverter conv;
-  int id = itsInfo->Param().GetParamIdent();
+  int id = itsSource->currentParamId();
   std::string shortName = conv.ToString(id);
   std::cout << "[qdless] " << itsOpts.filename << " | param: " << shortName << " | time: "
-            << currentTimeLabel() << " (" << (itsInfo->TimeIndex() + 1) << "/"
-            << itsInfo->SizeTimes() << ") | level: " << itsInfo->Level()->LevelValue()
-            << " (" << (itsInfo->LevelIndex() + 1) << "/" << itsInfo->SizeLevels()
+            << currentTimeLabel() << " (" << (itsSource->currentTimeIndex() + 1) << "/"
+            << itsSource->timeCount() << ") | level: "
+            << itsSource->levelValueAt(itsSource->currentLevelIndex())
+            << " (" << (itsSource->currentLevelIndex() + 1) << "/" << itsSource->levelCount()
             << ") | range: [" << dataMin << ", " << dataMax << "] | palette: " << itsPalette.name()
             << " | coast: " << itsCoastlines.size() << "+" << itsBorders.size() << " polylines\n";
 
@@ -1589,7 +1539,7 @@ int App::runInteractive()
       // beforehand. So commit ncurses windows first, then draw the map
       // on top via raw escapes.
       NFmiEnumConverter conv;
-      int id = itsInfo->Param().GetParamIdent();
+      int id = itsSource->currentParamId();
       std::string label = conv.ToString(id);
       label += "  ";
       label += currentTimeLabel();
@@ -1605,8 +1555,8 @@ int App::runInteractive()
         label += itsLastMessage;
         itsLastMessage.clear();
       }
-      ui.drawTimeline(label, static_cast<int>(itsInfo->TimeIndex()),
-                      static_cast<int>(itsInfo->SizeTimes()));
+      ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
+                      static_cast<int>(itsSource->timeCount()));
       ui.drawStatusBar();
       doupdate();
       drawMap(ui);
@@ -1617,9 +1567,9 @@ int App::runInteractive()
     if (key == ERR)
     {
       // Timeout: advance to next frame.
-      auto idx = itsInfo->TimeIndex();
-      const auto n = itsInfo->SizeTimes();
-      itsInfo->TimeIndex((idx + 1) % n);
+      auto idx = itsSource->currentTimeIndex();
+      const auto n = itsSource->timeCount();
+      itsSource->selectTimeIndex((idx + 1) % n);
       needRedraw = true;
       continue;
     }

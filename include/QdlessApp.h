@@ -2,15 +2,13 @@
 
 #include "QdlessCities.h"
 #include "QdlessCoastline.h"
+#include "QdlessDataSource.h"
 #include "QdlessPalette.h"
 #include "QdlessRenderer.h"
 
 #include <memory>
 #include <string>
 #include <vector>
-
-class NFmiQueryData;
-class NFmiFastQueryInfo;
 
 namespace Qdless
 {
@@ -85,8 +83,8 @@ class App
   std::vector<std::string> levelLabels() const;
 
   Options itsOpts;
-  std::unique_ptr<NFmiQueryData> itsData;
-  std::unique_ptr<NFmiFastQueryInfo> itsInfo;
+  std::unique_ptr<DataSource> itsSource;
+  LatLonBox itsBbox;  // data extent in lat/lon
   Palette itsPalette;
   Renderer itsRenderer;
   std::vector<Polyline> itsCoastlines;
