@@ -95,7 +95,42 @@ GridFilesSource::~GridFilesSource() = default;
 
 void GridFilesSource::indexMessages()
 {
-  // Collect unique parameter IDs, validity times, and level values.
+  // Resolve each message's parameter via its NAME (preferring the explicit
+  // newbase / FMI / GRIB name from the file) rather than blindly trusting
+  // grid-files' numeric FMI mapping, which depends on a CSV table that may
+  // not cover every (discipline, category, number) GRIB combination — when
+  // the table doesn't match, the numeric ID can collide with a totally
+  // unrelated FMI parameter (e.g. Temperature ↦ RadiationOutSW2).
+  NFmiEnumConverter conv;
+  auto resolveId = [&](SmartMet::GRID::Message* m) -> int {
+    auto tryName = [&](const char* s) -> int {
+      if (s == nullptr || *s == '\0') return kFmiBadParameter;
+      const int id = conv.ToEnum(s);
+      return id;
+    };
+    // Prefer the GRIB-native parameter name straight from the file (the
+    // parameterName / shortName field) — that's what tools like grib_dump
+    // report and what the file producer intended. Fall through to FMI/
+    // newbase mappings only if that doesn't resolve, since those depend on
+    // grid-files' CSV tables which can mis-map unconfigured (discipline,
+    // category, number) tuples to unrelated FMI parameters.
+    int id = tryName(m->getGribParameterName());
+    if (id == kFmiBadParameter) id = tryName(m->getNewbaseParameterName());
+    if (id == kFmiBadParameter) id = tryName(m->getFmiParameterName());
+    if (id == kFmiBadParameter)
+    {
+      // Last-resort fallback: numeric FMI ID. Likely wrong but at least
+      // makes the parameter pickable.
+      id = static_cast<int>(m->getFmiParameterId());
+    }
+    return id;
+  };
+  auto resolveUnits = [](SmartMet::GRID::Message* m) -> std::string {
+    if (const char* u = m->getFmiParameterUnits(); u != nullptr) return u;
+    return {};
+  };
+
+  std::map<int, std::string> idToUnits;  // remember units for each id
   std::set<int> paramSet;
   std::set<long> timeSet;  // unix timestamps
   std::set<float> levelSet;
@@ -104,11 +139,16 @@ void GridFilesSource::indexMessages()
   for (std::size_t i = 0; i < n; ++i)
   {
     auto* m = itsFile->getMessageByIndex(i);
-    paramSet.insert(static_cast<int>(m->getFmiParameterId()));
+    const int id = resolveId(m);
+    paramSet.insert(id);
+    if (idToUnits.find(id) == idToUnits.end()) idToUnits[id] = resolveUnits(m);
     timeSet.insert(static_cast<long>(m->getForecastTimeT()));
     levelSet.insert(static_cast<float>(m->getGridParameterLevel()));
   }
   itsParamIds.assign(paramSet.begin(), paramSet.end());
+  itsParamUnits.clear();
+  itsParamUnits.reserve(itsParamIds.size());
+  for (int id : itsParamIds) itsParamUnits.push_back(idToUnits[id]);
   itsLevels.assign(levelSet.begin(), levelSet.end());
   itsTimes.clear();
   itsTimes.reserve(timeSet.size());
@@ -124,11 +164,12 @@ void GridFilesSource::indexMessages()
                           static_cast<short>(utc.tm_sec));
   }
 
-  // Build the lookup index.
+  // Build the lookup index — same name-resolution as above so the index
+  // matches itsParamIds.
   for (std::size_t i = 0; i < n; ++i)
   {
     auto* m = itsFile->getMessageByIndex(i);
-    const int pId = static_cast<int>(m->getFmiParameterId());
+    const int pId = resolveId(m);
     const long ts = static_cast<long>(m->getForecastTimeT());
     const float lv = static_cast<float>(m->getGridParameterLevel());
 
@@ -161,14 +202,18 @@ std::vector<int> GridFilesSource::paramIds() const { return itsParamIds; }
 
 std::string GridFilesSource::paramShortName(int paramId) const
 {
+  // Prefer grid-files' FmiParameterDef.mParameterName — it's more accurate
+  // than newbase's enum (which can have name collisions for IDs not in the
+  // newbase table, e.g. ID 153 = "T-K" in grid-files but "RadiationOutSW2"
+  // in newbase).
+  using SmartMet::Identification::FmiParameterDef;
+  FmiParameterDef def;
+  if (SmartMet::Identification::gridDef.getFmiParameterDefById(paramId, def) &&
+      !def.mParameterName.empty())
+    return def.mParameterName;
   NFmiEnumConverter conv;
   std::string name = conv.ToString(paramId);
   if (!name.empty()) return name;
-  // Fall back to grid-files' parameter name lookup.
-  using SmartMet::Identification::FmiParameterDef;
-  FmiParameterDef def;
-  if (SmartMet::Identification::gridDef.getFmiParameterDefById(paramId, def))
-    return def.mParameterName;
   return std::to_string(paramId);
 }
 
@@ -179,6 +224,14 @@ std::string GridFilesSource::paramLongName(int paramId) const
   if (SmartMet::Identification::gridDef.getFmiParameterDefById(paramId, def))
     return def.mParameterDescription.empty() ? def.mParameterName : def.mParameterDescription;
   return paramShortName(paramId);
+}
+
+std::string GridFilesSource::paramUnits(int paramId) const
+{
+  auto it = std::find(itsParamIds.begin(), itsParamIds.end(), paramId);
+  if (it == itsParamIds.end()) return {};
+  const std::size_t idx = static_cast<std::size_t>(it - itsParamIds.begin());
+  return idx < itsParamUnits.size() ? itsParamUnits[idx] : std::string{};
 }
 
 int GridFilesSource::currentParamId() const { return itsCurrentParam; }

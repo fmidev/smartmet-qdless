@@ -27,6 +27,7 @@ class QueryDataSource : public DataSource
   std::vector<int> paramIds() const override;
   std::string paramShortName(int paramId) const override;
   std::string paramLongName(int paramId) const override;
+  std::string paramUnits(int paramId) const override;
   int currentParamId() const override;
   bool selectParamId(int paramId) override;
 

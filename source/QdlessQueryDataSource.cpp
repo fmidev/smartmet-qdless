@@ -48,6 +48,14 @@ std::string QueryDataSource::paramLongName(int paramId) const
   return name;
 }
 
+std::string QueryDataSource::paramUnits(int /*paramId*/) const
+{
+  // QueryData does not record explicit unit strings; rely on the fact that
+  // SmartMet QueryData traditionally stores parameters in their canonical
+  // units (Celsius for Temperature, m/s for wind, mm for precipitation, …).
+  return {};
+}
+
 int QueryDataSource::currentParamId() const { return itsInfo->Param().GetParamIdent(); }
 
 bool QueryDataSource::selectParamId(int paramId)

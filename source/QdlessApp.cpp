@@ -284,6 +284,12 @@ App::App(Options opts) : itsOpts(std::move(opts))
 
 App::~App() = default;
 
+float App::transform(float v) const
+{
+  if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e10F) return v;
+  return v * itsValueScale + itsValueOffset;
+}
+
 void App::buildIndices()
 {
   itsParamIds = itsSource->paramIds();
@@ -295,6 +301,26 @@ void App::loadPalette()
   const int id = itsSource->currentParamId();
   const std::string shortName = itsSource->paramShortName(id);
   const std::string longName = itsSource->paramLongName(id);
+  const std::string units = itsSource->paramUnits(id);
+
+  // Auto-detect Kelvin and shift to Celsius so the temperature palette (which
+  // is expressed in °C) lights up correctly. Triggered when units == "K" AND
+  // the parameter has temperature-flavoured naming.
+  itsValueScale = 1.0F;
+  itsValueOffset = 0.0F;
+  if (units == "K" || units == "kelvin" || units == "Kelvin")
+  {
+    auto isTempLike = [](const std::string& n) {
+      return n.find("emperature") != std::string::npos ||
+             n.find("DewPoint") != std::string::npos || n == "T" || n == "TD" ||
+             n == "T-K" || n == "T2m";
+    };
+    if (isTempLike(shortName) || isTempLike(longName))
+    {
+      itsValueOffset = -273.15F;
+      itsLastMessage = "Auto-shift: K → °C";
+    }
+  }
 
   std::string paletteName = itsOpts.paletteOverride;
   if (paletteName.empty()) paletteName = paletteForParam(itsOpts.configFile, shortName);
@@ -350,7 +376,7 @@ void App::loadPalette()
     for (int i = 0; i < N; ++i)
     {
       const double lon = itsBbox.minLon + (i + 0.5) / N * (itsBbox.maxLon - itsBbox.minLon);
-      const float v = itsSource->interpolatedValue(lat, lon);
+      const float v = transform(itsSource->interpolatedValue(lat, lon));
       if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e10F) continue;
       lo = std::min(lo, v);
       hi = std::max(hi, v);
@@ -410,7 +436,7 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
     {
       const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / subWidth * spanU;
       const double lon = itsBbox.minLon + up * bboxLonSpan;
-      const float val = itsSource->interpolatedValue(lat, lon);
+      const float val = transform(itsSource->interpolatedValue(lat, lon));
       if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e10F)
       {
         dataMin = std::min(dataMin, val);
@@ -489,7 +515,7 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
       const double frac = (static_cast<double>(sx) + 0.5) / subW;
       const double lat = lat1 + frac * (lat2 - lat1);
       const double lon = lon1 + frac * (lon2 - lon1);
-      const float val = itsSource->interpolatedValue(lat, lon);
+      const float val = transform(itsSource->interpolatedValue(lat, lon));
       const Rgb c = itsPalette.lookup(val);
       pixels[static_cast<std::size_t>(li * 2) * subW + sx] = c;
       pixels[static_cast<std::size_t>(li * 2 + 1) * subW + sx] = c;
@@ -507,7 +533,7 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   const int interiorW = width - 2;
 
   NFmiEnumConverter conv;
-  std::string title = "Cross-section: " + std::string(conv.ToString(itsSource->currentParamId()));
+  std::string title = "Cross-section: " + std::string(itsSource->paramShortName(itsSource->currentParamId()));
 
   std::ostringstream os;
 
@@ -698,7 +724,7 @@ std::string App::exportPng(std::string& err) const
     {
       const float u = itsViewport.uMin + (static_cast<float>(px) + 0.5F) / width * spanU;
       const double lon = itsBbox.minLon + u * bboxLonSpan;
-      const float val = itsSource->interpolatedValue(lat, lon);
+      const float val = transform(itsSource->interpolatedValue(lat, lon));
       Rgb c = itsPalette.lookup(val);
       if (c.transparent) continue;  // leave white for "no data"
       image(px, py) = Imagine::NFmiColorTools::MakeColor(c.r, c.g, c.b);
@@ -755,7 +781,7 @@ std::string App::exportPng(std::string& err) const
   NFmiEnumConverter conv;
   std::filesystem::path inputPath(itsOpts.filename);
   const std::string base = inputPath.stem().string();
-  const std::string param = conv.ToString(itsSource->currentParamId());
+  const std::string param = itsSource->paramShortName(itsSource->currentParamId());
   NFmiMetTime t = itsSource->currentValidTime();
   char tbuf[32];
   std::snprintf(tbuf, sizeof(tbuf), "%04d%02d%02d_%02d%02d", static_cast<int>(t.GetYear()),
@@ -916,7 +942,7 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
     {
       const float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
       const double lon = itsBbox.minLon + u * bboxLonSpan;
-      const float val = itsSource->interpolatedValue(lat, lon);
+      const float val = transform(itsSource->interpolatedValue(lat, lon));
       samples.push_back({cx, cy, val, 0.0F});
     }
   }
@@ -931,6 +957,7 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
       const float u = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
       const double lon = itsBbox.minLon + u * bboxLonSpan;
       samples[i++].v = itsSource->interpolatedValue(lat, lon);
+      // Wind components are not unit-shifted (m/s expected); skip transform.
     }
   }
 
@@ -1048,10 +1075,9 @@ std::string App::currentTimeLabel() const
 
 std::vector<std::string> App::paramLabels() const
 {
-  NFmiEnumConverter conv;
   std::vector<std::string> out;
   out.reserve(itsParamIds.size());
-  for (int id : itsParamIds) out.push_back(conv.ToString(id));
+  for (int id : itsParamIds) out.push_back(itsSource->paramShortName(id));
   return out;
 }
 
@@ -1123,12 +1149,12 @@ void App::openProbe(int cellX, int cellY, UI& ui)
   for (std::size_t i = 0; i < itsSource->timeCount(); ++i)
   {
     itsSource->selectTimeIndex(i);
-    series.push_back(itsSource->interpolatedValue(lat, lon));
+    series.push_back(transform(itsSource->interpolatedValue(lat, lon)));
   }
   itsSource->selectTimeIndex(savedTime);
 
   NFmiEnumConverter conv;
-  std::string param = conv.ToString(itsSource->currentParamId());
+  std::string param = itsSource->paramShortName(itsSource->currentParamId());
 
   // Callback: when the user presses an arrow inside the popup, update the
   // querydata's time index and redraw the map underneath. The popup loop
@@ -1213,7 +1239,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'G':
     {
       NFmiEnumConverter conv;
-      std::string param = conv.ToString(itsSource->currentParamId());
+      std::string param = itsSource->paramShortName(itsSource->currentParamId());
       ui.popupLegend(param, itsPalette.name(), itsPalette, itsRenderer);
       return true;
     }
@@ -1506,9 +1532,8 @@ int App::runOnce()
   overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
   overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
 
-  NFmiEnumConverter conv;
-  int id = itsSource->currentParamId();
-  std::string shortName = conv.ToString(id);
+  const int id = itsSource->currentParamId();
+  std::string shortName = itsSource->paramShortName(id);
   std::cout << "[qdless] " << itsOpts.filename << " | param: " << shortName << " | time: "
             << currentTimeLabel() << " (" << (itsSource->currentTimeIndex() + 1) << "/"
             << itsSource->timeCount() << ") | level: "
@@ -1538,9 +1563,8 @@ int App::runInteractive()
       // screen with blanks, which would clobber a raw-ANSI map written
       // beforehand. So commit ncurses windows first, then draw the map
       // on top via raw escapes.
-      NFmiEnumConverter conv;
-      int id = itsSource->currentParamId();
-      std::string label = conv.ToString(id);
+      const int id = itsSource->currentParamId();
+      std::string label = itsSource->paramShortName(id);
       label += "  ";
       label += currentTimeLabel();
       if (itsAnimating)

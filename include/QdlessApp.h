@@ -121,6 +121,14 @@ class App
   // (e.g. "Saved foo.png"). Cleared by the next non-message-producing key.
   std::string itsLastMessage;
 
+  // Optional value transform applied to each sampled value before palette
+  // lookup. Used to auto-shift Kelvin → Celsius so K-unit data picks up the
+  // temperature palette correctly. value' = value * scale + offset.
+  float itsValueScale = 1.0F;
+  float itsValueOffset = 0.0F;
+  // Helper: apply transform, but keep missing/sentinel as-is.
+  float transform(float v) const;
+
   // City lookup index, lazily loaded on first '/' (place search).
   mutable CityIndex itsCityIndex;
   mutable bool itsCityIndexAttempted = false;

@@ -32,6 +32,9 @@ class DataSource
   virtual std::vector<int> paramIds() const = 0;
   virtual std::string paramShortName(int paramId) const = 0;
   virtual std::string paramLongName(int paramId) const = 0;
+  // Unit string as given by the underlying file (e.g. "K", "m/s", "%").
+  // Empty if unknown.
+  virtual std::string paramUnits(int paramId) const = 0;
   virtual int currentParamId() const = 0;
   virtual bool selectParamId(int paramId) = 0;
 

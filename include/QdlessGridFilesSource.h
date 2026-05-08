@@ -36,6 +36,7 @@ class GridFilesSource : public DataSource
   std::vector<int> paramIds() const override;
   std::string paramShortName(int paramId) const override;
   std::string paramLongName(int paramId) const override;
+  std::string paramUnits(int paramId) const override;
   int currentParamId() const override;
   bool selectParamId(int paramId) override;
 
@@ -64,7 +65,8 @@ class GridFilesSource : public DataSource
   SmartMet::GRID::Message* currentMessage() const;
 
   std::unique_ptr<SmartMet::GRID::GridFile> itsFile;
-  std::vector<int> itsParamIds;        // newbase IDs (mapped from FMI ID)
+  std::vector<int> itsParamIds;        // newbase IDs (resolved via name)
+  std::vector<std::string> itsParamUnits;  // parallel to itsParamIds
   std::vector<NFmiMetTime> itsTimes;   // sorted, unique
   std::vector<float> itsLevels;        // sorted, unique
   // Map (newbaseParamId, timeIdx, levelIdx) → message index.
