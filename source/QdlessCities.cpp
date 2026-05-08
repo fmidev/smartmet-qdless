@@ -86,12 +86,31 @@ std::vector<std::size_t> CityIndex::search(const std::string& query, std::size_t
     return lp - 3.0 * std::log1p(dKm / 100.0);
   };
 
-  // Two-tier ranking: prefix matches win over infix matches first, then
-  // (-score) breaks ties. So typing "kou" prefers Kouvola (prefix) over
-  // Haikou (infix) regardless of population or distance.
+  // True if `needle` matches at position 0 or just after a word separator
+  // (space, hyphen, slash, period). So "york" matches "New York" (prefix
+  // of the second word) and "saint" matches "Saint-Étienne", but "imat"
+  // does NOT match "Orimattila" because it's mid-word.
+  auto matchesWordPrefix = [&](const std::string& s) -> int {
+    // Returns 0 if needle is a prefix of the whole string,
+    //         1 if it's a prefix of a non-leading word,
+    //        -1 if no match.
+    if (s.compare(0, needle.size(), needle) == 0) return 0;
+    for (std::size_t i = 1; i + needle.size() <= s.size(); ++i)
+    {
+      const char prev = s[i - 1];
+      if ((prev == ' ' || prev == '-' || prev == '/' || prev == '.') &&
+          s.compare(i, needle.size(), needle) == 0)
+        return 1;
+    }
+    return -1;
+  };
+
+  // Two-tier ranking: prefix-of-name wins over prefix-of-word; within each
+  // tier (-score) breaks ties so locality + population still matter. Plain
+  // infix matches ("imat" inside "Orimattila") don't match at all.
   struct Hit
   {
-    int tier;        // 0 = prefix match, 1 = infix only
+    int tier;        // 0 = prefix of name, 1 = prefix of word
     double negScore;
     std::size_t idx;
   };
@@ -108,11 +127,13 @@ std::vector<std::size_t> CityIndex::search(const std::string& query, std::size_t
     const auto& c = itsCities[i];
     const std::string lname = lowercased(c.name);
     const std::string lascii = lowercased(c.asciiname);
-    const bool prefix = lname.starts_with(needle) || lascii.starts_with(needle);
-    const bool infix = !prefix && (lname.find(needle) != std::string::npos ||
-                                   lascii.find(needle) != std::string::npos);
-    if (!prefix && !infix) continue;
-    ranked.push_back({prefix ? 0 : 1, -score(c), i});
+    const int t1 = matchesWordPrefix(lname);
+    const int t2 = matchesWordPrefix(lascii);
+    int tier = -1;
+    if (t1 == 0 || t2 == 0) tier = 0;
+    else if (t1 == 1 || t2 == 1) tier = 1;
+    if (tier < 0) continue;
+    ranked.push_back({tier, -score(c), i});
   }
   std::partial_sort(ranked.begin(),
                     ranked.begin() + std::min(maxResults, ranked.size()), ranked.end(),

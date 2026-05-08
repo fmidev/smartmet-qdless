@@ -427,53 +427,54 @@ int UI::popupSearch(const std::string& title,
     for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
     os << "\xe2\x94\xa4" << kEscReset;
 
-    // Body rows.
-    for (int i = 0; i < innerH; ++i)
+    // Body region: every row between separator and footer must be drawn
+    // every frame, otherwise rows from a wider previous match list stay
+    // on screen when the result set shrinks (especially when the user
+    // deletes the entire query and there are no matches).
+    const int bodyRows = height - 4 - kFooterRows;  // 1 top + query + sep + footer + bottom
+    for (int i = 0; i < bodyRows; ++i)
     {
       putAt(os, top + 3 + i, left);
       os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82";
-      const bool isSel = (i == sel);
-      if (isSel)
-        os << kEscBgWhite << kEscFgBlack << kEscBold;
-      else
-        os << kEscBgBlack << kEscFgWhite;
-      // Hotkey [N] for first 9.
-      const char hk = (i < 9) ? static_cast<char>('1' + i) : ' ';
-      os << ' ';
-      int consumed = 1;
-      if (hk != ' ')
+      if (i < static_cast<int>(matches.size()))
       {
+        const bool isSel = (i == sel);
         if (isSel)
+          os << kEscBgWhite << kEscFgBlack << kEscBold;
+        else
+          os << kEscBgBlack << kEscFgWhite;
+        // Hotkey [N] for first 9.
+        const char hk = (i < 9) ? static_cast<char>('1' + i) : ' ';
+        os << ' ';
+        int consumed = 1;
+        if (hk != ' ')
         {
-          os << '[' << hk << "] ";
+          if (isSel)
+          {
+            os << '[' << hk << "] ";
+          }
+          else
+          {
+            os << '[' << kEscFgRed << kEscBold << hk << kEscReset << kEscBgBlack << kEscFgWhite
+               << "] ";
+          }
+          consumed += 4;
         }
         else
         {
-          os << '[' << kEscFgRed << kEscBold << hk << kEscReset << kEscBgBlack << kEscFgWhite
-             << "] ";
+          os << "    ";
+          consumed += 4;
         }
-        consumed += 4;
+        os << matches[i];
+        consumed += utf8Width(matches[i]);
+        pad(os, interiorW - consumed);
       }
       else
       {
-        os << "    ";
-        consumed += 4;
+        os << kEscBgBlack << kEscFgWhite;
+        pad(os, interiorW);
       }
-      os << matches[i];
-      consumed += utf8Width(matches[i]);
-      pad(os, interiorW - consumed);
       os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
-    }
-    // Pad empty body rows when fewer matches than slots.
-    for (int i = innerH; i < std::max(1, std::min(static_cast<int>(matches.size() == 0 ? 1 : 0),
-                                                  maxRows));
-         ++i)
-    {
-      putAt(os, top + 3 + i, left);
-      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
-         << kEscFgWhite;
-      pad(os, interiorW);
-      os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
     }
 
     // Footer.
