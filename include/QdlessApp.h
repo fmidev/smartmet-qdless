@@ -7,7 +7,9 @@
 #include "QdlessRenderer.h"
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Qdless
@@ -137,10 +139,16 @@ class App
   bool cellToViewport(const UI& ui, int cellX, int cellY, float& u, float& v) const;
   void zoomAt(float factor, float anchorU, float anchorV);
   void openProbe(int cellX, int cellY, UI& ui);
+  void openProbeAt(double lat, double lon, UI& ui);
 
   // Overlays.
   void overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
+  void overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   std::string buildWindArrows(int cellW, int cellH, int originRow, int originCol);
+
+  // Optional pin marker (lat, lon) drawn on the map; set by place search and
+  // click-to-probe. Persists until the next set.
+  std::optional<std::pair<double, double>> itsMarker;
 
   // Export current slice as a PNG. Returns the filename written, or empty
   // string on failure (with `err` set).

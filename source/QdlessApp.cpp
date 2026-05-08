@@ -844,7 +844,14 @@ void App::openPlaceSearch(UI& ui)
   itsViewport.vMax = v + halfSpan;
   itsViewport.clamp();
 
+  itsMarker = std::make_pair(city.lat, city.lon);
   itsLastMessage = std::string("Centred on ") + city.name + ", " + city.country;
+
+  // Auto-open the time-series probe at the picked location. The popup runs
+  // its own input loop until dismissed; on exit, control returns here and
+  // the main loop redraws the map (with the marker still visible).
+  drawMap(ui);
+  openProbeAt(city.lat, city.lon, ui);
 }
 
 std::string App::exportPng(std::string& err) const
@@ -1228,6 +1235,45 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
   }
 }
 
+void App::overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
+{
+  if (!itsMarker.has_value() || subWidth <= 0 || subHeight <= 0) return;
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  if (spanU <= 0 || spanV <= 0) return;
+  double u = 0;
+  double v = 0;
+  itsSource->latLonToUV(itsMarker->first, itsMarker->second, u, v);
+  const double u01 = (u - itsViewport.uMin) / spanU;
+  const double v01 = (v - itsViewport.vMin) / spanV;
+  const int cx = static_cast<int>(u01 * subWidth);
+  const int cy = static_cast<int>(v01 * subHeight);
+
+  const Rgb fg{255, 40, 40};
+  const Rgb bg{255, 255, 255};
+  auto plot = [&](int x, int y, Rgb c) {
+    if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
+      pixels[static_cast<std::size_t>(y) * subWidth + x] = c;
+  };
+  // White halo above/below and left/right of each cross arm so the marker
+  // stands out against any palette colour.
+  for (int d = -3; d <= 3; ++d)
+  {
+    plot(cx + d, cy - 1, bg);
+    plot(cx + d, cy + 1, bg);
+    plot(cx - 1, cy + d, bg);
+    plot(cx + 1, cy + d, bg);
+  }
+  // Red cross arms.
+  for (int d = -3; d <= 3; ++d)
+  {
+    plot(cx + d, cy, fg);
+    plot(cx, cy + d, fg);
+  }
+  // White centre dot for visibility.
+  plot(cx, cy, bg);
+}
+
 std::string App::currentTimeLabel() const
 {
   NFmiMetTime t = itsSource->currentValidTime();
@@ -1296,7 +1342,12 @@ void App::openProbe(int cellX, int cellY, UI& ui)
   double lat = 0;
   double lon = 0;
   if (!cellToLatLon(ui, cellX, cellY, lat, lon)) return;
+  itsMarker = std::make_pair(lat, lon);
+  openProbeAt(lat, lon, ui);
+}
 
+void App::openProbeAt(double lat, double lon, UI& ui)
+{
   // Sample the current parameter at this lat/lon for every time step.
   // Save and restore the time index so the rest of the UI keeps its state.
   std::vector<float> series;
@@ -1660,6 +1711,7 @@ void App::drawMap(UI& ui)
   if (itsShowGraticule) overlayGraticule(pixels, subWidth, subHeight);
   overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
   overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
+  overlayMarker(pixels, subWidth, subHeight);
 
   // Bypass ncurses: write raw ANSI directly to stdout, positioned at map origin.
   std::ostringstream os;
@@ -1687,6 +1739,7 @@ int App::runOnce()
   auto pixels = sampleSlice(subWidth, subHeight, dataMin, dataMax);
   overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
   overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
+  overlayMarker(pixels, subWidth, subHeight);
 
   const int id = itsSource->currentParamId();
   std::string shortName = itsSource->paramShortName(id);
