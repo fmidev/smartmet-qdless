@@ -85,22 +85,39 @@ std::vector<std::size_t> CityIndex::search(const std::string& query, std::size_t
     return lp - 2.0 * std::log1p(dKm / 100.0);
   };
 
+  // Two-tier ranking: prefix matches win over infix matches first, then
+  // (-score) breaks ties. So typing "kou" prefers Kouvola (prefix) over
+  // Haikou (infix) regardless of population or distance.
+  struct Hit
+  {
+    int tier;        // 0 = prefix match, 1 = infix only
+    double negScore;
+    std::size_t idx;
+  };
+  auto rank = [](const Hit& a, const Hit& b) {
+    if (a.tier != b.tier) return a.tier < b.tier;
+    return a.negScore < b.negScore;
+  };
+
   // Linear scan: for ~170k cities this is well below 100 ms on modern CPUs.
-  std::vector<std::pair<double, std::size_t>> ranked;  // -score, idx
+  std::vector<Hit> ranked;
   ranked.reserve(256);
   for (std::size_t i = 0; i < itsCities.size(); ++i)
   {
     const auto& c = itsCities[i];
     const std::string lname = lowercased(c.name);
     const std::string lascii = lowercased(c.asciiname);
-    if (lname.find(needle) != std::string::npos ||
-        lascii.find(needle) != std::string::npos)
-      ranked.emplace_back(-score(c), i);
+    const bool prefix = lname.starts_with(needle) || lascii.starts_with(needle);
+    const bool infix = !prefix && (lname.find(needle) != std::string::npos ||
+                                   lascii.find(needle) != std::string::npos);
+    if (!prefix && !infix) continue;
+    ranked.push_back({prefix ? 0 : 1, -score(c), i});
   }
   std::partial_sort(ranked.begin(),
-                    ranked.begin() + std::min(maxResults, ranked.size()), ranked.end());
+                    ranked.begin() + std::min(maxResults, ranked.size()), ranked.end(),
+                    rank);
   for (std::size_t i = 0; i < std::min(maxResults, ranked.size()); ++i)
-    hits.push_back(ranked[i].second);
+    hits.push_back(ranked[i].idx);
   return hits;
 }
 }  // namespace Qdless
