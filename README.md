@@ -34,6 +34,8 @@ adapter.
 
 - Quadrant-block (¼-cell) raster with 24-bit truecolor or xterm-256
   fallback
+- Native projection rendering for QueryData (polar stereographic,
+  Lambert, rotated lat/lon, …); GRIB / NetCDF render in lat/lon
 - 80+ pre-baked palettes from `wms-conf`, plus a built-in fallback ramp
 - Automatic palette + unit detection: `K → °C`, `Pa → hPa`, fraction → %,
   with name-based disambiguation (sea-surface temperature ≠ atmospheric
@@ -42,12 +44,49 @@ adapter.
   roundness filters that drop fractal noise (Saimaa) while keeping real
   lakes (Vänern)
 - Lat/lon graticule, wind arrows, legend popup, help popup
-- Click-to-probe braille-sparkline time series at a chosen point
-- Place search via GeoNames `cities1000`
+- City overlay (top-N most-populous in view, with names) sourced from
+  GeoNames `cities1000`
+- Place search with auto-marker and time-series probe at the picked
+  location
+- Click-to-probe braille-sparkline time series at any point on the map
 - Animation (play/pause + speed control)
 - PNG export
 - Cross-section view across pressure / height (model) levels
 - Mouse drag-pan and double-click zoom
+
+## Keyboard shortcuts
+
+The full list is in the in-app help popup (`?`). Quick reference:
+
+| Key | Action |
+| --- | --- |
+| `q` / `Esc` | Quit |
+| `p` | Parameter menu |
+| `L` (Shift+L) | Level menu |
+| `←` / `→` | Previous / next time |
+| `Home` / `End` | First / last time |
+| `Space` | Play / pause animation |
+| `↑` / `↓` | Animation speed up / down |
+| `+` / `-` | Zoom in / out (centre) |
+| dbl-click L / R | Zoom in / out at cursor |
+| `0` | Reset view |
+| `h` `j` `k` `l` or Shift+arrow or drag | Pan |
+| click | Time-series probe at point |
+| `g` | Legend popup |
+| `c` | Toggle coastlines |
+| `b` | Toggle borders |
+| `n` | Toggle lat/lon graticule |
+| `w` | Toggle wind arrows |
+| `i` | Toggle city overlay |
+| `PgDn` / `PgUp` | Cities: denser / sparser (5 → 500) |
+| `/` | Place search (auto-opens probe at the pick) |
+| `x` | Cross-section (click two endpoints) |
+| `e` | Export PNG |
+| `?` | This help |
+
+PgUp / PgDn were chosen for the city density step because they're in the
+same physical position on every common keyboard layout (US, AZERTY,
+QWERTZ, Finnish) and need no modifier.
 
 ## Gallery
 
