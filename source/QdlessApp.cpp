@@ -2228,9 +2228,11 @@ void App::openProbeAt(double lat, double lon, UI& ui)
       }
       return s;
     };
+    const std::string units = itsSource->paramUnits(itsSource->currentParamId());
     int finalIdx = ui.popupTimeseries(param, lat, lon, series, timeLabels,
                                       static_cast<int>(savedTime), itsRenderer,
                                       activePanel().palette, onTimeChange, computeStats,
+                                      units, &itsAnimationDelayMs,
                                       avoidRow, avoidCol, &clickRow, &clickCol);
     itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
 

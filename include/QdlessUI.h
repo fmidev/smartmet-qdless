@@ -97,7 +97,11 @@ class UI
   //
   // Left/Right (and Home/End) arrows step the marker; on each step
   // `onTimeChange(newIdx)` is invoked so the caller can update the time on
-  // the underlying map while the popup stays visible. 's' toggles a stats
+  // the underlying map while the popup stays visible. Space toggles
+  // animation: when active, the marker auto-advances every
+  // `animationDelayMs` and wraps; Up / Down adjust that delay (and the
+  // updated delay is written back through the pointer so the App's
+  // outside-popup animation picks up the same speed). 's' toggles a stats
   // overlay (min/mean/max curves across the viewport) — on first toggle
   // `computeStats` is invoked to fetch the data; subsequent toggles just
   // hide / show the cached series. Any other keyboard key dismisses the
@@ -107,6 +111,11 @@ class UI
   // time index.
   // `timeLabels[i]` is the human-readable time for series step i; if
   // empty, no time row is drawn.
+  // `units` is appended to numeric values in the info row (e.g. "K",
+  // "%"). Empty string means no unit shown.
+  // `animationDelayMs` (nullable): when non-null and Space is pressed,
+  // animation runs at *animationDelayMs ms/frame; Up/Down keys adjust
+  // it. Pass nullptr to disable in-popup animation.
   // `avoidCellRow` / `avoidCellCol` (-1 = ignore): if both ≥ 0, the popup
   // shifts into the opposite quadrant so a map marker at that cell stays
   // visible behind the popup.
@@ -116,6 +125,8 @@ class UI
                       const Renderer& renderer, const Palette& palette,
                       std::function<void(int)> onTimeChange = {},
                       std::function<StatsSeries()> computeStats = {},
+                      const std::string& units = {},
+                      int* animationDelayMs = nullptr,
                       int avoidCellRow = -1, int avoidCellCol = -1,
                       int* outClickRow = nullptr, int* outClickCol = nullptr);
 

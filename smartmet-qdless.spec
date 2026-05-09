@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 14%{?dist}.fmi
+Release: 15%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,26 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-15.fmi
+- Time-series probe popup: in-popup time animation. Space toggles
+  play/pause, Up/Down adjust the per-frame delay (same scaling and
+  same shared `itsAnimationDelayMs` as the outside-popup animation,
+  so speed persists on either side). Each frame the marker advances
+  one step (wrapping at the end) and onTimeChange is invoked so the
+  underlying map ticks in lockstep — and because the viewport-stats
+  cache is keyed on (param, level, viewport), animating with stats
+  visible is immediate after the first scan.
+- Probe info row: rename "now" → "value" (the marker can be anywhere
+  in the forecast — calling it "now" implied real-time). Numeric
+  readings are coloured to match their chart series — the value /
+  point reading in green, viewport mean in teal, min and max in
+  grey when stats are visible — and the parameter's units are
+  appended where the source provides them (GRIB/NetCDF; QueryData
+  has no explicit units so it's omitted there).
+- First press of `s` flashes a "Computing viewport stats…" line in
+  the info row before invoking the (potentially slow) scan, so the
+  popup doesn't look frozen on a multi-second computation.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-14.fmi
 - Fix blank rendering of curvilinear NetCDF files (e.g. NEMO ocean SST):
   grid-files' getGridLatLonCoordinatesByGridPosition / getGridPointBy-

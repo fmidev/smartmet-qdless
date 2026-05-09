@@ -574,6 +574,7 @@ void UI::popupHelp()
       {"click (mouse)",             "Time-series probe at point"},
       {"\xe2\x86\x90 \xe2\x86\x92 in probe",
                                     "Step time, map updates"},
+      {"Space in probe",            "Play / pause animation (\xe2\x86\x91\xe2\x86\x93 speed)"},
       {"s in probe",                "Toggle viewport min/mean/max overlay"},
       {"",                          ""},
       {"g",                         "Legend"},
@@ -991,8 +992,10 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
                         const std::vector<std::string>& timeLabels, int currentIndex,
                         const Renderer& renderer, const Palette& palette,
                         std::function<void(int)> onTimeChange,
-                        std::function<StatsSeries()> computeStats, int avoidCellRow,
-                        int avoidCellCol, int* outClickRow, int* outClickCol)
+                        std::function<StatsSeries()> computeStats,
+                        const std::string& units, int* animationDelayMs,
+                        int avoidCellRow, int avoidCellCol,
+                        int* outClickRow, int* outClickCol)
 {
   (void)palette;  // reserved for future colour-by-band line rendering
   if (outClickRow) *outClickRow = -1;
@@ -1120,9 +1123,12 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   int timeMaxW = 0;
   if (showTimeRow)
     for (const auto& t : timeLabels) timeMaxW = std::max(timeMaxW, utf8Width(t));
-  const std::string footer =
-      "\xe2\x86\x90\xe2\x86\x92 / click / drag step time   "
-      "s: viewport stats   click map: re-probe   any key: close";
+  const std::string footer = animationDelayMs != nullptr
+      ? std::string("\xe2\x86\x90\xe2\x86\x92 / click step time   "
+                    "Space play   \xe2\x86\x91\xe2\x86\x93 speed   "
+                    "s: viewport stats   any key: close")
+      : std::string("\xe2\x86\x90\xe2\x86\x92 / click / drag step time   "
+                    "s: viewport stats   click map: re-probe   any key: close");
   const int width = std::max({chartW + chartLeftPad + 4,
                               utf8Width(paramName) + 6,
                               utf8Width(latlonBuf) + 6,
@@ -1255,42 +1261,78 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
     int markerSubX = -1;
     if (markerIdx >= 0 && markerIdx < n) markerSubX = sampleSubX(markerIdx);
 
-    // "now" value depends on marker.
+    // The point-series value at the current marker. Labelled "value"
+    // rather than "now" because the marker can be anywhere in the
+    // forecast; "now" implies real-time which it isn't.
     const float curVal =
         (markerIdx >= 0 && markerIdx < static_cast<int>(series.size()))
             ? series[markerIdx]
             : std::numeric_limits<float>::quiet_NaN();
-    // When stats are visible, the second info line shows the
-    // viewport-wide min/mean/max at the marker's time step instead of
-    // duplicating the point-series min/max (which the chart already
-    // makes obvious).
+
+    // Format a numeric reading with optional units appended.
+    auto fmtNum = [&](float v) {
+      std::string s = fmt::format("{:.{}f}", v, decimals);
+      if (!units.empty())
+      {
+        s += ' ';
+        s += units;
+      }
+      return s;
+    };
+    // Colour the numeric values to match the chart series: point series
+    // (and the "value" reading) green; min/max grey (envelope); mean
+    // teal. Build both an ANSI-coloured string and a parallel visible-
+    // width counter so writeRow can pad correctly without trying to
+    // strip the escapes.
+    constexpr std::string_view kFgValueGreen = "\x1b[38;5;46m";
+    constexpr std::string_view kFgMeanTeal = "\x1b[38;5;38m";
+    constexpr std::string_view kFgMinMaxGrey = "\x1b[38;5;240m";
+
     std::string rangeBuf;
-    if (statsVisible && markerIdx >= 0 && markerIdx < static_cast<int>(stats.mean.size()))
+    int rangeBufVisible = 0;
+    auto pushPlain = [&](std::string_view t) {
+      rangeBuf.append(t);
+      rangeBufVisible += utf8Width(std::string(t));
+    };
+    auto pushColored = [&](std::string_view colour, std::string_view t) {
+      rangeBuf.append(colour);
+      rangeBuf.append(t);
+      rangeBuf.append(kEscFgWhite);
+      rangeBufVisible += utf8Width(std::string(t));
+    };
+
+    // When stats are visible, the info line summarises viewport-wide
+    // min / mean / max at the marker's time step instead of duplicating
+    // the point series's overall extrema (which the chart shows
+    // anyway).
+    if (statsVisible && markerIdx >= 0 && markerIdx < static_cast<int>(stats.mean.size()) &&
+        finiteValue(stats.mean[markerIdx]))
     {
-      const float vMin = stats.min[markerIdx];
-      const float vMean = stats.mean[markerIdx];
-      const float vMax = stats.max[markerIdx];
-      const std::string nowPart =
-          finiteValue(curVal) ? fmt::format("now {:.{}f}", curVal, decimals) : std::string("now -");
-      if (finiteValue(vMean))
-        rangeBuf = fmt::format(
-            "viewport min {:.{}f}  mean {:.{}f}  max {:.{}f}  step {}/{}  {}",
-            vMin, decimals, vMean, decimals, vMax, decimals, markerIdx + 1,
-            static_cast<int>(series.size()), nowPart);
-      else
-        rangeBuf = fmt::format("viewport: no finite samples  step {}/{}  {}",
-                               markerIdx + 1, static_cast<int>(series.size()), nowPart);
+      pushPlain("viewport min ");
+      pushColored(kFgMinMaxGrey, fmtNum(stats.min[markerIdx]));
+      pushPlain("  mean ");
+      pushColored(kFgMeanTeal, fmtNum(stats.mean[markerIdx]));
+      pushPlain("  max ");
+      pushColored(kFgMinMaxGrey, fmtNum(stats.max[markerIdx]));
+    }
+    else if (statsVisible && markerIdx >= 0)
+    {
+      pushPlain("viewport: no finite samples");
     }
     else
     {
-      rangeBuf = finiteValue(curVal)
-                     ? fmt::format("min {:.{}f}  max {:.{}f}  step {}/{}  now {:.{}f}",
-                                   dataLo, decimals, dataHi, decimals, markerIdx + 1,
-                                   static_cast<int>(series.size()), curVal, decimals)
-                     : fmt::format("min {:.{}f}  max {:.{}f}  step {}/{}  now -",
-                                   dataLo, decimals, dataHi, decimals, markerIdx + 1,
-                                   static_cast<int>(series.size()));
+      pushPlain("min ");
+      pushPlain(fmtNum(dataLo));
+      pushPlain("  max ");
+      pushPlain(fmtNum(dataHi));
     }
+    pushPlain("  step ");
+    pushPlain(fmt::format("{}/{}", markerIdx + 1, static_cast<int>(series.size())));
+    pushPlain("  value ");
+    if (finiteValue(curVal))
+      pushColored(kFgValueGreen, fmtNum(curVal));
+    else
+      pushPlain("-");
 
     std::ostringstream os;
 
@@ -1300,13 +1342,18 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
     for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
     os << "\xe2\x94\x90" << kEscReset;
 
-    auto writeRow = [&](int rowOffset, std::string_view label, bool bold = false) {
+    // `visibleWidth` overrides utf8Width(label) for strings that already
+    // contain ANSI colour escapes (rangeBuf). When negative, we measure
+    // the label as plain text.
+    auto writeRow = [&](int rowOffset, std::string_view label, bool bold = false,
+                        int visibleWidth = -1) {
       putAt(os, top + rowOffset, left);
       os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
          << kEscFgWhite;
       if (bold) os << kEscBold;
       os << ' ' << label;
-      pad(os, interiorW - 1 - utf8Width(label));
+      const int w = visibleWidth >= 0 ? visibleWidth : utf8Width(std::string(label));
+      pad(os, interiorW - 1 - w);
       os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
     };
 
@@ -1321,7 +1368,7 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
               : timeLabels.front();
       writeRow(rowCursor++, timeStr, false);
     }
-    writeRow(rowCursor++, rangeBuf, false);
+    writeRow(rowCursor++, rangeBuf, false, rangeBufVisible);
     // chart starts at top + chartTopOffset (computed outside this lambda).
 
     // Chart rows.
@@ -1404,6 +1451,24 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
 
   int idx = std::clamp(currentIndex, 0, static_cast<int>(series.size()) - 1);
   bool dragging = false;
+  bool animating = false;
+
+  // Brief flashes a "Computing viewport stats…" message in the chart's
+  // status row before invoking the (potentially slow) stats fetch, so a
+  // multi-second scan doesn't look like the popup hung. The next render
+  // overwrites the message with the real info row.
+  auto showComputing = [&]() {
+    std::ostringstream os;
+    putAt(os, top + (showTimeRow ? 4 : 3), left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite;
+    static const std::string_view msg = " Computing viewport stats\xe2\x80\xa6";
+    os << msg;
+    pad(os, interiorW - utf8Width(std::string(msg)));
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+    const std::string s = os.str();
+    std::fwrite(s.data(), 1, s.size(), stdout);
+    std::fflush(stdout);
+  };
 
   // Translate a screen cell column to a series index, or -1 if outside the
   // chart's horizontal span. The chart starts at left + 1 + chartLeftPad
@@ -1418,10 +1483,30 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   while (true)
   {
     renderFrame(idx);
-    int ch = wgetch(itsStatusWin);
+    // When animating, wait at most animationDelayMs ms for input; if no
+    // key arrives, advance the marker one step (wrapping at the end).
+    int ch = ERR;
+    if (animating && animationDelayMs != nullptr)
+    {
+      wtimeout(itsStatusWin, *animationDelayMs);
+      ch = wgetch(itsStatusWin);
+      wtimeout(itsStatusWin, -1);
+    }
+    else
+    {
+      ch = wgetch(itsStatusWin);
+    }
     auto invokeChange = [&]() {
       if (onTimeChange) onTimeChange(idx);
     };
+    if (ch == ERR)
+    {
+      // Animation tick: advance and wrap.
+      const int n = static_cast<int>(series.size());
+      idx = (idx + 1) % n;
+      invokeChange();
+      continue;
+    }
     if (ch == KEY_LEFT)
     {
       if (idx > 0)
@@ -1458,6 +1543,22 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
       }
       continue;
     }
+    if (ch == ' ' && animationDelayMs != nullptr)
+    {
+      animating = !animating;
+      continue;
+    }
+    if (ch == KEY_UP && animationDelayMs != nullptr)
+    {
+      // Same scaling as App's outside-popup KEY_UP / KEY_DOWN.
+      *animationDelayMs = std::max(50, static_cast<int>(*animationDelayMs * 0.7));
+      continue;
+    }
+    if (ch == KEY_DOWN && animationDelayMs != nullptr)
+    {
+      *animationDelayMs = std::min(2000, static_cast<int>(*animationDelayMs / 0.7));
+      continue;
+    }
     if (ch == 's' || ch == 'S')
     {
       // Toggle the viewport-stats overlay. First toggle pulls the data
@@ -1466,6 +1567,7 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
       if (!statsAttempted && computeStats)
       {
         statsAttempted = true;
+        showComputing();
         stats = computeStats();
       }
       const bool hasAnyStats = !stats.empty();
