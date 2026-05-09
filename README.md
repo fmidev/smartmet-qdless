@@ -42,7 +42,14 @@ adapter.
   temperature, wind-speed ≠ ocean-current, etc.)
 - Coastlines, borders and rivers from `gshhg-gmt-nc4`, with area /
   roundness filters that drop fractal noise (Saimaa) while keeping real
-  lakes (Vänern)
+  lakes (Vänern). Drawn by default as a thin braille overlay (~1/4 cell
+  wide) so the gridded data shows through; cycle to the older thick
+  half-cell rasterisation or off with `c` / `b`
+- Multi-panel layouts (`F2` cycles single → side-by-side → 2x2); each
+  panel has its own parameter, level, and palette while sharing the
+  viewport, time, marker, and overlay toggles. `Tab`, digit keys `1`–`4`,
+  and mouse clicks switch the active panel; parameter / level / legend /
+  probe / cross-section / PNG export all act on it
 - Lat/lon graticule, wind arrows, legend popup, help popup
 - City overlay (top-N most-populous in view, with names) sourced from
   GeoNames `cities1000`
@@ -77,15 +84,19 @@ The full list is in the in-app help popup (`?`). Quick reference:
 | `h` `j` `k` `l` or Shift+arrow or drag | Pan |
 | click | Time-series probe at point |
 | `g` | Legend popup |
-| `c` | Toggle coastlines |
-| `b` | Toggle borders |
+| `c` | Coastlines: braille → thick → off |
+| `b` | Borders: braille → thick → off |
 | `n` | Toggle lat/lon graticule |
 | `w` | Toggle wind arrows |
 | `i` | Toggle city overlay |
 | `PgDn` / `PgUp` | Cities: denser / sparser (5 → 500) |
 | `/` | Place search (auto-opens probe at the pick) |
 | `x` | Cross-section (click two endpoints) |
-| `e` | Export PNG |
+| `e` | Export PNG (active panel) |
+| `F2` | Cycle panel layout: single → side-by-side → 2x2 |
+| `Tab` / `Shift+Tab` | Next / previous active panel |
+| `1`–`4` | Activate panel by number |
+| click | Activate the panel under the cursor |
 | `?` | This help |
 
 PgUp / PgDn were chosen for the city density step because they're in the
@@ -104,6 +115,12 @@ QWERTZ, Finnish) and need no modifier.
 | ![pressure-level cross-section](docs/images/pressurelevel_cross_section.png) <br/>Cross-section across pressure levels | ![model-level cross-section](docs/images/model_level_cross_section.png) <br/>Cross-section across model (hybrid) levels |
 | ![timeseries probe](docs/images/timeseries.png) <br/>Click-to-probe braille time series | |
 
+The screenshots above were taken before the braille coastline overlay
+landed, so they show the older half-cell "thick" style. The current
+default renders coastlines and political borders much thinner than what
+you see in these images; press `c` or `b` to cycle back to the thick
+style if you prefer the look.
+
 ## Build
 
 ```bash
@@ -116,10 +133,17 @@ make install         # install to $PREFIX/bin (default /usr/bin)
 ## Usage
 
 ```bash
-qdless data.sqd                        # interactive viewer
+qdless data.sqd                              # interactive viewer
 qdless --param Temperature data.grib2
 qdless --palette seatemperature sst.nc
-qdless --dump data.sqd                 # render one frame to stdout and exit
+qdless --dump data.sqd                       # render one frame to stdout and exit
+
+# Multi-panel: -p takes a comma-separated list. 1 -> single, 2 -> side,
+# 3 or 4 -> 2x2; >4 is rejected. With three parameters the 4th panel
+# clones the first.
+qdless -p Temperature,Pressure data.sqd      # side-by-side
+qdless -p T,RH,P,W data.sqd                  # 2x2 quad
+qdless --layout side data.sqd                # explicit override
 ```
 
 In `--dump` mode the first stdout line is a header summarising the
