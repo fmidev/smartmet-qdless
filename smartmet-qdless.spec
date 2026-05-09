@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 7%{?dist}.fmi
+Release: 8%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,22 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-8.fmi
+- Fix GRIB rendering for global lat/lon grids and parameters whose
+  newbase / grid-files FMI ID namespaces disagree. `boundingBox()`
+  collapsed to a 0.25° sliver on grids that wrap the antimeridian
+  (corner longitudes wrap to [-180,180], so min/max-of-corners loses
+  the actual span); the renderer therefore sampled a single column and
+  stretched it horizontally. `paramShortName()` looked the file's id up
+  in grid-files' FmiParameterDef table, which uses different numeric
+  ids than newbase (id 13 = Humidity in newbase but GROWDEV-D in
+  grid-files), so RH-PRCNT GRIBs were labelled "GROWDEV-D" and didn't
+  match the humidity palette. Fixed by routing (u,v) through the grid's
+  native (i,j) coordinates via `getGridLatLonCoordinatesByGridPosition`
+  / `getGridPointByLatLonCoordinates` (mirroring how QueryDataSource
+  uses NFmiArea), and by displaying the file's own newbase parameter
+  name instead of the cross-namespace id lookup.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-7.fmi
 - New `t` key cycles the cell render style: sextants → triangles →
   squares. Sextants (2x3 sub-pixel grid, 64 glyphs from Symbols for
