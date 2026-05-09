@@ -35,6 +35,74 @@ namespace Qdless
 {
 namespace
 {
+// Split the map area into panel sub-rectangles separated by 1-cell gutters.
+// If the area is too small to split cleanly, fall back to a single panel
+// covering the full area.
+std::vector<PanelRect> computePanelRects(int row, int col, int height, int width,
+                                         PanelLayout layout)
+{
+  if (width <= 0 || height <= 0) return {};
+  const PanelRect full{row, col, height, width};
+  switch (layout)
+  {
+    case PanelLayout::Single:
+      return {full};
+    case PanelLayout::Side:
+    {
+      if (width < 4) return {full};
+      const int leftW = (width - 1) / 2;
+      const int rightW = width - 1 - leftW;
+      return {
+          {row, col, height, leftW},
+          {row, col + leftW + 1, height, rightW},
+      };
+    }
+    case PanelLayout::Quad:
+    {
+      if (width < 4 || height < 4) return {full};
+      const int leftW = (width - 1) / 2;
+      const int rightW = width - 1 - leftW;
+      const int topH = (height - 1) / 2;
+      const int botH = height - 1 - topH;
+      return {
+          {row, col, topH, leftW},
+          {row, col + leftW + 1, topH, rightW},
+          {row + topH + 1, col, botH, leftW},
+          {row + topH + 1, col + leftW + 1, botH, rightW},
+      };
+    }
+  }
+  return {full};
+}
+
+const char* panelLayoutLabel(PanelLayout l)
+{
+  switch (l)
+  {
+    case PanelLayout::Single: return "Layout: single";
+    case PanelLayout::Side:   return "Layout: side-by-side";
+    case PanelLayout::Quad:   return "Layout: 2x2";
+  }
+  return "Layout: ?";
+}
+
+// Append a raw-ANSI cursor positioning + glyph for each cell of a vertical
+// or horizontal separator. `glyph` is a UTF-8 box-drawing character.
+void appendSeparator(std::ostringstream& os, int row, int col, int len, bool vertical,
+                     const char* glyph)
+{
+  // ESC[<row>;<col>H is 1-based; map our 0-based positions accordingly.
+  // Use a dim cyan-on-black scheme that matches the popup borders.
+  static const char* kReset = "\x1b[0m";
+  static const char* kStyle = "\x1b[40m\x1b[36m";  // bg black, fg cyan
+  for (int i = 0; i < len; ++i)
+  {
+    const int r = vertical ? row + i : row;
+    const int c = vertical ? col : col + i;
+    os << "\x1b[" << (r + 1) << ';' << (c + 1) << 'H' << kStyle << glyph << kReset;
+  }
+}
+
 struct TerminalSize
 {
   int cols;
@@ -427,7 +495,9 @@ App::App(Options opts) : itsOpts(std::move(opts))
     return static_cast<std::size_t>(requested);
   };
   itsSource->selectTimeIndex(resolveIndex(itsOpts.timeIndex, itsSource->timeCount()));
-  itsSource->selectLevelIndex(resolveIndex(itsOpts.levelIndex, itsSource->levelCount()));
+  const std::size_t levelIdx = resolveIndex(itsOpts.levelIndex, itsSource->levelCount());
+  itsSource->selectLevelIndex(levelIdx);
+  activePanel().levelIndex = levelIdx;
 
   loadPalette();
   loadCoastlines();
@@ -1495,7 +1565,72 @@ void App::selectLevel(int newIndex)
 {
   if (newIndex < 0 || newIndex >= static_cast<int>(itsSource->levelCount())) return;
   itsSource->selectLevelIndex(static_cast<unsigned long>(newIndex));
+  activePanel().levelIndex = static_cast<std::size_t>(newIndex);
   itsOpts.levelIndex = newIndex;
+}
+
+void App::cyclePanelLayout()
+{
+  PanelLayout next = PanelLayout::Single;
+  switch (itsPanelLayout)
+  {
+    case PanelLayout::Single: next = PanelLayout::Side; break;
+    case PanelLayout::Side:   next = PanelLayout::Quad; break;
+    case PanelLayout::Quad:   next = PanelLayout::Single; break;
+  }
+  setPanelLayout(next);
+}
+
+void App::setPanelLayout(PanelLayout layout)
+{
+  itsPanelLayout = layout;
+  std::size_t want = 1;
+  switch (layout)
+  {
+    case PanelLayout::Single: want = 1; break;
+    case PanelLayout::Side:   want = 2; break;
+    case PanelLayout::Quad:   want = 4; break;
+  }
+
+  // Grow: clone the active panel for each new slot and rotate paramIndex
+  // so the user immediately sees different data.
+  if (itsPanels.size() < want)
+  {
+    const Panel base = activePanel();
+    const int n = static_cast<int>(itsParamIds.size());
+    while (itsPanels.size() < want)
+    {
+      const int slot = static_cast<int>(itsPanels.size());
+      Panel p = base;
+      if (n > 0) p.paramIndex = (base.paramIndex + slot) % n;
+      itsPanels.push_back(p);
+
+      // Resolve palette / value-shift for the new panel.
+      const int savedActive = itsActivePanel;
+      itsActivePanel = slot;
+      if (p.paramIndex >= 0 && p.paramIndex < n)
+        itsSource->selectParamId(itsParamIds[p.paramIndex]);
+      if (p.levelIndex < itsSource->levelCount())
+        itsSource->selectLevelIndex(p.levelIndex);
+      loadPalette();
+      itsActivePanel = savedActive;
+    }
+  }
+  // Shrink: drop trailing panels.
+  if (itsPanels.size() > want)
+  {
+    itsPanels.resize(want);
+    if (itsActivePanel >= static_cast<int>(itsPanels.size())) itsActivePanel = 0;
+  }
+
+  // Restore source to the active panel's selection.
+  if (activePanel().paramIndex >= 0 &&
+      activePanel().paramIndex < static_cast<int>(itsParamIds.size()))
+    itsSource->selectParamId(itsParamIds[activePanel().paramIndex]);
+  if (activePanel().levelIndex < itsSource->levelCount())
+    itsSource->selectLevelIndex(activePanel().levelIndex);
+
+  itsLastMessage = panelLayoutLabel(layout);
 }
 
 bool App::cellToViewport(const UI& ui, int cellX, int cellY, float& u, float& v) const
@@ -1812,6 +1947,10 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       itsDragging = false;
       return true;
 
+    case KEY_F(2):
+      cyclePanelLayout();
+      return true;
+
     case ' ':  // Space: toggle animation
       itsAnimating = !itsAnimating;
       return true;
@@ -1963,31 +2102,78 @@ void App::drawMap(UI& ui)
 {
   const auto& l = ui.layout();
   if (l.map.height < 2 || l.map.width < 2) return;
-  int subWidth = l.map.width * 2;
-  int subHeight = l.map.height * 2;
 
   // Re-pick coastline resolution for the current viewport. Cheap when the
   // selected file is unchanged; reads ~100ms at h-resolution worst case.
   loadCoastlines();
 
-  float dataMin = 0;
-  float dataMax = 0;
-  auto pixels = sampleSlice(subWidth, subHeight, dataMin, dataMax);
-  if (itsShowGraticule) overlayGraticule(pixels, subWidth, subHeight);
-  overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
-  overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
-  overlayCities(pixels, subWidth, subHeight);
-  overlayMarker(pixels, subWidth, subHeight);
+  const auto rects =
+      computePanelRects(l.map.row, l.map.col, l.map.height, l.map.width, itsPanelLayout);
 
-  // Bypass ncurses: write raw ANSI directly to stdout, positioned at map origin.
   std::ostringstream os;
-  itsRenderer.render(os, pixels, subWidth, subHeight, l.map.row, l.map.col);
+  const int savedActive = itsActivePanel;
 
-  // Wind arrow + city label overlays drawn AFTER the raster so glyphs sit
-  // on top of the quadrant blocks.
-  if (itsShowWindArrows)
-    os << buildWindArrows(l.map.width, l.map.height, l.map.row, l.map.col);
-  os << buildCityLabels(l.map.width, l.map.height, l.map.row, l.map.col);
+  for (std::size_t i = 0; i < rects.size() && i < itsPanels.size(); ++i)
+  {
+    const PanelRect& r = rects[i];
+    if (r.width < 2 || r.height < 2) continue;
+
+    Panel& panel = itsPanels[i];
+    if (panel.paramIndex >= 0 && panel.paramIndex < static_cast<int>(itsParamIds.size()))
+      itsSource->selectParamId(itsParamIds[panel.paramIndex]);
+    if (panel.levelIndex < itsSource->levelCount())
+      itsSource->selectLevelIndex(panel.levelIndex);
+
+    // sampleSlice() / transform() / overlays read activePanel(); make this
+    // panel active for the duration of its render.
+    itsActivePanel = static_cast<int>(i);
+
+    const int subW = r.width * 2;
+    const int subH = r.height * 2;
+    float dMin = 0;
+    float dMax = 0;
+    auto pixels = sampleSlice(subW, subH, dMin, dMax);
+    if (itsShowGraticule) overlayGraticule(pixels, subW, subH);
+    overlayPolylines(pixels, subW, subH, itsCoastlines, Rgb{0, 0, 0});
+    overlayPolylines(pixels, subW, subH, itsBorders, Rgb{90, 90, 90});
+    overlayCities(pixels, subW, subH);
+    overlayMarker(pixels, subW, subH);
+
+    itsRenderer.render(os, pixels, subW, subH, r.row, r.col);
+
+    if (itsShowWindArrows)
+      os << buildWindArrows(r.width, r.height, r.row, r.col);
+    os << buildCityLabels(r.width, r.height, r.row, r.col);
+  }
+
+  // Restore source + active panel to user's selection so probe / legend /
+  // cross-section / timeline see the right state.
+  itsActivePanel = savedActive;
+  if (activePanel().paramIndex >= 0 &&
+      activePanel().paramIndex < static_cast<int>(itsParamIds.size()))
+    itsSource->selectParamId(itsParamIds[activePanel().paramIndex]);
+  if (activePanel().levelIndex < itsSource->levelCount())
+    itsSource->selectLevelIndex(activePanel().levelIndex);
+
+  // Separators between panels. Only drawn when the layout actually split.
+  if (rects.size() > 1)
+  {
+    if (itsPanelLayout == PanelLayout::Side && rects.size() == 2)
+    {
+      const int gutterCol = rects[0].col + rects[0].width;
+      appendSeparator(os, l.map.row, gutterCol, l.map.height, true, "\xe2\x94\x82");
+    }
+    else if (itsPanelLayout == PanelLayout::Quad && rects.size() == 4)
+    {
+      const int gutterCol = rects[0].col + rects[0].width;
+      const int gutterRow = rects[0].row + rects[0].height;
+      appendSeparator(os, l.map.row, gutterCol, l.map.height, true, "\xe2\x94\x82");
+      appendSeparator(os, gutterRow, l.map.col, l.map.width, false, "\xe2\x94\x80");
+      // Cross at the intersection.
+      os << "\x1b[" << (gutterRow + 1) << ';' << (gutterCol + 1) << "H\x1b[40m\x1b[36m"
+            "\xe2\x94\xbc\x1b[0m";
+    }
+  }
 
   std::string s = os.str();
   std::fwrite(s.data(), 1, s.size(), stdout);

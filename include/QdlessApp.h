@@ -42,9 +42,29 @@ struct Options
 struct Panel
 {
   int paramIndex = 0;
+  std::size_t levelIndex = 0;
   Palette palette;
   float valueScale = 1.0F;
   float valueOffset = 0.0F;
+};
+
+// Sub-rectangle of cell coordinates inside the map area. Width/height in
+// terminal cells; row/col are absolute screen positions.
+struct PanelRect
+{
+  int row = 0;
+  int col = 0;
+  int height = 0;
+  int width = 0;
+};
+
+// Display tiling. Panels share viewport / time / overlays; only parameter,
+// level, and palette differ. Cycled with F2.
+enum class PanelLayout
+{
+  Single,  // 1 panel — full map area
+  Side,    // 2 panels, side-by-side (meteorologist classic)
+  Quad,    // 2x2 grid
 };
 
 // Sub-rectangle of NFmiArea coordinates we are currently displaying.
@@ -92,6 +112,10 @@ class App
   // Interactive helpers:
   void selectParam(int newIndex);
   void selectLevel(int newIndex);
+  void cyclePanelLayout();
+  // Resize / re-fill itsPanels for `layout`. New panels are clones of the
+  // active panel with paramIndex rotated by their position in the vector.
+  void setPanelLayout(PanelLayout layout);
   // Returns true if a redraw is needed; sets quit=true on quit.
   bool handleKey(int key, UI& ui, bool& quit);
   void drawMap(UI& ui);
@@ -115,11 +139,12 @@ class App
   // Available parameters (newbase numeric IDs), in file order.
   std::vector<int> itsParamIds;
 
-  // Display panels. Always non-empty; today size() == 1 (single full-screen
-  // panel). Side-by-side and 2x2 layouts will grow this vector. The active
-  // panel receives parameter / level / palette / probe commands.
+  // Display panels. Always non-empty; size depends on itsPanelLayout
+  // (1, 2, or 4). The active panel receives parameter / level / palette /
+  // probe commands.
   std::vector<Panel> itsPanels;
   int itsActivePanel = 0;
+  PanelLayout itsPanelLayout = PanelLayout::Single;
   Panel& activePanel() { return itsPanels[itsActivePanel]; }
   const Panel& activePanel() const { return itsPanels[itsActivePanel]; }
 
