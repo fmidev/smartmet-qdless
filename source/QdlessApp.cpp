@@ -2287,22 +2287,24 @@ void App::drawMap(UI& ui)
     itsSource->selectLevelIndex(activePanel().levelIndex);
 
   // Separators between panels. Only drawn when the layout actually split.
+  // Use one-eighth-block glyphs (▏ U+258F at the cell's left edge, ▔ U+2594
+  // at the cell's top edge) for a much thinner border than ─/│ would give.
+  // The two glyphs anchor to adjacent cell edges, so the Quad cross meets
+  // cleanly when the vertical pass runs after the horizontal pass and wins
+  // at the intersection cell.
   if (rects.size() > 1)
   {
     if (itsPanelLayout == PanelLayout::Side && rects.size() == 2)
     {
       const int gutterCol = rects[0].col + rects[0].width;
-      appendSeparator(os, l.map.row, gutterCol, l.map.height, true, "\xe2\x94\x82");
+      appendSeparator(os, l.map.row, gutterCol, l.map.height, true, "\xe2\x96\x8f");
     }
     else if (itsPanelLayout == PanelLayout::Quad && rects.size() == 4)
     {
       const int gutterCol = rects[0].col + rects[0].width;
       const int gutterRow = rects[0].row + rects[0].height;
-      appendSeparator(os, l.map.row, gutterCol, l.map.height, true, "\xe2\x94\x82");
-      appendSeparator(os, gutterRow, l.map.col, l.map.width, false, "\xe2\x94\x80");
-      // Cross at the intersection.
-      os << "\x1b[" << (gutterRow + 1) << ';' << (gutterCol + 1) << "H\x1b[40m\x1b[36m"
-            "\xe2\x94\xbc\x1b[0m";
+      appendSeparator(os, gutterRow, l.map.col, l.map.width, false, "\xe2\x96\x94");
+      appendSeparator(os, l.map.row, gutterCol, l.map.height, true, "\xe2\x96\x8f");
     }
 
     // Per-panel labels: "[N] paramName" at top-left of each panel. The active

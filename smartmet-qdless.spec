@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 3%{?dist}.fmi
+Release: 4%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-4.fmi
+- Panel separators use one-eighth-block glyphs (▏ U+258F vertical, ▔
+  U+2594 horizontal) instead of the heavier ─/│ box-drawing characters.
+  The lines are anchored to cell edges so the Quad cross meets cleanly
+  when the vertical pass overwrites the horizontal at the intersection.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-3.fmi
 - -p accepts a comma-separated list of parameters and picks the layout
   from the count: 1 -> single, 2 -> side-by-side, 3 or 4 -> 2x2; >4 is an
