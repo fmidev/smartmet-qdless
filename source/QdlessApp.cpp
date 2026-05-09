@@ -68,6 +68,28 @@ const char* lineStyleLabel(LineStyle s)
   return "?";
 }
 
+CornerStyle nextCornerStyle(CornerStyle s)
+{
+  switch (s)
+  {
+    case CornerStyle::Sextant:       return CornerStyle::SmallTriangle;
+    case CornerStyle::SmallTriangle: return CornerStyle::Square;
+    case CornerStyle::Square:        return CornerStyle::Sextant;
+  }
+  return CornerStyle::Sextant;
+}
+
+const char* cornerStyleLabel(CornerStyle s)
+{
+  switch (s)
+  {
+    case CornerStyle::Sextant:       return "sextants";
+    case CornerStyle::SmallTriangle: return "triangles";
+    case CornerStyle::Square:        return "squares";
+  }
+  return "?";
+}
+
 // Encode a braille codepoint U+2800+mask as a 3-byte UTF-8 string. Mirrors
 // the helper in QdlessUI.cpp (kept duplicated to avoid exposing it as a
 // public symbol; the layouts are identical).
@@ -800,8 +822,9 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   const int desiredW = std::min(80, COLS - 16);
   const int chartW = std::max(20, desiredW);
   const int chartH = nLevels;
+  const int subRows = subRowsForStyle(itsCornerStyle);
   const int subW = chartW * 2;
-  const int subH = chartH * 2;
+  const int subH = chartH * subRows;
 
   // Compute label width for level labels.
   int labelW = 0;
@@ -834,8 +857,8 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
       const double lon = lon1 + frac * (lon2 - lon1);
       const float val = transform(itsSource->interpolatedValue(lat, lon));
       const Rgb c = activePanel().palette.lookup(val);
-      pixels[static_cast<std::size_t>(li * 2) * subW + sx] = c;
-      pixels[static_cast<std::size_t>(li * 2 + 1) * subW + sx] = c;
+      for (int sr = 0; sr < subRows; ++sr)
+        pixels[static_cast<std::size_t>(li * subRows + sr) * subW + sx] = c;
     }
   }
   itsSource->selectLevelIndex(savedLevel);
@@ -877,16 +900,14 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
     os << fmt::format("{:>{}g}", levelValues[levelOrder[cy]], labelW) << " \xe2\x94\xa4";
 
     // Render this row's chart cells using a tiny Renderer call.
-    // Build the slice: 2 sub-rows of pixels for this level.
-    std::vector<Rgb> rowPixels(static_cast<std::size_t>(subW) * 2);
-    for (int sx = 0; sx < subW; ++sx)
-    {
-      rowPixels[sx] = pixels[static_cast<std::size_t>(cy * 2) * subW + sx];
-      rowPixels[static_cast<std::size_t>(subW) + sx] =
-          pixels[static_cast<std::size_t>(cy * 2 + 1) * subW + sx];
-    }
+    // Build the slice: subRows sub-rows of pixels for this level.
+    std::vector<Rgb> rowPixels(static_cast<std::size_t>(subW) * subRows);
+    for (int sr = 0; sr < subRows; ++sr)
+      for (int sx = 0; sx < subW; ++sx)
+        rowPixels[static_cast<std::size_t>(sr) * subW + sx] =
+            pixels[static_cast<std::size_t>(cy * subRows + sr) * subW + sx];
     // Render at the chart column origin.
-    itsRenderer.render(os, rowPixels, subW, 2, top + 1 + cy, left + 1 + labelW + 2 + 1);
+    itsRenderer.render(os, rowPixels, subW, subRows, top + 1 + cy, left + 1 + labelW + 2 + 1);
 
     // Right padding inside the box.
     pos(1 + cy, interiorW + 1);  // not used; we just close the right border below.
@@ -1413,9 +1434,10 @@ void App::appendPolylineBraille(std::ostringstream& os,
                                 int originRow, int originCol) const
 {
   if (polylines.empty() || subWidth <= 0) return;
+  const int subRows = subRowsForStyle(itsCornerStyle);
   const int cellW = subWidth / 2;
   const int subHeight = static_cast<int>(pixels.size()) / std::max(1, subWidth);
-  const int cellH = subHeight / 2;
+  const int cellH = subHeight / subRows;
   if (cellW <= 0 || cellH <= 0) return;
 
   // Higher-resolution sub-cell grid for the line: 2 cols × 4 rows per cell.
@@ -1491,7 +1513,7 @@ void App::appendPolylineBraille(std::ostringstream& os,
         }
       }
       if (cellMask == 0U) continue;
-      const Rgb bg = pixels[static_cast<std::size_t>(cy * 2) * subWidth + (cx * 2)];
+      const Rgb bg = pixels[static_cast<std::size_t>(cy * subRows) * subWidth + (cx * 2)];
       out += "\x1b[";
       out += std::to_string(originRow + cy + 1);
       out += ';';
@@ -2117,6 +2139,13 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       return true;
     }
 
+    case 't':
+    case 'T':
+      itsCornerStyle = nextCornerStyle(itsCornerStyle);
+      itsRenderer.setCornerStyle(itsCornerStyle);
+      itsLastMessage = std::string("Corners: ") + cornerStyleLabel(itsCornerStyle);
+      return true;
+
     case 'n':
     case 'N':
       itsShowGraticule = !itsShowGraticule;
@@ -2417,7 +2446,7 @@ void App::drawMap(UI& ui)
     itsActivePanel = static_cast<int>(i);
 
     const int subW = r.width * 2;
-    const int subH = r.height * 2;
+    const int subH = r.height * subRowsForStyle(itsCornerStyle);
     float dMin = 0;
     float dMax = 0;
     auto pixels = sampleSlice(subW, subH, dMin, dMax);

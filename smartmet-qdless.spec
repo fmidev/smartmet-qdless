@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 6%{?dist}.fmi
+Release: 7%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,20 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-7.fmi
+- New `t` key cycles the cell render style: sextants → triangles →
+  squares. Sextants (2x3 sub-pixel grid, 64 glyphs from Symbols for
+  Legacy Computing U+1FB00) is the new default — 1.5x vertical
+  resolution and near-square sub-pixels in a typical 1:2 terminal
+  cell, so colour clustering is more spatially meaningful and diagonal
+  boundaries land in 64 places per cell instead of 16. Triangles is
+  the previous quadrant-block rendering with 1/12-cell corner-triangle
+  bevels (U+1FB57, U+1FB62, U+1FB3C, U+1FB47) substituted on 3:1 cells
+  to soften staircase boundaries. Squares is the original 16-glyph
+  quadrant rendering and the universal-font fallback (Block Elements
+  U+2580..259F, Unicode 1.1, ships with every monospace font); both
+  sextants and triangles need a font that includes the U+1FB00 block.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-6.fmi
 - Coastline (`c`) and border (`b`) keys cycle braille → thick → off
   instead of toggling on/off. Braille is the default; thick is the old

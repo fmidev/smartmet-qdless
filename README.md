@@ -32,8 +32,11 @@ adapter.
 
 ## Features
 
-- Quadrant-block (¼-cell) raster with 24-bit truecolor or xterm-256
-  fallback
+- Sextant-block (2×3 sub-cell) raster with 24-bit truecolor or xterm-256
+  fallback. `t` cycles cell style: sextants (default, 64 glyphs from the
+  Symbols-for-Legacy-Computing block) → triangles (¼-cell quadrants with
+  1/12-cell corner-triangle bevels on 3:1 cells, smoother diagonals) →
+  squares (¼-cell quadrants only, universal-font fallback)
 - Native projection rendering for QueryData (polar stereographic,
   Lambert, rotated lat/lon, …); GRIB / NetCDF render in lat/lon
 - 80+ pre-baked palettes from `wms-conf`, plus a built-in fallback ramp
@@ -86,6 +89,7 @@ The full list is in the in-app help popup (`?`). Quick reference:
 | `g` | Legend popup |
 | `c` | Coastlines: braille → thick → off |
 | `b` | Borders: braille → thick → off |
+| `t` | Cell style: sextants → triangles → squares (font fallback) |
 | `n` | Toggle lat/lon graticule |
 | `w` | Toggle wind arrows |
 | `i` | Toggle city overlay |

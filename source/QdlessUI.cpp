@@ -578,6 +578,7 @@ void UI::popupHelp()
       {"g",                         "Legend"},
       {"c",                         "Coastlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off"},
       {"b",                         "Borders: braille \xe2\x86\x92 thick \xe2\x86\x92 off"},
+      {"t",                         "Cell style: sextants \xe2\x86\x92 triangles \xe2\x86\x92 squares (font fallback)"},
       {"n",                         "Toggle lat/lon graticule"},
       {"w",                         "Toggle wind arrows"},
       {"i",                         "Toggle city overlay"},
