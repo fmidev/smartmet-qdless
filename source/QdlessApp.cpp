@@ -46,6 +46,28 @@ const char* panelLayoutLabel(PanelLayout l)
   return "Layout: ?";
 }
 
+LineStyle nextLineStyle(LineStyle s)
+{
+  switch (s)
+  {
+    case LineStyle::Braille: return LineStyle::Thick;
+    case LineStyle::Thick:   return LineStyle::None;
+    case LineStyle::None:    return LineStyle::Braille;
+  }
+  return LineStyle::Braille;
+}
+
+const char* lineStyleLabel(LineStyle s)
+{
+  switch (s)
+  {
+    case LineStyle::Braille: return "braille";
+    case LineStyle::Thick:   return "thick";
+    case LineStyle::None:    return "off";
+  }
+  return "?";
+}
+
 // Encode a braille codepoint U+2800+mask as a 3-byte UTF-8 string. Mirrors
 // the helper in QdlessUI.cpp (kept duplicated to avoid exposing it as a
 // public symbol; the layouts are identical).
@@ -453,6 +475,12 @@ App::App(Options opts) : itsOpts(std::move(opts))
   itsPanels.resize(1);
   buildIndices();
 
+  // Seed live overlay styles from CLI flags. After startup these are
+  // cycled by the `c` / `b` keys; itsOpts.noCoastline / noBorders are not
+  // updated further.
+  if (itsOpts.noCoastline) itsCoastlineStyle = LineStyle::None;
+  if (itsOpts.noBorders) itsBorderStyle = LineStyle::None;
+
   // Apply parameter overrides. -p accepts a comma-separated list:
   //   1 entry  -> Single layout
   //   2        -> Side
@@ -686,7 +714,7 @@ void App::loadCoastlines()
     }
   const auto span = static_cast<float>(std::max(maxLon - minLon, maxLat - minLat));
 
-  if (!itsOpts.noCoastline)
+  if (itsCoastlineStyle != LineStyle::None)
   {
     auto path = Coastline::pickFile(itsOpts.coastlineDir, "GSHHS", span);
     if (!path.empty() && path != itsCoastlinePath)
@@ -696,7 +724,7 @@ void App::loadCoastlines()
       itsCoastlinePath = path;
     }
   }
-  if (!itsOpts.noBorders)
+  if (itsBorderStyle != LineStyle::None)
   {
     auto path = Coastline::pickFile(itsOpts.coastlineDir, "border", span);
     if (!path.empty() && path != itsBorderPath)
@@ -2055,31 +2083,39 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
     case 'b':
     case 'B':
-      itsOpts.noBorders = !itsOpts.noBorders;
-      if (itsOpts.noBorders)
+    {
+      const LineStyle prev = itsBorderStyle;
+      itsBorderStyle = nextLineStyle(prev);
+      if (itsBorderStyle == LineStyle::None)
       {
         itsBorders.clear();
         itsBorderPath.clear();
       }
-      else
+      else if (prev == LineStyle::None)
       {
         itsBorderPath.clear();  // force reload on next drawMap
       }
+      itsLastMessage = std::string("Borders: ") + lineStyleLabel(itsBorderStyle);
       return true;
+    }
 
     case 'c':
     case 'C':
-      itsOpts.noCoastline = !itsOpts.noCoastline;
-      if (itsOpts.noCoastline)
+    {
+      const LineStyle prev = itsCoastlineStyle;
+      itsCoastlineStyle = nextLineStyle(prev);
+      if (itsCoastlineStyle == LineStyle::None)
       {
         itsCoastlines.clear();
         itsCoastlinePath.clear();
       }
-      else
+      else if (prev == LineStyle::None)
       {
         itsCoastlinePath.clear();
       }
+      itsLastMessage = std::string("Coastlines: ") + lineStyleLabel(itsCoastlineStyle);
       return true;
+    }
 
     case 'n':
     case 'N':
@@ -2386,16 +2422,23 @@ void App::drawMap(UI& ui)
     float dMax = 0;
     auto pixels = sampleSlice(subW, subH, dMin, dMax);
     if (itsShowGraticule) overlayGraticule(pixels, subW, subH);
+    // Thick mode rasterises into the data buffer before the renderer so the
+    // line shows as a half-cell quadrant block.
+    if (itsCoastlineStyle == LineStyle::Thick)
+      overlayPolylines(pixels, subW, subH, itsCoastlines, Rgb{0, 0, 0});
+    if (itsBorderStyle == LineStyle::Thick)
+      overlayPolylines(pixels, subW, subH, itsBorders, Rgb{90, 90, 90});
     overlayCities(pixels, subW, subH);
     overlayMarker(pixels, subW, subH);
 
     itsRenderer.render(os, pixels, subW, subH, r.row, r.col);
 
-    // Coastlines and borders use a braille overlay on top of the rendered
-    // quadrant blocks so the lines are about 1/2 to 1/4 of a cell wide
-    // instead of half a cell.
-    appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subW, r.row, r.col);
-    appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subW, r.row, r.col);
+    // Braille mode draws on top of the rendered quadrant blocks so the
+    // line is just a few dots wide; data colour shows through behind it.
+    if (itsCoastlineStyle == LineStyle::Braille)
+      appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subW, r.row, r.col);
+    if (itsBorderStyle == LineStyle::Braille)
+      appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subW, r.row, r.col);
 
     if (itsShowWindArrows)
       os << buildWindArrows(r.width, r.height, r.row, r.col);
@@ -2470,6 +2513,10 @@ int App::runOnce()
   float dataMin = 0;
   float dataMax = 0;
   auto pixels = sampleSlice(subWidth, subHeight, dataMin, dataMax);
+  if (itsCoastlineStyle == LineStyle::Thick)
+    overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
+  if (itsBorderStyle == LineStyle::Thick)
+    overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
   overlayCities(pixels, subWidth, subHeight);
   overlayMarker(pixels, subWidth, subHeight);
 
@@ -2488,8 +2535,10 @@ int App::runOnce()
 
   std::ostringstream os;
   itsRenderer.render(os, pixels, subWidth, subHeight, 1, 0);
-  appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subWidth, 1, 0);
-  appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subWidth, 1, 0);
+  if (itsCoastlineStyle == LineStyle::Braille)
+    appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subWidth, 1, 0);
+  if (itsBorderStyle == LineStyle::Braille)
+    appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subWidth, 1, 0);
   os << buildCityLabels(cellW, cellH, 1, 0);
   std::cout << os.str() << "\x1b[" << ts.rows << ";1H" << '\n';
   return 0;

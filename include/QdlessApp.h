@@ -74,6 +74,14 @@ enum class PanelLayout
   Quad,    // 2x2 grid
 };
 
+// Coastline / border render style. Cycled with `c` / `b`.
+enum class LineStyle
+{
+  Braille,  // thin braille overlay on top of the rendered data (default)
+  Thick,    // rasterised into the data pixel buffer (half-cell-wide quads)
+  None,     // not drawn
+};
+
 // Sub-rectangle of NFmiArea coordinates we are currently displaying.
 struct Viewport
 {
@@ -188,6 +196,11 @@ class App
   bool itsShowGraticule = false;
   bool itsShowWindArrows = false;
   bool itsShowCities = false;
+  // Coastline + political-border render styles. Initialised from
+  // Options::noCoastline / noBorders (None when set, Braille otherwise) and
+  // cycled with `c` / `b` (Braille → Thick → None → Braille).
+  LineStyle itsCoastlineStyle = LineStyle::Braille;
+  LineStyle itsBorderStyle = LineStyle::Braille;
   // Top-N cap for the cities overlay; PageUp / PageDown step through fixed
   // levels (5, 10, 25, 50, 100, 250, 500). Default = a comfortable mid value.
   int itsCityOverlayN = 25;

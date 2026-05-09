@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 5%{?dist}.fmi
+Release: 6%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-6.fmi
+- Coastline (`c`) and border (`b`) keys cycle braille → thick → off
+  instead of toggling on/off. Braille is the default; thick is the old
+  half-cell quadrant rasterisation. CLI --no-coastline / --no-borders
+  start in the off state.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-5.fmi
 - Coastlines and political borders are now drawn as a braille overlay on
   top of the rendered quadrant blocks (2x4 sub-cell resolution instead of
