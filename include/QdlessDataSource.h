@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Qdless
@@ -62,6 +63,12 @@ class DataSource
   // Lat/lon bounding box of the data extent (rectangle covering all grid
   // points; exact for lat/lon grids, approximate for projected grids).
   virtual LatLonBox boundingBox() const = 0;
+
+  // Backend-specific extra metadata for the metadata popup ('M'). Returns
+  // a list of (label, value) rows, e.g. ("Format", "GRIB2"), ("Grid",
+  // "LatLon 2879x1441"), ("Producer", "ECMWF/IFS"). Default is empty;
+  // overridden by QueryDataSource and GridFilesSource.
+  virtual std::vector<std::pair<std::string, std::string>> extraMetadata() const { return {}; }
 
   // Map a viewport position (u, v) ∈ [0, 1]² to a geographic lat/lon, and
   // back. The viewport rectangle is the source's "natural" rendering

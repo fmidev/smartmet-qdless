@@ -432,6 +432,79 @@ void GridFilesSource::latLonToUV(double lat, double lon, double& u, double& v) c
   v = itsScanFromNorth ? gj / (itsNy - 1) : 1.0 - gj / (itsNy - 1);
 }
 
+namespace
+{
+const char* gridProjectionName(T::GridProjection p)
+{
+  using GP = T::GridProjectionValue;
+  switch (p)
+  {
+    case GP::LatLon: return "LatLon";
+    case GP::RotatedLatLon: return "RotatedLatLon";
+    case GP::StretchedLatLon: return "StretchedLatLon";
+    case GP::StretchedRotatedLatLon: return "StretchedRotatedLatLon";
+    case GP::VariableResolutionLatLon: return "VariableResolutionLatLon";
+    case GP::VariableResolutionRotatedLatLon: return "VariableResolutionRotatedLatLon";
+    case GP::Mercator: return "Mercator";
+    case GP::TransverseMercator: return "TransverseMercator";
+    case GP::PolarStereographic: return "PolarStereographic";
+    case GP::LambertConformal: return "LambertConformal";
+    case GP::ObliqueLambertConformal: return "ObliqueLambertConformal";
+    case GP::Albers: return "Albers";
+    case GP::Gaussian: return "Gaussian";
+    case GP::RotatedGaussian: return "RotatedGaussian";
+    case GP::SpaceView: return "SpaceView";
+    case GP::IrregularLatLon: return "IrregularLatLon";
+    case GP::LambertAzimuthalEqualArea: return "LambertAzimuthalEqualArea";
+    default: return "Unknown";
+  }
+}
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> GridFilesSource::extraMetadata() const
+{
+  std::vector<std::pair<std::string, std::string>> rows;
+  if (itsFile == nullptr || itsFile->getNumberOfMessages() == 0) return rows;
+  // grid-files' GridFile::getFileType() returns Unknown for the formats we
+  // care about, so re-detect from the filename + magic bytes. Reads the
+  // first 4 bytes; cheap and exact.
+  const std::string& path = itsFile->getFileName();
+  std::ifstream in(path, std::ios::binary);
+  unsigned char hdr[4] = {};
+  in.read(reinterpret_cast<char*>(hdr), sizeof(hdr));
+  std::string format = "grid-files";
+  if (hdr[0] == 'G' && hdr[1] == 'R' && hdr[2] == 'I' && hdr[3] == 'B')
+  {
+    format = "GRIB";
+    // The edition byte is at offset 7 in both GRIB1 and GRIB2 headers.
+    in.seekg(7, std::ios::beg);
+    char edition = 0;
+    if (in.read(&edition, 1))
+    {
+      if (edition == 1) format = "GRIB1";
+      else if (edition == 2) format = "GRIB2";
+    }
+  }
+  else if (hdr[0] == 'C' && hdr[1] == 'D' && hdr[2] == 'F') format = "NetCDF3";
+  else if (hdr[0] == 0x89 && hdr[1] == 'H' && hdr[2] == 'D' && hdr[3] == 'F') format = "NetCDF4";
+  rows.emplace_back("Format", format);
+  rows.emplace_back("Messages", std::to_string(itsFile->getNumberOfMessages()));
+  auto* msg = itsFile->getMessageByIndex(0);
+  if (msg != nullptr)
+  {
+    try
+    {
+      rows.emplace_back("Grid", gridProjectionName(msg->getGridProjection()));
+    }
+    catch (const std::exception&)
+    {
+    }
+    if (ensureGridGeometry())
+      rows.emplace_back("Grid size", std::to_string(itsNx) + "x" + std::to_string(itsNy));
+  }
+  return rows;
+}
+
 LatLonBox GridFilesSource::boundingBox() const
 {
   LatLonBox b;
@@ -458,59 +531,62 @@ LatLonBox GridFilesSource::boundingBox() const
   }
   auto* msg = itsFile->getMessageByIndex(0);
 
-  // Walk the four edges of the grid, sampling lat/lon at each step. Track
-  // longitudes with a running unwrap inside each edge: grid-files wraps
-  // its lon output to [-180, 180], so a global grid that starts at the
-  // antimeridian gives e.g. 180 → 179.875 across the row, looking like a
-  // 0.25° span when it's really 359.875°. Detecting >180° jumps and adding
-  // ±360 gives a contiguous sequence we can min/max.
+  // Walk the perimeter as one continuous closed loop, sampling lat/lon at
+  // each step. A single running longitude-unwrap state spans all four
+  // edges so that consecutive points always land adjacent on the grid:
+  // grid-files wraps lon output to [-180, 180], so a global grid that
+  // starts at the antimeridian gives e.g. 180 → -179.875 across the
+  // bottom row, looking like a 0.25° span when it's really 359.875°.
+  // Detecting >180° jumps and adding ±360 reconstructs the contiguous
+  // sequence we can min/max. Per-run reset would break the corner
+  // transitions (top row ends near 180°, right edge starts near -180°)
+  // and miss the wrap.
   double minLat = std::numeric_limits<double>::infinity();
   double maxLat = -std::numeric_limits<double>::infinity();
   double minLon = std::numeric_limits<double>::infinity();
   double maxLon = -std::numeric_limits<double>::infinity();
+  double prevLon = 0;
+  bool havePrev = false;
 
   constexpr int kSamples = 60;
-  auto sampleEdge = [&](auto giOf, auto gjOf)
+  auto sample = [&](double gi, double gj)
   {
-    double prevLon = 0;
-    bool havePrev = false;
-    for (int i = 0; i <= kSamples; ++i)
+    double lat = 0;
+    double lon = 0;
+    try
     {
-      const double t = static_cast<double>(i) / kSamples;
-      const double gi = giOf(t);
-      const double gj = gjOf(t);
-      double lat = 0;
-      double lon = 0;
-      try
-      {
-        if (!msg->getGridLatLonCoordinatesByGridPosition(gi, gj, lat, lon))
-          continue;
-      }
-      catch (const std::exception&)
-      {
-        continue;
-      }
-      minLat = std::min(minLat, lat);
-      maxLat = std::max(maxLat, lat);
-      if (havePrev)
-      {
-        while (lon - prevLon > 180.0)
-          lon -= 360.0;
-        while (prevLon - lon > 180.0)
-          lon += 360.0;
-      }
-      prevLon = lon;
-      havePrev = true;
-      minLon = std::min(minLon, lon);
-      maxLon = std::max(maxLon, lon);
+      if (!msg->getGridLatLonCoordinatesByGridPosition(gi, gj, lat, lon)) return;
     }
+    catch (const std::exception&)
+    {
+      return;
+    }
+    minLat = std::min(minLat, lat);
+    maxLat = std::max(maxLat, lat);
+    if (havePrev)
+    {
+      while (lon - prevLon > 180.0)
+        lon -= 360.0;
+      while (prevLon - lon > 180.0)
+        lon += 360.0;
+    }
+    prevLon = lon;
+    havePrev = true;
+    minLon = std::min(minLon, lon);
+    maxLon = std::max(maxLon, lon);
   };
   const double lastI = static_cast<double>(itsNx - 1);
   const double lastJ = static_cast<double>(itsNy - 1);
-  sampleEdge([](double) { return 0.0; }, [&](double t) { return t * lastJ; });
-  sampleEdge([&](double) { return lastI; }, [&](double t) { return t * lastJ; });
-  sampleEdge([&](double t) { return t * lastI; }, [](double) { return 0.0; });
-  sampleEdge([&](double t) { return t * lastI; }, [&](double) { return lastJ; });
+  // Closed perimeter in CW order: left edge ↓, bottom edge →, right edge ↑,
+  // top edge ←. Repeat the start corner so we exit unwrap-consistent.
+  for (int i = 0; i <= kSamples; ++i)
+    sample(0.0, static_cast<double>(i) / kSamples * lastJ);
+  for (int i = 1; i <= kSamples; ++i)
+    sample(static_cast<double>(i) / kSamples * lastI, lastJ);
+  for (int i = 1; i <= kSamples; ++i)
+    sample(lastI, lastJ - static_cast<double>(i) / kSamples * lastJ);
+  for (int i = 1; i <= kSamples; ++i)
+    sample(lastI - static_cast<double>(i) / kSamples * lastI, 0.0);
 
   if (!std::isfinite(minLat) || !std::isfinite(minLon))
     return b;

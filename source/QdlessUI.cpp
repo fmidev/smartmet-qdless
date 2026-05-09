@@ -587,6 +587,7 @@ void UI::popupHelp()
       {"x",                         "Cross-section"},
       {"e",                         "Export PNG (active panel)"},
       {"",                          ""},
+      {"M",                         "File metadata"},
       {"F2",                        "Cycle layout: single \xe2\x86\x92 side \xe2\x86\x92 2x2"},
       {"Tab  Shift+Tab",            "Next / previous active panel"},
       {"1 2 3 4",                   "Activate panel by number"},
@@ -659,6 +660,94 @@ void UI::popupHelp()
   os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
 
   // Bottom border.
+  putAt(os, top + height - 1, left);
+  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
+  for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
+  os << "\xe2\x94\x98" << kEscReset;
+
+  const std::string s = os.str();
+  std::fwrite(s.data(), 1, s.size(), stdout);
+  std::fflush(stdout);
+
+  wgetch(itsStatusWin);
+  touch();
+}
+
+void UI::popupMetadata(const std::string& title,
+                       const std::vector<std::pair<std::string, std::string>>& rows)
+{
+  if (rows.empty()) return;
+
+  // Width budget: clamp each side. Labels are short ("Format", "Grid"),
+  // values can be long (filename, projection string). If a value is wider
+  // than the value column allows, truncate with an ellipsis on the right.
+  const int screenW = std::max(40, COLS - 4);
+  int maxL = 0;
+  for (const auto& [l, v] : rows) maxL = std::max(maxL, utf8Width(l));
+  const int sep = 2;            // gap between label and value
+  constexpr int kMargin = 4;    // borders + interior padding (1 left + 1 right + 2 borders)
+  // Use the natural value width but cap the popup at the screen width.
+  int maxV = 0;
+  for (const auto& [l, v] : rows) maxV = std::max(maxV, utf8Width(v));
+  int width = std::min(screenW, std::max({maxL + sep + maxV + kMargin,
+                                          utf8Width(title) + 8, 50}));
+  const int interiorW = width - 2;
+  const int valueW = std::max(1, interiorW - 1 - maxL - sep - 1);
+
+  // Truncate a string to `maxw` display columns, replacing the tail with
+  // an ellipsis if it exceeds. Operates on bytes; safe for our short
+  // values which are ASCII / well-behaved UTF-8.
+  auto fitWidth = [](const std::string& s, int maxw) -> std::string {
+    if (utf8Width(s) <= maxw) return s;
+    if (maxw <= 1) return std::string(maxw, '.');
+    return s.substr(0, std::max(0, maxw - 1)) + "\xe2\x80\xa6";
+  };
+
+  // Layout: top border + N body rows + 1 footer + bottom border = N + 3.
+  const int height = static_cast<int>(rows.size()) + 3;
+  const int top = std::max(0, (LINES - height) / 2);
+  const int left = std::max(0, (COLS - width) / 2);
+
+  std::ostringstream os;
+
+  putAt(os, top, left);
+  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x8c\xe2\x94\x80[" << kEscFgWhite
+     << title << kEscFgCyan << "]";
+  int titleConsumed = 4 + utf8Width(title);
+  for (int i = 0; i < width - titleConsumed - 1; ++i) os << "\xe2\x94\x80";
+  os << "\xe2\x94\x90" << kEscReset;
+
+  for (std::size_t i = 0; i < rows.size(); ++i)
+  {
+    putAt(os, top + 1 + static_cast<int>(i), left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack;
+
+    const auto& [label, value] = rows[i];
+    if (label.empty() && value.empty())
+    {
+      os << kEscFgWhite;
+      pad(os, interiorW);
+    }
+    else
+    {
+      os << ' ';
+      os << kEscFgRed << kEscBold << label << kEscReset << kEscBgBlack << kEscFgWhite;
+      pad(os, maxL - utf8Width(label));
+      pad(os, sep);
+      const std::string fitted = fitWidth(value, valueW);
+      os << fitted;
+      pad(os, interiorW - 1 - maxL - sep - utf8Width(fitted));
+    }
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+  }
+
+  putAt(os, top + height - 2, left);
+  std::string_view footer = "any key to close";
+  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
+     << ' ' << footer;
+  pad(os, interiorW - 1 - utf8Width(footer));
+  os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+
   putAt(os, top + height - 1, left);
   os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
   for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";

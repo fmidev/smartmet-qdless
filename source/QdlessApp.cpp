@@ -1745,6 +1745,111 @@ std::string App::originTimeLabel() const
                      static_cast<int>(t.GetMin()));
 }
 
+namespace
+{
+std::string formatFileSize(std::uintmax_t bytes)
+{
+  // Human-readable: KB / MB / GB up to 3 significant digits.
+  if (bytes < 1024) return fmt::format("{} B", bytes);
+  const double kb = bytes / 1024.0;
+  if (kb < 1024.0) return fmt::format("{:.1f} KB", kb);
+  const double mb = kb / 1024.0;
+  if (mb < 1024.0) return fmt::format("{:.1f} MB", mb);
+  return fmt::format("{:.2f} GB", mb / 1024.0);
+}
+
+std::string formatMetTime(const NFmiMetTime& t)
+{
+  if (t.GetYear() < 2000) return {};
+  return fmt::format("{:04}-{:02}-{:02} {:02}:{:02} UTC",
+                     static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
+                     static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
+                     static_cast<int>(t.GetMin()));
+}
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
+{
+  std::vector<std::pair<std::string, std::string>> rows;
+  std::error_code ec;
+  const std::filesystem::path filePath(itsOpts.filename);
+  rows.emplace_back("File", filePath.filename().string());
+  if (filePath.has_parent_path())
+    rows.emplace_back("Directory", filePath.parent_path().string());
+  if (auto sz = std::filesystem::file_size(filePath, ec); !ec)
+    rows.emplace_back("Size", formatFileSize(sz));
+
+  // Backend-specific extras (format, producer, grid type, dimensions, …)
+  // come right after the file identification.
+  for (auto&& kv : itsSource->extraMetadata()) rows.push_back(std::move(kv));
+
+  rows.emplace_back("", "");
+
+  // Geographic extent.
+  const auto bbox = itsSource->boundingBox();
+  rows.emplace_back("Lat range", fmt::format("{:.3f}..{:.3f}", bbox.minLat, bbox.maxLat));
+  rows.emplace_back("Lon range", fmt::format("{:.3f}..{:.3f}", bbox.minLon, bbox.maxLon));
+
+  // Times.
+  if (auto origin = formatMetTime(itsSource->originTime()); !origin.empty())
+    rows.emplace_back("Reference", origin);
+  const std::size_t nt = itsSource->timeCount();
+  if (nt > 0)
+  {
+    // Sample the first and last time without leaving the source mutated.
+    const auto savedT = itsSource->currentTimeIndex();
+    auto* mut = const_cast<DataSource*>(itsSource.get());
+    mut->selectTimeIndex(0);
+    const std::string first = formatMetTime(itsSource->currentValidTime());
+    mut->selectTimeIndex(nt - 1);
+    const std::string last = formatMetTime(itsSource->currentValidTime());
+    mut->selectTimeIndex(savedT);
+    if (nt == 1)
+      rows.emplace_back("Times", fmt::format("1 step at {}", first));
+    else
+      rows.emplace_back("Times", fmt::format("{} steps, {} -> {}", nt, first, last));
+  }
+
+  // Levels.
+  const std::size_t nl = itsSource->levelCount();
+  if (nl > 0)
+  {
+    float lo = itsSource->levelValueAt(0);
+    float hi = lo;
+    for (std::size_t i = 1; i < nl; ++i)
+    {
+      const float v = itsSource->levelValueAt(i);
+      lo = std::min(lo, v);
+      hi = std::max(hi, v);
+    }
+    if (nl == 1)
+      rows.emplace_back("Levels", fmt::format("1 ({:g})", lo));
+    else
+      rows.emplace_back("Levels", fmt::format("{} ({:g}..{:g})", nl, lo, hi));
+  }
+
+  rows.emplace_back("", "");
+
+  // Parameter listing — name + units, comma-separated. The popup truncates
+  // on the right with an ellipsis if it's wider than the popup allows.
+  std::string paramsLine;
+  for (std::size_t i = 0; i < itsParamIds.size(); ++i)
+  {
+    if (!paramsLine.empty()) paramsLine += ", ";
+    const int id = itsParamIds[i];
+    paramsLine += itsSource->paramShortName(id);
+    if (auto u = itsSource->paramUnits(id); !u.empty())
+    {
+      paramsLine += " [";
+      paramsLine += u;
+      paramsLine += "]";
+    }
+  }
+  rows.emplace_back("Params", fmt::format("{}", itsParamIds.size()));
+  if (!paramsLine.empty()) rows.emplace_back("", paramsLine);
+  return rows;
+}
+
 std::vector<std::string> App::paramLabels() const
 {
   std::vector<std::string> out;
@@ -2101,6 +2206,10 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
     case '?':
       ui.popupHelp();
+      return true;
+
+    case 'M':
+      ui.popupMetadata("File metadata", buildMetadataRows());
       return true;
 
     case 'b':

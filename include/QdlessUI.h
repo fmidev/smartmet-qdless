@@ -64,6 +64,13 @@ class UI
   // Dismissed by any key.
   void popupHelp();
 
+  // Centred metadata popup listing (label, value) rows. Used to display
+  // file-level info: filename, format, grid type, dimensions, parameter
+  // / level / time counts, lat/lon extent, etc. An empty (label, value)
+  // pair renders as a blank separator row. Dismissed by any key.
+  void popupMetadata(const std::string& title,
+                     const std::vector<std::pair<std::string, std::string>>& rows);
+
   // Live-filter search popup. The matcher is invoked on every keystroke
   // with the current query string and must return formatted display rows.
   // Returns the 0-based index into the matcher's last result, or -1 on

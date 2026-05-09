@@ -47,6 +47,8 @@ class QueryDataSource : public DataSource
   void uvToLatLon(double u, double v, double& lat, double& lon) const override;
   void latLonToUV(double lat, double lon, double& u, double& v) const override;
 
+  std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
+
  private:
   std::unique_ptr<NFmiQueryData> itsData;
   std::unique_ptr<NFmiFastQueryInfo> itsInfo;

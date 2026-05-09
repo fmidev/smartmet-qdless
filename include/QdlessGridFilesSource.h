@@ -63,6 +63,8 @@ class GridFilesSource : public DataSource
   void uvToLatLon(double u, double v, double& lat, double& lon) const override;
   void latLonToUV(double lat, double lon, double& u, double& v) const override;
 
+  std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
+
   // One-time initialisation of grid-files' parameter mapping. Safe to
   // call multiple times; only the first call has effect. Searches several
   // standard locations for grid-files.conf.

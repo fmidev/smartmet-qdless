@@ -263,5 +263,11 @@ class App
   // Render a cross-section popup of the current parameter from (x1,y1) to
   // (x2,y2) in cell coords, sampled across all levels.
   void renderCrossSection(int x1, int y1, int x2, int y2, UI& ui);
+
+  // Compose the (label, value) rows for the metadata popup ('M').
+  // Combines common fields (file path, size, time/level/param counts,
+  // lat/lon extent, parameter listing) with backend-specific extras from
+  // DataSource::extraMetadata().
+  std::vector<std::pair<std::string, std::string>> buildMetadataRows() const;
 };
 }  // namespace Qdless

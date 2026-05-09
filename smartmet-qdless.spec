@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 8%{?dist}.fmi
+Release: 9%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,21 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-9.fmi
+- New `M` key opens a metadata popup listing file path, format (GRIB1/2,
+  NetCDF, QueryData), grid type and dimensions, lat/lon extent, reference
+  time, time/level/parameter counts, and the parameter listing with
+  units. Grid-files format is detected from the file's magic bytes
+  because grid-files' own `GridFile::getFileType()` reports Unknown for
+  the GRIB and NetCDF inputs we read.
+- `boundingBox()` now walks the grid perimeter as a single closed loop
+  with a continuous longitude-unwrap state spanning all four edges, so
+  the lon range comes out normalised to [-180, 180] for global grids
+  that wrap the antimeridian (the per-edge reset in 26.5.9-8 mistracked
+  one corner and reported e.g. `179.75..539.75` instead of
+  `-180..179.75`). Only affects the metadata display; the rendering
+  pipeline already bypasses bbox via the `uvToLatLon` override.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-8.fmi
 - Fix GRIB rendering for global lat/lon grids and parameters whose
   newbase / grid-files FMI ID namespaces disagree. `boundingBox()`

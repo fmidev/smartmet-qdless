@@ -4,6 +4,7 @@
 #include <newbase/NFmiEnumConverter.h>
 #include <newbase/NFmiFastQueryInfo.h>
 #include <newbase/NFmiPoint.h>
+#include <newbase/NFmiProducer.h>
 #include <newbase/NFmiQueryData.h>
 
 #include <algorithm>
@@ -178,5 +179,42 @@ LatLonBox QueryDataSource::boundingBox() const
     addPoint(t * w, h);          // bottom edge
   }
   return b;
+}
+
+std::vector<std::pair<std::string, std::string>> QueryDataSource::extraMetadata() const
+{
+  std::vector<std::pair<std::string, std::string>> rows;
+  rows.emplace_back("Format", "QueryData");
+
+  if (auto* prod = itsInfo->Producer(); prod != nullptr)
+  {
+    const std::string name = prod->GetName().CharPtr();
+    const auto id = prod->GetIdent();
+    if (!name.empty() || id != 0)
+    {
+      std::string val = name.empty() ? std::string{} : name;
+      if (id != 0)
+      {
+        if (!val.empty()) val += ' ';
+        val += '(';
+        val += std::to_string(id);
+        val += ')';
+      }
+      rows.emplace_back("Producer", val);
+    }
+  }
+
+  if (const auto* area = itsInfo->Area(); area != nullptr)
+  {
+    rows.emplace_back("Grid", area->ClassName());
+    rows.emplace_back("Grid size", std::to_string(itsInfo->GridXNumber()) + "x" +
+                                       std::to_string(itsInfo->GridYNumber()));
+    // Area::AreaStr() returns the SmartMet projection descriptor
+    // (e.g. "stereographic,20,90,60:6,51.3,49,70.2"). Long-ish but the
+    // popup wraps gracefully.
+    const std::string proj = area->AreaStr();
+    if (!proj.empty()) rows.emplace_back("Projection", proj);
+  }
+  return rows;
 }
 }  // namespace Qdless
