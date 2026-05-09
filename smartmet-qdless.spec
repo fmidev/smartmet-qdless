@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.5.11
-Release: 1%{?dist}.fmi
+Version: 26.5.9
+Release: 3%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,14 +110,14 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
-* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.11-1.fmi
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-3.fmi
 - -p accepts a comma-separated list of parameters and picks the layout
   from the count: 1 -> single, 2 -> side-by-side, 3 or 4 -> 2x2; >4 is an
   error. With three parameters the 4th panel clones the first. New
   --layout single|side|quad option overrides the count-derived layout
   (must hold at least as many panels as parameters).
 
-* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-1.fmi
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-2.fmi
 - Multi-panel layouts. F2 cycles single → side-by-side → 2x2; each panel
   has its own parameter, level, and palette while sharing the viewport,
   time, marker, and overlay toggles. Tab / Shift+Tab / digit keys 1–4 /
