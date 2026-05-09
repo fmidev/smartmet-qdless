@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 11%{?dist}.fmi
+Release: 12%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,15 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-12.fmi
+- Metadata popup ('M'): wrap long values across continuation rows
+  instead of truncating with an ellipsis. The parameter listing on a
+  many-parameter querydata (e.g. the 10-param `pal_skandinavia_pinta`)
+  now lays out across multiple rows broken at ", " boundaries; long
+  filenames or projection strings wrap at any whitespace as a fallback.
+  The popup width is capped at 100 columns; lines longer than that
+  pick up extra rows so no data is hidden.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-11.fmi
 - Time-series probe: render the point-series trace in bright green
   instead of white when the viewport-stats overlay is visible. Stats

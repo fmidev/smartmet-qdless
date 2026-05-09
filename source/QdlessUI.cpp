@@ -679,33 +679,113 @@ void UI::popupMetadata(const std::string& title,
 {
   if (rows.empty()) return;
 
-  // Width budget: clamp each side. Labels are short ("Format", "Grid"),
-  // values can be long (filename, projection string). If a value is wider
-  // than the value column allows, truncate with an ellipsis on the right.
+  // Width budget: clamp at the screen width. Long values (filename,
+  // projection string, parameter listing) wrap across continuation rows
+  // rather than truncating, so the popup gets taller for big lists
+  // instead of losing data.
   const int screenW = std::max(40, COLS - 4);
   int maxL = 0;
   for (const auto& [l, v] : rows) maxL = std::max(maxL, utf8Width(l));
   const int sep = 2;            // gap between label and value
   constexpr int kMargin = 4;    // borders + interior padding (1 left + 1 right + 2 borders)
-  // Use the natural value width but cap the popup at the screen width.
   int maxV = 0;
   for (const auto& [l, v] : rows) maxV = std::max(maxV, utf8Width(v));
-  int width = std::min(screenW, std::max({maxL + sep + maxV + kMargin,
-                                          utf8Width(title) + 8, 50}));
+  // Cap width so the popup doesn't span the full screen for one row that
+  // happens to be very long. 100 cols is a comfortable reading width;
+  // values longer than that wrap.
+  const int desired = std::max({maxL + sep + maxV + kMargin, utf8Width(title) + 8, 50});
+  const int width = std::min({screenW, 100, desired});
   const int interiorW = width - 2;
-  const int valueW = std::max(1, interiorW - 1 - maxL - sep - 1);
+  const int valueW = std::max(8, interiorW - 1 - maxL - sep - 1);
 
-  // Truncate a string to `maxw` display columns, replacing the tail with
-  // an ellipsis if it exceeds. Operates on bytes; safe for our short
-  // values which are ASCII / well-behaved UTF-8.
-  auto fitWidth = [](const std::string& s, int maxw) -> std::string {
-    if (utf8Width(s) <= maxw) return s;
-    if (maxw <= 1) return std::string(maxw, '.');
-    return s.substr(0, std::max(0, maxw - 1)) + "\xe2\x80\xa6";
+  // Wrap a long value into chunks each fitting in `valueW` columns.
+  // Prefers breaking at ", " (for comma-separated lists like the
+  // parameter listing); otherwise at any whitespace; otherwise hard-
+  // breaks. The empty input is treated as a single empty chunk.
+  auto wrapValue = [&](const std::string& s) -> std::vector<std::string> {
+    std::vector<std::string> out;
+    if (utf8Width(s) <= valueW)
+    {
+      out.push_back(s);
+      return out;
+    }
+    std::string remaining = s;
+    while (!remaining.empty())
+    {
+      if (utf8Width(remaining) <= valueW)
+      {
+        out.push_back(remaining);
+        break;
+      }
+      // Walk the byte index to find the latest break-friendly position
+      // whose prefix fits in valueW columns. utf8Width counts column
+      // width including multi-byte characters; for the param listing
+      // and ASCII values these are 1:1 with bytes.
+      int bestComma = -1;
+      int bestSpace = -1;
+      int bestHard = -1;
+      // Iterate forward from byte 0; track display width.
+      int width_so_far = 0;
+      for (std::size_t i = 0; i < remaining.size(); ++i)
+      {
+        // Treat ASCII range as width-1; multi-byte continuations (bytes
+        // with the 10xxxxxx pattern) add zero width. Good enough for our
+        // values (filenames, projection strings, param names).
+        const unsigned char c = static_cast<unsigned char>(remaining[i]);
+        if ((c & 0xC0) != 0x80) width_so_far += 1;
+        if (width_so_far > valueW) break;
+        // After this byte, look at the boundary BETWEEN i and i+1.
+        if (i + 1 < remaining.size())
+        {
+          if (remaining[i] == ',' && remaining[i + 1] == ' ')
+            bestComma = static_cast<int>(i + 2);  // include the space
+          else if (remaining[i] == ' ')
+            bestSpace = static_cast<int>(i + 1);
+        }
+        bestHard = static_cast<int>(i + 1);
+      }
+      const int cut = bestComma > 0 ? bestComma : bestSpace > 0 ? bestSpace : bestHard;
+      if (cut <= 0)
+      {
+        out.push_back(remaining);
+        break;
+      }
+      std::string chunk = remaining.substr(0, cut);
+      // Trim trailing space on continuation chunks for tidiness.
+      while (!chunk.empty() && chunk.back() == ' ') chunk.pop_back();
+      out.push_back(chunk);
+      remaining = remaining.substr(cut);
+    }
+    if (out.empty()) out.push_back(std::string{});
+    return out;
   };
 
-  // Layout: top border + N body rows + 1 footer + bottom border = N + 3.
-  const int height = static_cast<int>(rows.size()) + 3;
+  // Expand each input row into one or more physical lines: the first
+  // physical line carries the label; continuation lines have a blank
+  // label so the value stays aligned. A blank input row stays as one
+  // blank physical row.
+  struct PhysRow
+  {
+    std::string label;
+    std::string value;
+    bool blank = false;
+  };
+  std::vector<PhysRow> phys;
+  phys.reserve(rows.size());
+  for (const auto& [label, value] : rows)
+  {
+    if (label.empty() && value.empty())
+    {
+      phys.push_back(PhysRow{"", "", true});
+      continue;
+    }
+    auto chunks = wrapValue(value);
+    for (std::size_t k = 0; k < chunks.size(); ++k)
+      phys.push_back(PhysRow{k == 0 ? label : std::string{}, chunks[k], false});
+  }
+
+  // Layout: top border + N physical body rows + 1 footer + bottom border.
+  const int height = static_cast<int>(phys.size()) + 3;
   const int top = std::max(0, (LINES - height) / 2);
   const int left = std::max(0, (COLS - width) / 2);
 
@@ -718,13 +798,13 @@ void UI::popupMetadata(const std::string& title,
   for (int i = 0; i < width - titleConsumed - 1; ++i) os << "\xe2\x94\x80";
   os << "\xe2\x94\x90" << kEscReset;
 
-  for (std::size_t i = 0; i < rows.size(); ++i)
+  for (std::size_t i = 0; i < phys.size(); ++i)
   {
     putAt(os, top + 1 + static_cast<int>(i), left);
     os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack;
 
-    const auto& [label, value] = rows[i];
-    if (label.empty() && value.empty())
+    const auto& r = phys[i];
+    if (r.blank)
     {
       os << kEscFgWhite;
       pad(os, interiorW);
@@ -732,12 +812,11 @@ void UI::popupMetadata(const std::string& title,
     else
     {
       os << ' ';
-      os << kEscFgRed << kEscBold << label << kEscReset << kEscBgBlack << kEscFgWhite;
-      pad(os, maxL - utf8Width(label));
+      os << kEscFgRed << kEscBold << r.label << kEscReset << kEscBgBlack << kEscFgWhite;
+      pad(os, maxL - utf8Width(r.label));
       pad(os, sep);
-      const std::string fitted = fitWidth(value, valueW);
-      os << fitted;
-      pad(os, interiorW - 1 - maxL - sep - utf8Width(fitted));
+      os << r.value;
+      pad(os, interiorW - 1 - maxL - sep - utf8Width(r.value));
     }
     os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
   }
