@@ -35,46 +35,6 @@ namespace Qdless
 {
 namespace
 {
-// Split the map area into panel sub-rectangles separated by 1-cell gutters.
-// If the area is too small to split cleanly, fall back to a single panel
-// covering the full area.
-std::vector<PanelRect> computePanelRects(int row, int col, int height, int width,
-                                         PanelLayout layout)
-{
-  if (width <= 0 || height <= 0) return {};
-  const PanelRect full{row, col, height, width};
-  switch (layout)
-  {
-    case PanelLayout::Single:
-      return {full};
-    case PanelLayout::Side:
-    {
-      if (width < 4) return {full};
-      const int leftW = (width - 1) / 2;
-      const int rightW = width - 1 - leftW;
-      return {
-          {row, col, height, leftW},
-          {row, col + leftW + 1, height, rightW},
-      };
-    }
-    case PanelLayout::Quad:
-    {
-      if (width < 4 || height < 4) return {full};
-      const int leftW = (width - 1) / 2;
-      const int rightW = width - 1 - leftW;
-      const int topH = (height - 1) / 2;
-      const int botH = height - 1 - topH;
-      return {
-          {row, col, topH, leftW},
-          {row, col + leftW + 1, topH, rightW},
-          {row + topH + 1, col, botH, leftW},
-          {row + topH + 1, col + leftW + 1, botH, rightW},
-      };
-    }
-  }
-  return {full};
-}
-
 const char* panelLayoutLabel(PanelLayout l)
 {
   switch (l)
@@ -1569,6 +1529,76 @@ void App::selectLevel(int newIndex)
   itsOpts.levelIndex = newIndex;
 }
 
+std::vector<PanelRect> App::currentPanelRects(int row, int col, int height, int width) const
+{
+  if (width <= 0 || height <= 0) return {};
+  const PanelRect full{row, col, height, width};
+  switch (itsPanelLayout)
+  {
+    case PanelLayout::Single:
+      return {full};
+    case PanelLayout::Side:
+    {
+      if (width < 4) return {full};
+      const int leftW = (width - 1) / 2;
+      const int rightW = width - 1 - leftW;
+      return {
+          {row, col, height, leftW},
+          {row, col + leftW + 1, height, rightW},
+      };
+    }
+    case PanelLayout::Quad:
+    {
+      if (width < 4 || height < 4) return {full};
+      const int leftW = (width - 1) / 2;
+      const int rightW = width - 1 - leftW;
+      const int topH = (height - 1) / 2;
+      const int botH = height - 1 - topH;
+      return {
+          {row, col, topH, leftW},
+          {row, col + leftW + 1, topH, rightW},
+          {row + topH + 1, col, botH, leftW},
+          {row + topH + 1, col + leftW + 1, botH, rightW},
+      };
+    }
+  }
+  return {full};
+}
+
+std::optional<int> App::panelAtCell(const UI& ui, int cellX, int cellY) const
+{
+  const auto& l = ui.layout();
+  const auto rects = currentPanelRects(l.map.row, l.map.col, l.map.height, l.map.width);
+  for (std::size_t i = 0; i < rects.size() && i < itsPanels.size(); ++i)
+  {
+    const auto& r = rects[i];
+    if (cellX >= r.col && cellX < r.col + r.width && cellY >= r.row && cellY < r.row + r.height)
+      return static_cast<int>(i);
+  }
+  return std::nullopt;
+}
+
+void App::setActivePanel(int idx)
+{
+  if (idx < 0 || idx >= static_cast<int>(itsPanels.size())) return;
+  if (idx == itsActivePanel) return;
+  itsActivePanel = idx;
+  // Restore source state so the rest of the UI sees the new active panel.
+  if (activePanel().paramIndex >= 0 &&
+      activePanel().paramIndex < static_cast<int>(itsParamIds.size()))
+    itsSource->selectParamId(itsParamIds[activePanel().paramIndex]);
+  if (activePanel().levelIndex < itsSource->levelCount())
+    itsSource->selectLevelIndex(activePanel().levelIndex);
+}
+
+void App::cycleActivePanel(int step)
+{
+  const int n = static_cast<int>(itsPanels.size());
+  if (n <= 1) return;
+  const int next = ((itsActivePanel + step) % n + n) % n;
+  setActivePanel(next);
+}
+
 void App::cyclePanelLayout()
 {
   PanelLayout next = PanelLayout::Single;
@@ -1951,6 +1981,20 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       cyclePanelLayout();
       return true;
 
+    case '\t':
+      cycleActivePanel(+1);
+      return true;
+    case KEY_BTAB:
+      cycleActivePanel(-1);
+      return true;
+
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+      setActivePanel(key - '1');
+      return true;
+
     case ' ':  // Space: toggle animation
       itsAnimating = !itsAnimating;
       return true;
@@ -1989,6 +2033,16 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       const bool inMap =
           ev.x >= l.map.col && ev.x < l.map.col + l.map.width && ev.y >= l.map.row &&
           ev.y < l.map.row + l.map.height;
+
+      // Any left-button click on a panel makes that panel active. Wheel /
+      // motion events leave the focus alone.
+      const auto kButton1Click = static_cast<mmask_t>(
+          BUTTON1_PRESSED | BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED);
+      if ((ev.bstate & kButton1Click) != 0U)
+      {
+        if (auto panel = panelAtCell(ui, ev.x, ev.y); panel.has_value())
+          setActivePanel(*panel);
+      }
 
       // Wheel-up / wheel-down: kept for terminals that deliver wheel events
       // as BUTTON4/5 through ncurses. (Many don't, so double-click is the
@@ -2107,8 +2161,7 @@ void App::drawMap(UI& ui)
   // selected file is unchanged; reads ~100ms at h-resolution worst case.
   loadCoastlines();
 
-  const auto rects =
-      computePanelRects(l.map.row, l.map.col, l.map.height, l.map.width, itsPanelLayout);
+  const auto rects = currentPanelRects(l.map.row, l.map.col, l.map.height, l.map.width);
 
   std::ostringstream os;
   const int savedActive = itsActivePanel;
@@ -2172,6 +2225,27 @@ void App::drawMap(UI& ui)
       // Cross at the intersection.
       os << "\x1b[" << (gutterRow + 1) << ';' << (gutterCol + 1) << "H\x1b[40m\x1b[36m"
             "\xe2\x94\xbc\x1b[0m";
+    }
+
+    // Per-panel labels: "[N] paramName" at top-left of each panel. The active
+    // panel uses bold yellow; inactive panels use dim grey. Skipped for the
+    // single-panel layout (no ambiguity).
+    for (std::size_t i = 0; i < rects.size() && i < itsPanels.size(); ++i)
+    {
+      const auto& r = rects[i];
+      if (r.width < 4 || r.height < 1) continue;
+      const Panel& p = itsPanels[i];
+      std::string name;
+      if (p.paramIndex >= 0 && p.paramIndex < static_cast<int>(itsParamIds.size()))
+        name = itsSource->paramShortName(itsParamIds[p.paramIndex]);
+      const std::string label = "[" + std::to_string(i + 1) + "] " + name;
+      const std::string visible = label.substr(0, static_cast<std::size_t>(r.width));
+      const bool active = (static_cast<int>(i) == itsActivePanel);
+      // Bold + bright yellow for active, dim white for inactive. Black bg
+      // matches the map raster behind it.
+      const char* style = active ? "\x1b[1m\x1b[40m\x1b[93m" : "\x1b[2m\x1b[40m\x1b[37m";
+      os << "\x1b[" << (r.row + 1) << ';' << (r.col + 1) << 'H' << style << visible
+         << "\x1b[0m";
     }
   }
 

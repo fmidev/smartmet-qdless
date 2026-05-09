@@ -116,6 +116,18 @@ class App
   // Resize / re-fill itsPanels for `layout`. New panels are clones of the
   // active panel with paramIndex rotated by their position in the vector.
   void setPanelLayout(PanelLayout layout);
+  // Make `idx` the active panel (no-op if out of range). Restores the
+  // source's (paramId, level) selection to the new active panel so probe /
+  // legend / cross-section see consistent state.
+  void setActivePanel(int idx);
+  void cycleActivePanel(int step);  // +1 next, -1 previous
+
+  // Compute panel sub-rectangles for the current itsPanelLayout inside the
+  // given map area (row, col, height, width).
+  std::vector<PanelRect> currentPanelRects(int row, int col, int height, int width) const;
+  // Map a screen cell to a panel index (or nullopt if the cell is on a
+  // gutter or outside the map area).
+  std::optional<int> panelAtCell(const UI& ui, int cellX, int cellY) const;
   // Returns true if a redraw is needed; sets quit=true on quit.
   bool handleKey(int key, UI& ui, bool& quit);
   void drawMap(UI& ui);
