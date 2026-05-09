@@ -815,9 +815,11 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
                         const std::vector<std::string>& timeLabels, int currentIndex,
                         const Renderer& renderer, const Palette& palette,
                         std::function<void(int)> onTimeChange, int avoidCellRow,
-                        int avoidCellCol)
+                        int avoidCellCol, int* outClickRow, int* outClickCol)
 {
   (void)palette;  // reserved for future colour-by-band line rendering
+  if (outClickRow) *outClickRow = -1;
+  if (outClickCol) *outClickCol = -1;
   if (series.empty()) return currentIndex;
 
   // Compute value range over finite samples.
@@ -900,10 +902,14 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   int timeMaxW = 0;
   if (showTimeRow)
     for (const auto& t : timeLabels) timeMaxW = std::max(timeMaxW, utf8Width(t));
+  const std::string footer =
+      "\xe2\x86\x90\xe2\x86\x92 / click / drag step time   "
+      "click map: re-probe   any key: close";
   const int width = std::max({chartW + chartLeftPad + 4,
                               utf8Width(paramName) + 6,
                               utf8Width(latlonBuf) + 6,
                               timeMaxW + 6,
+                              utf8Width(footer) + 4,
                               40});
   // border + (param, latlon, [time], range) header rows + chart + footer + border
   const int headerRows = showTimeRow ? 4 : 3;
@@ -1095,9 +1101,7 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
       os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
     }
 
-    writeRow(chartTopOffset + chartH,
-             "\xe2\x86\x90\xe2\x86\x92 / click / drag step time   any other key closes",
-             false);
+    writeRow(chartTopOffset + chartH, footer, false);
 
     putAt(os, top + height - 1, left);
     os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
@@ -1172,11 +1176,17 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
       const int hitIdx = cellToIdx(ev.x);
       const bool inChart = hitIdx >= 0 && ev.y >= top + chartTopOffset &&
                            ev.y < top + chartTopOffset + chartH;
-      if ((ev.bstate & BUTTON1_PRESSED) != 0U)
+      // Some terminals deliver BUTTON1_PRESSED + BUTTON1_RELEASED for a click;
+      // others deliver only BUTTON1_CLICKED (atomic). Treat both as a click.
+      // Drag scrubbing only works under the press/release model — CLICKED is
+      // a single event with no motion phase.
+      const bool pressed = (ev.bstate & BUTTON1_PRESSED) != 0U;
+      const bool clicked = (ev.bstate & BUTTON1_CLICKED) != 0U;
+      if (pressed || clicked)
       {
         if (inChart)
         {
-          dragging = true;
+          if (pressed) dragging = true;
           if (idx != hitIdx)
           {
             idx = hitIdx;
@@ -1184,8 +1194,16 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
           }
           continue;
         }
-        // Click anywhere outside the chart (border, padding, or off-popup)
-        // dismisses, matching the existing "any other key closes" behaviour.
+        // Click outside the chart but on the map area: report the click cell
+        // so the caller can re-probe at the new location. Clicks landing
+        // outside the map area are ignored — only the keyboard closes.
+        const auto& l = itsLayout.map;
+        const bool onMap = l.width > 0 && l.height > 0 && ev.x >= l.col &&
+                           ev.x < l.col + l.width && ev.y >= l.row &&
+                           ev.y < l.row + l.height;
+        if (!onMap) continue;
+        if (outClickRow) *outClickRow = ev.y;
+        if (outClickCol) *outClickCol = ev.x;
         break;
       }
       if ((ev.bstate & BUTTON1_RELEASED) != 0U)

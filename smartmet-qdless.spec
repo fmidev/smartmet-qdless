@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.5.8
+Version: 26.5.9
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -110,6 +110,13 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-1.fmi
+- Timeseries probe: a click outside the chart on the map area now picks a
+  new probe location instead of closing the popup; the popup loops at the
+  new lat/lon. Keyboard still closes. Off-map clicks are ignored. Also
+  handles BUTTON1_CLICKED so clicks register on terminals that deliver an
+  atomic click event.
+
 * Fri May  8 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.8-1.fmi
 - Initial release. Split out from smartmet-qdtools so the project can
   depend on smartmet-library-grid-files for GRIB / NetCDF input without

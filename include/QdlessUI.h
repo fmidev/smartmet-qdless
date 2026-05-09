@@ -77,8 +77,11 @@ class UI
   //
   // Left/Right (and Home/End) arrows step the marker; on each step
   // `onTimeChange(newIdx)` is invoked so the caller can update the time on
-  // the underlying map while the popup stays visible. Any other key
-  // dismisses. Returns the final time index.
+  // the underlying map while the popup stays visible. Any keyboard key
+  // dismisses the popup. A mouse click outside the chart but on the map
+  // area is reported back via `outClickRow` / `outClickCol` (if non-null) so
+  // the caller can re-probe at that cell; clicks elsewhere are ignored.
+  // Returns the final time index.
   // `timeLabels[i]` is the human-readable time for series step i; if
   // empty, no time row is drawn.
   // `avoidCellRow` / `avoidCellCol` (-1 = ignore): if both ≥ 0, the popup
@@ -89,7 +92,8 @@ class UI
                       const std::vector<std::string>& timeLabels, int currentIndex,
                       const Renderer& renderer, const Palette& palette,
                       std::function<void(int)> onTimeChange = {},
-                      int avoidCellRow = -1, int avoidCellCol = -1);
+                      int avoidCellRow = -1, int avoidCellCol = -1,
+                      int* outClickRow = nullptr, int* outClickCol = nullptr);
 
  private:
   void writeLabel(WINDOW* w, int y, int x, const std::string& label, int hotPos);

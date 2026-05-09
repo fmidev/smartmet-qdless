@@ -1528,62 +1528,82 @@ void App::openProbe(int cellX, int cellY, UI& ui)
 
 void App::openProbeAt(double lat, double lon, UI& ui)
 {
-  // Sample the current parameter at this lat/lon for every time step.
-  // Save and restore the time index so the rest of the UI keeps its state.
-  std::vector<float> series;
-  std::vector<std::string> timeLabels;
-  series.reserve(itsSource->timeCount());
-  timeLabels.reserve(itsSource->timeCount());
-  const std::size_t savedTime = itsSource->currentTimeIndex();
-  for (std::size_t i = 0; i < itsSource->timeCount(); ++i)
+  // The popup runs an event loop until the user closes it via the keyboard.
+  // A click outside the chart but on the map area is reported back as a
+  // request to re-probe at that cell — we update the marker, redraw the
+  // map, and reopen the popup at the new location.
+  while (true)
   {
-    itsSource->selectTimeIndex(i);
-    series.push_back(transform(itsSource->interpolatedValue(lat, lon)));
-    timeLabels.push_back(currentTimeLabel());
-  }
-  itsSource->selectTimeIndex(savedTime);
-
-  NFmiEnumConverter conv;
-  std::string param = itsSource->paramShortName(itsSource->currentParamId());
-
-  // Callback: when the user presses an arrow inside the popup, update the
-  // querydata's time index, refresh the bottom timeline label so the time
-  // there tracks the popup marker, then redraw the map underneath. The
-  // popup loop re-emits its raw-ANSI on top, so the popup stays visible.
-  auto onTimeChange = [&](int newIdx) {
-    itsSource->selectTimeIndex(static_cast<unsigned long>(newIdx));
-    renderTimeline(ui);
-    drawMap(ui);
-  };
-
-  // Translate the marker lat/lon into a terminal cell so the popup can
-  // shift to the opposite quadrant and keep the crosshair visible.
-  int avoidRow = -1;
-  int avoidCol = -1;
-  if (itsMarker.has_value())
-  {
-    const auto& l = ui.layout();
-    const float spanU = itsViewport.uMax - itsViewport.uMin;
-    const float spanV = itsViewport.vMax - itsViewport.vMin;
-    if (spanU > 0 && spanV > 0 && l.map.width > 0 && l.map.height > 0)
+    // Sample the current parameter at this lat/lon for every time step.
+    // Save and restore the time index so the rest of the UI keeps its state.
+    std::vector<float> series;
+    std::vector<std::string> timeLabels;
+    series.reserve(itsSource->timeCount());
+    timeLabels.reserve(itsSource->timeCount());
+    const std::size_t savedTime = itsSource->currentTimeIndex();
+    for (std::size_t i = 0; i < itsSource->timeCount(); ++i)
     {
-      double u = 0;
-      double v = 0;
-      itsSource->latLonToUV(itsMarker->first, itsMarker->second, u, v);
-      const double u01 = (u - itsViewport.uMin) / spanU;
-      const double v01 = (v - itsViewport.vMin) / spanV;
-      if (u01 >= 0 && u01 <= 1 && v01 >= 0 && v01 <= 1)
+      itsSource->selectTimeIndex(i);
+      series.push_back(transform(itsSource->interpolatedValue(lat, lon)));
+      timeLabels.push_back(currentTimeLabel());
+    }
+    itsSource->selectTimeIndex(savedTime);
+
+    NFmiEnumConverter conv;
+    std::string param = itsSource->paramShortName(itsSource->currentParamId());
+
+    // Callback: when the user presses an arrow inside the popup, update the
+    // querydata's time index, refresh the bottom timeline label so the time
+    // there tracks the popup marker, then redraw the map underneath. The
+    // popup loop re-emits its raw-ANSI on top, so the popup stays visible.
+    auto onTimeChange = [&](int newIdx) {
+      itsSource->selectTimeIndex(static_cast<unsigned long>(newIdx));
+      renderTimeline(ui);
+      drawMap(ui);
+    };
+
+    // Translate the marker lat/lon into a terminal cell so the popup can
+    // shift to the opposite quadrant and keep the crosshair visible.
+    int avoidRow = -1;
+    int avoidCol = -1;
+    if (itsMarker.has_value())
+    {
+      const auto& l = ui.layout();
+      const float spanU = itsViewport.uMax - itsViewport.uMin;
+      const float spanV = itsViewport.vMax - itsViewport.vMin;
+      if (spanU > 0 && spanV > 0 && l.map.width > 0 && l.map.height > 0)
       {
-        avoidCol = l.map.col + static_cast<int>(u01 * l.map.width);
-        avoidRow = l.map.row + static_cast<int>(v01 * l.map.height);
+        double u = 0;
+        double v = 0;
+        itsSource->latLonToUV(itsMarker->first, itsMarker->second, u, v);
+        const double u01 = (u - itsViewport.uMin) / spanU;
+        const double v01 = (v - itsViewport.vMin) / spanV;
+        if (u01 >= 0 && u01 <= 1 && v01 >= 0 && v01 <= 1)
+        {
+          avoidCol = l.map.col + static_cast<int>(u01 * l.map.width);
+          avoidRow = l.map.row + static_cast<int>(v01 * l.map.height);
+        }
       }
     }
-  }
 
-  int finalIdx = ui.popupTimeseries(param, lat, lon, series, timeLabels,
-                                    static_cast<int>(savedTime), itsRenderer, itsPalette,
-                                    onTimeChange, avoidRow, avoidCol);
-  itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
+    int clickRow = -1;
+    int clickCol = -1;
+    int finalIdx = ui.popupTimeseries(param, lat, lon, series, timeLabels,
+                                      static_cast<int>(savedTime), itsRenderer, itsPalette,
+                                      onTimeChange, avoidRow, avoidCol, &clickRow, &clickCol);
+    itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
+
+    if (clickRow < 0 || clickCol < 0) break;  // closed via keyboard
+
+    double newLat = 0;
+    double newLon = 0;
+    if (!cellToLatLon(ui, clickCol, clickRow, newLat, newLon)) break;
+
+    itsMarker = std::make_pair(newLat, newLon);
+    drawMap(ui);
+    lat = newLat;
+    lon = newLon;
+  }
 }
 
 bool App::handleKey(int key, UI& ui, bool& quit)
