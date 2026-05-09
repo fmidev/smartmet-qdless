@@ -20,7 +20,14 @@ struct Options
   std::string paletteDir = "/usr/share/smartmet/qdless/palettes";
   std::string configFile = "/usr/share/smartmet/qdless/qdless.conf";
   std::string coastlineDir = "/usr/share/gshhg-gmt-nc4";
-  std::string parameterOverride;  // empty -> use first parameter
+  // Parameters to launch with. Empty -> use first parameter in the file.
+  // 1 entry -> Single layout. 2 -> Side. 3 or 4 -> Quad. >4 is rejected.
+  // For 3 parameters in Quad layout, the 4th panel clones the first.
+  std::vector<std::string> parameterOverrides;
+  // Optional layout override ("single", "side", "quad"). When empty, the
+  // layout is picked from parameterOverrides.size(). When set, must hold
+  // at least as many panels as parameterOverrides.
+  std::string layoutOverride;
   std::string paletteOverride;    // empty -> resolve via config / built-in
   int timeIndex = 0;              // 0-based; -1 means last
   int levelIndex = 0;             // 0-based; -1 means last

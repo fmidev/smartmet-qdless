@@ -434,17 +434,57 @@ App::App(Options opts) : itsOpts(std::move(opts))
   itsPanels.resize(1);
   buildIndices();
 
-  // Apply parameter override.
-  if (!itsOpts.parameterOverride.empty())
+  // Apply parameter overrides. -p accepts a comma-separated list:
+  //   1 entry  -> Single layout
+  //   2        -> Side
+  //   3 or 4   -> Quad (with 4th panel cloning the first if only 3 given)
+  //   >4       -> error
+  // --layout overrides the count-derived choice but must hold at least the
+  // number of parameters given.
+  std::vector<int> overrideIdx;
+  if (!itsOpts.parameterOverrides.empty())
   {
+    if (itsOpts.parameterOverrides.size() > 4)
+      throw std::runtime_error("qdless: -p accepts at most 4 parameters (got " +
+                               std::to_string(itsOpts.parameterOverrides.size()) + ")");
     NFmiEnumConverter conv;
-    int id = conv.ToEnum(itsOpts.parameterOverride);
-    if (id == kFmiBadParameter || !itsSource->selectParamId(id))
-      throw std::runtime_error("qdless: parameter not found: " + itsOpts.parameterOverride);
-    auto it = std::find(itsParamIds.begin(), itsParamIds.end(), id);
-    if (it != itsParamIds.end())
-      activePanel().paramIndex = static_cast<int>(it - itsParamIds.begin());
+    overrideIdx.reserve(itsOpts.parameterOverrides.size());
+    for (const auto& name : itsOpts.parameterOverrides)
+    {
+      const int id = conv.ToEnum(name);
+      auto it = std::find(itsParamIds.begin(), itsParamIds.end(), id);
+      if (id == kFmiBadParameter || it == itsParamIds.end())
+        throw std::runtime_error("qdless: parameter not found: " + name);
+      overrideIdx.push_back(static_cast<int>(it - itsParamIds.begin()));
+    }
+    activePanel().paramIndex = overrideIdx.front();
+    itsSource->selectParamId(itsParamIds[overrideIdx.front()]);
   }
+
+  // Pick layout: explicit --layout, else from override count.
+  PanelLayout targetLayout = PanelLayout::Single;
+  if (!itsOpts.layoutOverride.empty())
+  {
+    std::string s = itsOpts.layoutOverride;
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (s == "single") targetLayout = PanelLayout::Single;
+    else if (s == "side" || s == "side-by-side") targetLayout = PanelLayout::Side;
+    else if (s == "quad" || s == "2x2") targetLayout = PanelLayout::Quad;
+    else throw std::runtime_error("qdless: unknown --layout '" + itsOpts.layoutOverride +
+                                  "' (expected single, side, or quad)");
+  }
+  else if (overrideIdx.size() == 2)
+    targetLayout = PanelLayout::Side;
+  else if (overrideIdx.size() >= 3)
+    targetLayout = PanelLayout::Quad;
+
+  const std::size_t want = (targetLayout == PanelLayout::Quad)
+                               ? 4
+                               : (targetLayout == PanelLayout::Side ? 2 : 1);
+  if (overrideIdx.size() > want)
+    throw std::runtime_error("qdless: --layout " + itsOpts.layoutOverride + " holds " +
+                             std::to_string(want) + " panel(s), but " +
+                             std::to_string(overrideIdx.size()) + " parameters were given");
 
   auto resolveIndex = [](int requested, std::size_t size) -> std::size_t {
     if (size == 0) return 0;
@@ -459,8 +499,46 @@ App::App(Options opts) : itsOpts(std::move(opts))
   itsSource->selectLevelIndex(levelIdx);
   activePanel().levelIndex = levelIdx;
 
+  // Resolve the active panel's palette before any further setPanelLayout
+  // grow: setPanelLayout's clone path copies the active panel's palette
+  // into new slots, then re-resolves per parameter.
   loadPalette();
   loadCoastlines();
+
+  // Grow into the requested layout. setPanelLayout clones the active panel
+  // and rotates paramIndex by slot; for explicit overrides we then assign
+  // each slot from the user-provided list (with slot 3 cloning slot 0 when
+  // only 3 parameters were given).
+  if (want > 1)
+  {
+    setPanelLayout(targetLayout);
+    if (!overrideIdx.empty())
+    {
+      const int n = static_cast<int>(itsParamIds.size());
+      for (std::size_t i = 0; i < itsPanels.size(); ++i)
+      {
+        const std::size_t src = (i < overrideIdx.size()) ? i : 0;
+        const int newParamIdx = overrideIdx[src];
+        if (itsPanels[i].paramIndex == newParamIdx) continue;
+        itsPanels[i].paramIndex = newParamIdx;
+        // Re-resolve palette for this slot.
+        const int savedActive = itsActivePanel;
+        itsActivePanel = static_cast<int>(i);
+        if (newParamIdx >= 0 && newParamIdx < n) itsSource->selectParamId(itsParamIds[newParamIdx]);
+        itsSource->selectLevelIndex(itsPanels[i].levelIndex);
+        loadPalette();
+        itsActivePanel = savedActive;
+      }
+      // Restore source to active panel.
+      if (activePanel().paramIndex >= 0 &&
+          activePanel().paramIndex < static_cast<int>(itsParamIds.size()))
+        itsSource->selectParamId(itsParamIds[activePanel().paramIndex]);
+      itsSource->selectLevelIndex(activePanel().levelIndex);
+    }
+  }
+  // The auto-shift toast from loadPalette() is informational; suppress it
+  // on startup so we don't ship the splash with stale text.
+  itsLastMessage.clear();
 }
 
 App::~App() = default;
