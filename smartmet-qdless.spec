@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.5.9
+Version: 26.5.10
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -110,6 +110,14 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-1.fmi
+- Multi-panel layouts. F2 cycles single → side-by-side → 2x2; each panel
+  has its own parameter, level, and palette while sharing the viewport,
+  time, marker, and overlay toggles. Tab / Shift+Tab / digit keys 1–4 /
+  mouse click switch the active panel; parameter / level / legend / probe
+  / cross-section / PNG export operate on it. Per-panel labels at top-left
+  of each panel show "[N] paramName" with the active panel highlighted.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-1.fmi
 - Timeseries probe: a click outside the chart on the map area now picks a
   new probe location instead of closing the popup; the popup loops at the

@@ -584,7 +584,13 @@ void UI::popupHelp()
       {"PgUp PgDn",                 "Cities: sparser / denser"},
       {"/",                         "Place search"},
       {"x",                         "Cross-section"},
-      {"e",                         "Export PNG"},
+      {"e",                         "Export PNG (active panel)"},
+      {"",                          ""},
+      {"F2",                        "Cycle layout: single \xe2\x86\x92 side \xe2\x86\x92 2x2"},
+      {"Tab  Shift+Tab",            "Next / previous active panel"},
+      {"1 2 3 4",                   "Activate panel by number"},
+      {"click (mouse)",             "Activate the panel under the cursor"},
+      {"",                          ""},
       {"?",                         "This help"},
   };
 
