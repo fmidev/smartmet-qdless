@@ -215,6 +215,17 @@ class App
   void overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   void overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   void overlayCities(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
+  // Append a braille-glyph overlay of a polyline set, written AFTER the
+  // renderer's quadrant blocks. Each polyline is rasterised into a 2x4
+  // sub-cell mask (4x finer Y than the data raster); cells with any dots
+  // get a braille glyph in `color` over `pixels[topLeftSubcell]` as bg.
+  // Yields a much thinner-looking line than overlaying into the data
+  // pixel buffer, at the cost of replacing the data quadrant-block in
+  // those cells with a single bg sample.
+  void appendPolylineBraille(std::ostringstream& os,
+                             const std::vector<Polyline>& polylines, Rgb color,
+                             const std::vector<Rgb>& pixels, int subWidth,
+                             int originRow, int originCol) const;
   std::string buildWindArrows(int cellW, int cellH, int originRow, int originCol);
   std::string buildCityLabels(int cellW, int cellH, int originRow, int originCol);
 

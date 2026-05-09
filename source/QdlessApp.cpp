@@ -46,6 +46,25 @@ const char* panelLayoutLabel(PanelLayout l)
   return "Layout: ?";
 }
 
+// Encode a braille codepoint U+2800+mask as a 3-byte UTF-8 string. Mirrors
+// the helper in QdlessUI.cpp (kept duplicated to avoid exposing it as a
+// public symbol; the layouts are identical).
+//   col 0 → bits 0,1,2,6 (rows 0..3); col 1 → bits 3,4,5,7.
+std::string brailleGlyph(unsigned mask)
+{
+  std::string s(3, '\0');
+  s[0] = static_cast<char>(0xE2);
+  s[1] = static_cast<char>(0xA0 | ((mask >> 6) & 0x03));
+  s[2] = static_cast<char>(0x80 | (mask & 0x3F));
+  return s;
+}
+
+unsigned brailleBit(int subCol, int subRow)
+{
+  if (subRow == 3) return (subCol == 0) ? 6U : 7U;
+  return static_cast<unsigned>(subCol * 3 + subRow);
+}
+
 // Append a raw-ANSI cursor positioning + glyph for each cell of a vertical
 // or horizontal separator. `glyph` is a UTF-8 box-drawing character.
 void appendSeparator(std::ostringstream& os, int row, int col, int len, bool vertical,
@@ -1360,6 +1379,108 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
   }
 }
 
+void App::appendPolylineBraille(std::ostringstream& os,
+                                const std::vector<Polyline>& polylines, Rgb color,
+                                const std::vector<Rgb>& pixels, int subWidth,
+                                int originRow, int originCol) const
+{
+  if (polylines.empty() || subWidth <= 0) return;
+  const int cellW = subWidth / 2;
+  const int subHeight = static_cast<int>(pixels.size()) / std::max(1, subWidth);
+  const int cellH = subHeight / 2;
+  if (cellW <= 0 || cellH <= 0) return;
+
+  // Higher-resolution sub-cell grid for the line: 2 cols × 4 rows per cell.
+  const int bW = cellW * 2;
+  const int bH = cellH * 4;
+  std::vector<unsigned char> mask(static_cast<std::size_t>(bW) * bH, 0);
+
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  if (spanU <= 0 || spanV <= 0) return;
+
+  auto plot = [&](int x, int y) {
+    if (x >= 0 && x < bW && y >= 0 && y < bH)
+      mask[static_cast<std::size_t>(y) * bW + x] = 1;
+  };
+
+  auto drawLine = [&](int x0, int y0, int x1, int y1) {
+    int dx = std::abs(x1 - x0);
+    int dy = -std::abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    while (true)
+    {
+      plot(x0, y0);
+      if (x0 == x1 && y0 == y1) break;
+      int e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  };
+
+  auto toSub = [&](float lon, float lat) -> std::pair<int, int> {
+    double u = 0;
+    double v = 0;
+    itsSource->latLonToUV(lat, lon, u, v);
+    const double u01 = (u - itsViewport.uMin) / spanU;
+    const double v01 = (v - itsViewport.vMin) / spanV;
+    return {static_cast<int>(u01 * bW), static_cast<int>(v01 * bH)};
+  };
+
+  for (const auto& pl : polylines)
+  {
+    if (pl.lons.size() < 2) continue;
+    auto prev = toSub(pl.lons[0], pl.lats[0]);
+    for (std::size_t i = 1; i < pl.lons.size(); ++i)
+    {
+      auto cur = toSub(pl.lons[i], pl.lats[i]);
+      if (std::abs(cur.first - prev.first) < bW && std::abs(cur.second - prev.second) < bH)
+        drawLine(prev.first, prev.second, cur.first, cur.second);
+      prev = cur;
+    }
+  }
+
+  // For each cell with any dots, emit a positioned braille glyph. Background
+  // is sampled from the top-left sub-pixel of the cell so the underlying
+  // data colour shows through behind the line dots.
+  std::string out;
+  out.reserve(static_cast<std::size_t>(cellW) * 16);
+  for (int cy = 0; cy < cellH; ++cy)
+  {
+    for (int cx = 0; cx < cellW; ++cx)
+    {
+      unsigned cellMask = 0;
+      for (int sy = 0; sy < 4; ++sy)
+      {
+        for (int sx = 0; sx < 2; ++sx)
+        {
+          const int bx = cx * 2 + sx;
+          const int by = cy * 4 + sy;
+          if (mask[static_cast<std::size_t>(by) * bW + bx] != 0U)
+            cellMask |= 1U << brailleBit(sx, sy);
+        }
+      }
+      if (cellMask == 0U) continue;
+      const Rgb bg = pixels[static_cast<std::size_t>(cy * 2) * subWidth + (cx * 2)];
+      out += "\x1b[";
+      out += std::to_string(originRow + cy + 1);
+      out += ';';
+      out += std::to_string(originCol + cx + 1);
+      out += 'H';
+      out += itsRenderer.bgEscape(bg);
+      out += itsRenderer.fgEscape(color);
+      out += brailleGlyph(cellMask);
+    }
+  }
+  if (!out.empty())
+  {
+    out += "\x1b[0m";
+    os << out;
+  }
+}
+
 void App::overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
 {
   if (!itsMarker.has_value() || subWidth <= 0 || subHeight <= 0) return;
@@ -2265,12 +2386,16 @@ void App::drawMap(UI& ui)
     float dMax = 0;
     auto pixels = sampleSlice(subW, subH, dMin, dMax);
     if (itsShowGraticule) overlayGraticule(pixels, subW, subH);
-    overlayPolylines(pixels, subW, subH, itsCoastlines, Rgb{0, 0, 0});
-    overlayPolylines(pixels, subW, subH, itsBorders, Rgb{90, 90, 90});
     overlayCities(pixels, subW, subH);
     overlayMarker(pixels, subW, subH);
 
     itsRenderer.render(os, pixels, subW, subH, r.row, r.col);
+
+    // Coastlines and borders use a braille overlay on top of the rendered
+    // quadrant blocks so the lines are about 1/2 to 1/4 of a cell wide
+    // instead of half a cell.
+    appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subW, r.row, r.col);
+    appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subW, r.row, r.col);
 
     if (itsShowWindArrows)
       os << buildWindArrows(r.width, r.height, r.row, r.col);
@@ -2345,8 +2470,6 @@ int App::runOnce()
   float dataMin = 0;
   float dataMax = 0;
   auto pixels = sampleSlice(subWidth, subHeight, dataMin, dataMax);
-  overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
-  overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
   overlayCities(pixels, subWidth, subHeight);
   overlayMarker(pixels, subWidth, subHeight);
 
@@ -2365,6 +2488,8 @@ int App::runOnce()
 
   std::ostringstream os;
   itsRenderer.render(os, pixels, subWidth, subHeight, 1, 0);
+  appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subWidth, 1, 0);
+  appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subWidth, 1, 0);
   os << buildCityLabels(cellW, cellH, 1, 0);
   std::cout << os.str() << "\x1b[" << ts.rows << ";1H" << '\n';
   return 0;

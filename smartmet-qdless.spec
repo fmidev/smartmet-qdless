@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 4%{?dist}.fmi
+Release: 5%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,14 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-5.fmi
+- Coastlines and political borders are now drawn as a braille overlay on
+  top of the rendered quadrant blocks (2x4 sub-cell resolution instead of
+  2x2), giving lines that are roughly 1/2 to 1/4 of a cell wide instead
+  of half a cell. Background of cells the line passes through is sampled
+  from the underlying data so the line reads as a thin trail across the
+  data rather than a solid colour block.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-4.fmi
 - Panel separators use one-eighth-block glyphs (▏ U+258F vertical, ▔
   U+2594 horizontal) instead of the heavier ─/│ box-drawing characters.
