@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 12%{?dist}.fmi
+Release: 13%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,14 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-13.fmi
+- Bracket each redraw in DEC mode 2026 (synchronized output) so the
+  timeline header, map, and any persistent overlay (cross-section,
+  marker) commit to the screen as one composed frame. Terminals that
+  don't implement 2026 ignore the private-mode set/reset, so the
+  sequence is safe to emit unconditionally. Removes the brief flash
+  between ncurses-managed UI elements and the raw-ANSI map.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-12.fmi
 - Metadata popup ('M'): wrap long values across continuation rows
   instead of truncating with an ellipsis. The parameter listing on a

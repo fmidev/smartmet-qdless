@@ -2816,6 +2816,13 @@ int App::runInteractive()
   {
     if (needRedraw)
     {
+      // DEC mode 2026 (synchronized output): the terminal buffers all
+      // rendering between begin and end so the user sees one composed
+      // frame instead of timeline → map → popup as three flashes.
+      // Terminals that don't support 2026 ignore the private-mode set,
+      // so the sequence is safe to emit unconditionally.
+      std::fputs("\x1b[?2026h", stdout);
+
       // Order matters: ncurses' first doupdate() force-paints the whole
       // screen with blanks, which would clobber a raw-ANSI map written
       // beforehand. So commit ncurses windows first, then draw the map
@@ -2823,6 +2830,9 @@ int App::runInteractive()
       renderTimeline(ui);
       drawMap(ui);
       drawCrossSection(ui);
+
+      std::fputs("\x1b[?2026l", stdout);
+      std::fflush(stdout);
       needRedraw = false;
     }
 
