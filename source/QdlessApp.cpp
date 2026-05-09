@@ -791,7 +791,93 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
   return out;
 }
 
-void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
+std::vector<App::ViewportStats> App::ensureViewportStats() const
+{
+  // Cache hit: same param, level, and viewport as last computation.
+  // Compare viewport components with a small epsilon — an interactive
+  // pan/zoom always produces a numerically distinct viewport, but
+  // exact-equality is fragile against floating-point round-trips.
+  const int paramId = itsSource->currentParamId();
+  const std::size_t levelIdx = itsSource->currentLevelIndex();
+  constexpr float kEps = 1e-6F;
+  if (itsStatsCacheValid && itsStatsCacheParam == paramId &&
+      itsStatsCacheLevel == levelIdx &&
+      std::fabs(itsStatsCacheViewport.uMin - itsViewport.uMin) < kEps &&
+      std::fabs(itsStatsCacheViewport.uMax - itsViewport.uMax) < kEps &&
+      std::fabs(itsStatsCacheViewport.vMin - itsViewport.vMin) < kEps &&
+      std::fabs(itsStatsCacheViewport.vMax - itsViewport.vMax) < kEps)
+    return itsStatsCacheSeries;
+
+  // Sample at a fixed resolution that's coarser than the screen but
+  // dense enough for stable min / max estimation. 256x128 is ~33k
+  // samples per time step, around 1M total for a 24-step file —
+  // well under a second on a modern CPU.
+  constexpr int kSampleW = 256;
+  constexpr int kSampleH = 128;
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+
+  const std::size_t nt = itsSource->timeCount();
+  std::vector<ViewportStats> out(nt);
+  if (nt == 0 || spanU <= 0 || spanV <= 0)
+  {
+    itsStatsCacheParam = paramId;
+    itsStatsCacheLevel = levelIdx;
+    itsStatsCacheViewport = itsViewport;
+    itsStatsCacheSeries = out;
+    itsStatsCacheValid = true;
+    return itsStatsCacheSeries;
+  }
+
+  // Save and restore the source's time index so we don't disturb the
+  // outer UI state (timeline, animation, etc).
+  auto* mut = const_cast<DataSource*>(itsSource.get());
+  const std::size_t savedTime = itsSource->currentTimeIndex();
+  for (std::size_t t = 0; t < nt; ++t)
+  {
+    mut->selectTimeIndex(t);
+    double sum = 0;
+    int count = 0;
+    float lo = std::numeric_limits<float>::infinity();
+    float hi = -std::numeric_limits<float>::infinity();
+    for (int sy = 0; sy < kSampleH; ++sy)
+    {
+      const float vp = itsViewport.vMin + (static_cast<float>(sy) + 0.5F) / kSampleH * spanV;
+      for (int sx = 0; sx < kSampleW; ++sx)
+      {
+        const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / kSampleW * spanU;
+        double lat = 0;
+        double lon = 0;
+        itsSource->uvToLatLon(up, vp, lat, lon);
+        const float val = transform(itsSource->interpolatedValue(lat, lon));
+        if (val == kFloatMissing || !std::isfinite(val) || std::fabs(val) > 1e6F) continue;
+        sum += val;
+        ++count;
+        lo = std::min(lo, val);
+        hi = std::max(hi, val);
+      }
+    }
+    ViewportStats s;
+    if (count > 0)
+    {
+      s.min = lo;
+      s.max = hi;
+      s.mean = static_cast<float>(sum / count);
+      s.valid = true;
+    }
+    out[t] = s;
+  }
+  mut->selectTimeIndex(savedTime);
+
+  itsStatsCacheParam = paramId;
+  itsStatsCacheLevel = levelIdx;
+  itsStatsCacheViewport = itsViewport;
+  itsStatsCacheSeries = std::move(out);
+  itsStatsCacheValid = true;
+  return itsStatsCacheSeries;
+}
+
+void App::beginCrossSection(int x1, int y1, int x2, int y2, UI& ui)
 {
   double lat1 = 0;
   double lon1 = 0;
@@ -800,12 +886,30 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   if (!cellToLatLon(ui, x1, y1, lat1, lon1) || !cellToLatLon(ui, x2, y2, lat2, lon2))
     return;
 
-  const int nLevels = static_cast<int>(itsSource->levelCount());
-  if (nLevels < 2)
+  if (itsSource->levelCount() < 2)
   {
     itsLastMessage = "Cross-section needs >= 2 levels in the file";
     return;
   }
+
+  itsCrossLat1 = lat1;
+  itsCrossLon1 = lon1;
+  itsCrossLat2 = lat2;
+  itsCrossLon2 = lon2;
+  itsCrossActive = true;
+}
+
+void App::drawCrossSection(UI& ui)
+{
+  if (!itsCrossActive) return;
+
+  const double lat1 = itsCrossLat1;
+  const double lon1 = itsCrossLon1;
+  const double lat2 = itsCrossLat2;
+  const double lon2 = itsCrossLon2;
+
+  const int nLevels = static_cast<int>(itsSource->levelCount());
+  if (nLevels < 2) return;
 
   // Collect level values + sort indices so the popup shows high altitude /
   // low pressure on top.
@@ -939,10 +1043,13 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
 
   // Footer.
   pos(3 + chartH);
-  std::string_view footer = " any key to close";
+  std::string_view footer = " 'x' close, \xe2\x86\x90/\xe2\x86\x92 step time, Space animate";
+  // The arrows are 3 bytes each in UTF-8 but render as 1 cell, so subtract
+  // the byte/cell skew when computing visible width for padding.
+  const int footerCells = static_cast<int>(footer.size()) - 4;  // 2 arrows * 2 extra bytes
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m"
      << footer;
-  padSpaces(os, interiorW - static_cast<int>(footer.size()));
+  padSpaces(os, interiorW - footerCells);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
 
   // Bottom border.
@@ -954,10 +1061,7 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   const std::string s = os.str();
   std::fwrite(s.data(), 1, s.size(), stdout);
   std::fflush(stdout);
-
-  // Wait for keypress to dismiss.
-  // Direct ncurses wgetch on stdscr would refresh stdscr; route through UI.
-  ui.waitInput();
+  (void)ui;  // popup is non-modal; main loop handles input
 }
 
 bool App::ensureCityIndex() const
@@ -2110,10 +2214,24 @@ void App::openProbeAt(double lat, double lon, UI& ui)
 
     int clickRow = -1;
     int clickCol = -1;
+    auto computeStats = [this]() {
+      UI::StatsSeries s;
+      const auto cached = ensureViewportStats();
+      s.min.reserve(cached.size());
+      s.mean.reserve(cached.size());
+      s.max.reserve(cached.size());
+      for (const auto& vs : cached)
+      {
+        s.min.push_back(vs.valid ? vs.min : kFloatMissing);
+        s.mean.push_back(vs.valid ? vs.mean : kFloatMissing);
+        s.max.push_back(vs.valid ? vs.max : kFloatMissing);
+      }
+      return s;
+    };
     int finalIdx = ui.popupTimeseries(param, lat, lon, series, timeLabels,
                                       static_cast<int>(savedTime), itsRenderer,
-                                      activePanel().palette, onTimeChange, avoidRow, avoidCol,
-                                      &clickRow, &clickCol);
+                                      activePanel().palette, onTimeChange, computeStats,
+                                      avoidRow, avoidCol, &clickRow, &clickCol);
     itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
 
     if (clickRow < 0 || clickCol < 0) break;  // closed via keyboard
@@ -2315,15 +2433,20 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
     case 'x':
     case 'X':
-      if (itsCrossPicks == 0)
-      {
-        itsCrossPicks = 2;
-        itsLastMessage = "Cross-section: click first endpoint";
-      }
-      else
+      if (itsCrossPicks > 0)
       {
         itsCrossPicks = 0;
         itsLastMessage = "Cross-section cancelled";
+      }
+      else if (itsCrossActive)
+      {
+        itsCrossActive = false;
+        itsLastMessage = "Cross-section closed";
+      }
+      else
+      {
+        itsCrossPicks = 2;
+        itsLastMessage = "Cross-section: click first endpoint";
       }
       return true;
 
@@ -2503,9 +2626,9 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         }
         else
         {
-          renderCrossSection(itsCrossX1, itsCrossY1, ev.x, ev.y, ui);
+          beginCrossSection(itsCrossX1, itsCrossY1, ev.x, ev.y, ui);
           itsCrossPicks = 0;
-          itsLastMessage.clear();
+          if (itsCrossActive) itsLastMessage.clear();
         }
         return true;
       }
@@ -2699,6 +2822,7 @@ int App::runInteractive()
       // on top via raw escapes.
       renderTimeline(ui);
       drawMap(ui);
+      drawCrossSection(ui);
       needRedraw = false;
     }
 

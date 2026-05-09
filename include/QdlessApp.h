@@ -187,6 +187,14 @@ class App
   int itsCrossPicks = 0;
   int itsCrossX1 = 0;
   int itsCrossY1 = 0;
+  // Persistent cross-section overlay. When active, the popup is redrawn
+  // each frame from the stored geographic endpoints so time-stepping
+  // (left/right) and animation (Space) keep working with it open.
+  bool itsCrossActive = false;
+  double itsCrossLat1 = 0;
+  double itsCrossLon1 = 0;
+  double itsCrossLat2 = 0;
+  double itsCrossLon2 = 0;
 
   // Animation state.
   bool itsAnimating = false;
@@ -260,14 +268,45 @@ class App
   // city's lat/lon (zoomed to a regional view).
   void openPlaceSearch(UI& ui);
 
-  // Render a cross-section popup of the current parameter from (x1,y1) to
-  // (x2,y2) in cell coords, sampled across all levels.
-  void renderCrossSection(int x1, int y1, int x2, int y2, UI& ui);
+  // Activate the persistent cross-section overlay between two click cells.
+  // Validates levels and stores the geographic endpoints; drawCrossSection
+  // is then called from the main loop on each redraw.
+  void beginCrossSection(int x1, int y1, int x2, int y2, UI& ui);
+  // Render the cross-section popup at the current time / parameter using
+  // the stored endpoints. No-op when itsCrossActive is false.
+  void drawCrossSection(UI& ui);
 
   // Compose the (label, value) rows for the metadata popup ('M').
   // Combines common fields (file path, size, time/level/param counts,
   // lat/lon extent, parameter listing) with backend-specific extras from
   // DataSource::extraMetadata().
   std::vector<std::pair<std::string, std::string>> buildMetadataRows() const;
+
+  // Min / mean / max of the active panel's parameter sampled across the
+  // currently-visible cells of the viewport, one entry per time step.
+  // Drawn as a translucent overlay on the time-series probe popup ('s'
+  // toggles the overlay).
+  struct ViewportStats
+  {
+    float min = 0;
+    float mean = 0;
+    float max = 0;
+    bool valid = false;  // false when the slice contains no finite samples
+  };
+
+  // Fetch (computing on cache miss) the viewport stats series for the
+  // active panel's (param, level) at the current viewport. Cached so
+  // re-opening the probe popup at a different point — or the eventual
+  // in-popup time animation — reuses the result without rescanning. The
+  // cache invalidates on viewport / param / level change.
+  std::vector<ViewportStats> ensureViewportStats() const;
+
+  // Cache for ensureViewportStats(). Invalidated on viewport/param/
+  // level mismatch. Mutable so const probes can refresh it on demand.
+  mutable bool itsStatsCacheValid = false;
+  mutable int itsStatsCacheParam = -1;
+  mutable std::size_t itsStatsCacheLevel = 0;
+  mutable Viewport itsStatsCacheViewport{};
+  mutable std::vector<ViewportStats> itsStatsCacheSeries;
 };
 }  // namespace Qdless

@@ -574,6 +574,7 @@ void UI::popupHelp()
       {"click (mouse)",             "Time-series probe at point"},
       {"\xe2\x86\x90 \xe2\x86\x92 in probe",
                                     "Step time, map updates"},
+      {"s in probe",                "Toggle viewport min/mean/max overlay"},
       {"",                          ""},
       {"g",                         "Legend"},
       {"c",                         "Coastlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off"},
@@ -910,7 +911,8 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
                         const std::vector<float>& series,
                         const std::vector<std::string>& timeLabels, int currentIndex,
                         const Renderer& renderer, const Palette& palette,
-                        std::function<void(int)> onTimeChange, int avoidCellRow,
+                        std::function<void(int)> onTimeChange,
+                        std::function<StatsSeries()> computeStats, int avoidCellRow,
                         int avoidCellCol, int* outClickRow, int* outClickCol)
 {
   (void)palette;  // reserved for future colour-by-band line rendering
@@ -918,38 +920,65 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   if (outClickCol) *outClickCol = -1;
   if (series.empty()) return currentIndex;
 
-  // Compute value range over finite samples.
-  float dataLo = std::numeric_limits<float>::infinity();
-  float dataHi = -std::numeric_limits<float>::infinity();
-  int finiteCount = 0;
-  for (float v : series)
-    if (finiteValue(v))
+  // Stats overlay state. Lazily fetched on first 's' press; the App
+  // caches the underlying scan, so re-toggling within a probe (or
+  // re-opening the probe at a new coordinate within the same viewport)
+  // is instant.
+  StatsSeries stats;
+  bool statsVisible = false;
+  bool statsAttempted = false;
+
+  // Recomputed on every show/hide of the stats overlay so the chart
+  // expands or contracts to fit the visible curves.
+  float dataLo = 0;
+  float dataHi = 1;
+  double tickStep = 1.0;
+  float vmin = 0;
+  float vmax = 1;
+  int decimals = 0;
+
+  auto rebuildAxis = [&]() {
+    dataLo = std::numeric_limits<float>::infinity();
+    dataHi = -std::numeric_limits<float>::infinity();
+    int finiteCount = 0;
+    auto includeSeries = [&](const std::vector<float>& s) {
+      for (float v : s)
+        if (finiteValue(v))
+        {
+          dataLo = std::min(dataLo, v);
+          dataHi = std::max(dataHi, v);
+          ++finiteCount;
+        }
+    };
+    includeSeries(series);
+    if (statsVisible)
     {
-      dataLo = std::min(dataLo, v);
-      dataHi = std::max(dataHi, v);
-      ++finiteCount;
+      includeSeries(stats.min);
+      includeSeries(stats.mean);
+      includeSeries(stats.max);
     }
-  if (finiteCount == 0)
-  {
-    dataLo = 0;
-    dataHi = 1;
-  }
-  if (dataHi - dataLo < 1e-6F)
-  {
-    dataLo -= 0.5F;
-    dataHi += 0.5F;
-  }
-  // Compute "nice" axis bounds and tick step (1, 2 or 5 × 10^k) so the Y
-  // axis labels are clean integers / decimals rather than raw extrema.
-  const int desiredLabels = 5;
-  const double tickStep = niceStep(static_cast<double>(dataHi - dataLo), desiredLabels);
-  const double niceMin = std::floor(dataLo / tickStep) * tickStep;
-  const double niceMax = std::ceil(dataHi / tickStep) * tickStep;
-  const float vmin = static_cast<float>(niceMin);
-  const float vmax = static_cast<float>(niceMax);
-  // Decimals based on the step's magnitude.
-  const int stepExp = static_cast<int>(std::floor(std::log10(tickStep)));
-  const int decimals = std::max(0, -stepExp);
+    if (finiteCount == 0)
+    {
+      dataLo = 0;
+      dataHi = 1;
+    }
+    if (dataHi - dataLo < 1e-6F)
+    {
+      dataLo -= 0.5F;
+      dataHi += 0.5F;
+    }
+    // Compute "nice" axis bounds and tick step (1, 2 or 5 × 10^k) so
+    // the Y axis labels are clean integers / decimals.
+    constexpr int desiredLabels = 5;
+    tickStep = niceStep(static_cast<double>(dataHi - dataLo), desiredLabels);
+    const double niceMin = std::floor(dataLo / tickStep) * tickStep;
+    const double niceMax = std::ceil(dataHi / tickStep) * tickStep;
+    vmin = static_cast<float>(niceMin);
+    vmax = static_cast<float>(niceMax);
+    const int stepExp = static_cast<int>(std::floor(std::log10(tickStep)));
+    decimals = std::max(0, -stepExp);
+  };
+  rebuildAxis();
 
   // Header lines that don't change as the marker moves.
   const std::string latlonBuf = fmt::format("{:.4f}°N  {:.4f}°E", lat, lon);
@@ -967,31 +996,45 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   const int chartH = std::max(4, desiredChartH);
 
   // Format axis labels with the precision dictated by the chosen step.
-  auto fmtAxis = [decimals](double v) {
+  // `decimals` is captured by reference so toggling stats picks up the
+  // updated precision.
+  auto fmtAxis = [&decimals](double v) {
     std::string tmp = fmt::format("{:.{}f}", v, decimals);
     // Avoid "-0" output.
     if (tmp == std::string("-") + std::string(decimals + 1, '0').replace(1, 1, "."))
       tmp = fmt::format("{:.{}f}", 0.0, decimals);
     return tmp;
   };
-  int labelW = std::max(utf8Width(fmtAxis(niceMin)), utf8Width(fmtAxis(niceMax)));
+  // Pick label-column width once based on the initial axis range. Don't
+  // resize the popup on stats toggle — a wider stats range typically still
+  // fits in 5–6 chars; if it doesn't, the rightmost digits clip rather
+  // than the popup jumping geometry.
+  int labelW = std::max(utf8Width(fmtAxis(static_cast<double>(vmin))),
+                        utf8Width(fmtAxis(static_cast<double>(vmax))));
   labelW = std::max(labelW, 3);
   const int chartLeftPad = labelW + 3;  // " <label> ┤"
 
-  // Build the tick set and map each tick to its chart row.
+  // Recomputed on every axis change.
   std::vector<bool> hasLabel(chartH, false);
   std::vector<double> labelValue(chartH, 0);
-  if (niceMax > niceMin)
-  {
-    for (double t = niceMin; t <= niceMax + tickStep * 0.5; t += tickStep)
+  auto rebuildLabels = [&]() {
+    std::fill(hasLabel.begin(), hasLabel.end(), false);
+    std::fill(labelValue.begin(), labelValue.end(), 0.0);
+    if (vmax > vmin)
     {
-      const double frac = (niceMax - t) / (niceMax - niceMin);  // 0 at top
-      const int row =
-          std::clamp(static_cast<int>(std::lround(frac * (chartH - 1))), 0, chartH - 1);
-      hasLabel[row] = true;
-      labelValue[row] = t;
+      const double dvmin = vmin;
+      const double dvmax = vmax;
+      for (double t = dvmin; t <= dvmax + tickStep * 0.5; t += tickStep)
+      {
+        const double frac = (dvmax - t) / (dvmax - dvmin);  // 0 at top
+        const int row =
+            std::clamp(static_cast<int>(std::lround(frac * (chartH - 1))), 0, chartH - 1);
+        hasLabel[row] = true;
+        labelValue[row] = t;
+      }
     }
-  }
+  };
+  rebuildLabels();
 
   const bool showTimeRow = !timeLabels.empty();
   // Width must also fit the time label if present (e.g. "2026-05-08 12:00 UTC").
@@ -1000,7 +1043,7 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
     for (const auto& t : timeLabels) timeMaxW = std::max(timeMaxW, utf8Width(t));
   const std::string footer =
       "\xe2\x86\x90\xe2\x86\x92 / click / drag step time   "
-      "click map: re-probe   any key: close";
+      "s: viewport stats   click map: re-probe   any key: close";
   const int width = std::max({chartW + chartLeftPad + 4,
                               utf8Width(paramName) + 6,
                               utf8Width(latlonBuf) + 6,
@@ -1021,79 +1064,107 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
   }
   const int interiorW = width - 2;
 
-  // Build the braille bitmask grid.
+  // Braille sub-cell coordinates: 2 columns × 4 rows per chart cell.
   const int subW = chartW * 2;
   const int subH = chartH * 4;
-  std::vector<unsigned> grid(static_cast<std::size_t>(chartW) * chartH, 0U);
-
-  auto setDot = [&](int sx, int sy) {
-    if (sx < 0 || sx >= subW || sy < 0 || sy >= subH) return;
-    const int cx = sx / 2;
-    const int cy = sy / 4;
-    grid[static_cast<std::size_t>(cy) * chartW + cx] |= 1U << brailleBit(sx % 2, sy % 4);
+  const int n = static_cast<int>(series.size());
+  auto sampleSubX = [&](int idx) {
+    return (n > 1) ? (idx * (subW - 1) / (n - 1)) : (subW / 2);
   };
+
+  // Up to four overlaid series (point + stats min/mean/max), each with
+  // its own braille mask grid and colour. Indices below are ordered by
+  // priority: when multiple series have a dot in the same cell, we draw
+  // the highest-numbered one (point series wins over stats so the user's
+  // probe is always foreground).
+  enum SeriesIdx
+  {
+    kStatsMin = 0,
+    kStatsMax = 1,
+    kStatsMean = 2,
+    kPoint = 3,
+    kSeriesCount = 4,
+  };
+  std::array<std::vector<unsigned>, kSeriesCount> grids;
+  for (auto& g : grids) g.assign(static_cast<std::size_t>(chartW) * chartH, 0U);
 
   auto valueToSubY = [&](float v) -> int {
     const float yn = (v - vmin) / (vmax - vmin);
     return std::clamp(static_cast<int>(std::lround((1.0F - yn) * (subH - 1))), 0, subH - 1);
   };
 
-  // Render the line by walking pairs of consecutive samples and connecting
-  // them with a Bresenham line in sub-cell coordinates.
-  const int n = static_cast<int>(series.size());
-  auto sampleSubX = [&](int idx) {
-    return (n > 1) ? (idx * (subW - 1) / (n - 1)) : (subW / 2);
+  auto setDot = [&](std::vector<unsigned>& g, int sx, int sy) {
+    if (sx < 0 || sx >= subW || sy < 0 || sy >= subH) return;
+    const int cx = sx / 2;
+    const int cy = sy / 4;
+    g[static_cast<std::size_t>(cy) * chartW + cx] |= 1U << brailleBit(sx % 2, sy % 4);
   };
 
-  int prevSx = -1;
-  int prevSy = -1;
-  bool prevValid = false;
-  for (int i = 0; i < n; ++i)
-  {
-    if (!finiteValue(series[i]))
+  // Rasterise one series via Bresenham line segments. Missing values
+  // break the line so jumps don't connect across gaps.
+  auto rasterise = [&](std::vector<unsigned>& g, const std::vector<float>& s) {
+    int prevSx = -1;
+    int prevSy = -1;
+    bool prevValid = false;
+    const int sn = static_cast<int>(s.size());
+    for (int i = 0; i < sn; ++i)
     {
-      prevValid = false;
-      continue;
-    }
-    const int sx = sampleSubX(i);
-    const int sy = valueToSubY(series[i]);
-    if (prevValid)
-    {
-      // Bresenham between (prevSx, prevSy) and (sx, sy).
-      int x0 = prevSx;
-      int y0 = prevSy;
-      const int x1 = sx;
-      const int y1 = sy;
-      const int dx = std::abs(x1 - x0);
-      const int dy = -std::abs(y1 - y0);
-      const int sxStep = x0 < x1 ? 1 : -1;
-      const int syStep = y0 < y1 ? 1 : -1;
-      int err = dx + dy;
-      while (true)
+      if (!finiteValue(s[i]))
       {
-        setDot(x0, y0);
-        if (x0 == x1 && y0 == y1) break;
-        const int e2 = 2 * err;
-        if (e2 >= dy)
+        prevValid = false;
+        continue;
+      }
+      const int sx = (sn > 1) ? (i * (subW - 1) / (sn - 1)) : (subW / 2);
+      const int sy = valueToSubY(s[i]);
+      if (prevValid)
+      {
+        int x0 = prevSx;
+        int y0 = prevSy;
+        const int x1 = sx;
+        const int y1 = sy;
+        const int dx = std::abs(x1 - x0);
+        const int dy = -std::abs(y1 - y0);
+        const int sxStep = x0 < x1 ? 1 : -1;
+        const int syStep = y0 < y1 ? 1 : -1;
+        int err = dx + dy;
+        while (true)
         {
-          err += dy;
-          x0 += sxStep;
-        }
-        if (e2 <= dx)
-        {
-          err += dx;
-          y0 += syStep;
+          setDot(g, x0, y0);
+          if (x0 == x1 && y0 == y1) break;
+          const int e2 = 2 * err;
+          if (e2 >= dy)
+          {
+            err += dy;
+            x0 += sxStep;
+          }
+          if (e2 <= dx)
+          {
+            err += dx;
+            y0 += syStep;
+          }
         }
       }
+      else
+      {
+        setDot(g, sx, sy);
+      }
+      prevSx = sx;
+      prevSy = sy;
+      prevValid = true;
     }
-    else
+  };
+
+  auto rebuildGrids = [&]() {
+    for (auto& g : grids) std::fill(g.begin(), g.end(), 0U);
+    rasterise(grids[kPoint], series);
+    if (statsVisible)
     {
-      setDot(sx, sy);
+      if (!stats.min.empty()) rasterise(grids[kStatsMin], stats.min);
+      if (!stats.max.empty()) rasterise(grids[kStatsMax], stats.max);
+      if (!stats.mean.empty()) rasterise(grids[kStatsMean], stats.mean);
     }
-    prevSx = sx;
-    prevSy = sy;
-    prevValid = true;
-  }
+  };
+  rebuildGrids();
 
   // First chart row offset (logical, relative to popup top): top border +
   // paramName + latlonBuf + optional timeBuf + rangeBuf.
@@ -1110,13 +1181,37 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
         (markerIdx >= 0 && markerIdx < static_cast<int>(series.size()))
             ? series[markerIdx]
             : std::numeric_limits<float>::quiet_NaN();
-    const std::string rangeBuf =
-        finiteValue(curVal)
-            ? fmt::format("min {:.{}f}  max {:.{}f}  step {}/{}  now {:.{}f}", dataLo, decimals,
-                          dataHi, decimals, markerIdx + 1, static_cast<int>(series.size()),
-                          curVal, decimals)
-            : fmt::format("min {:.{}f}  max {:.{}f}  step {}/{}  now -", dataLo, decimals, dataHi,
-                          decimals, markerIdx + 1, static_cast<int>(series.size()));
+    // When stats are visible, the second info line shows the
+    // viewport-wide min/mean/max at the marker's time step instead of
+    // duplicating the point-series min/max (which the chart already
+    // makes obvious).
+    std::string rangeBuf;
+    if (statsVisible && markerIdx >= 0 && markerIdx < static_cast<int>(stats.mean.size()))
+    {
+      const float vMin = stats.min[markerIdx];
+      const float vMean = stats.mean[markerIdx];
+      const float vMax = stats.max[markerIdx];
+      const std::string nowPart =
+          finiteValue(curVal) ? fmt::format("now {:.{}f}", curVal, decimals) : std::string("now -");
+      if (finiteValue(vMean))
+        rangeBuf = fmt::format(
+            "viewport min {:.{}f}  mean {:.{}f}  max {:.{}f}  step {}/{}  {}",
+            vMin, decimals, vMean, decimals, vMax, decimals, markerIdx + 1,
+            static_cast<int>(series.size()), nowPart);
+      else
+        rangeBuf = fmt::format("viewport: no finite samples  step {}/{}  {}",
+                               markerIdx + 1, static_cast<int>(series.size()), nowPart);
+    }
+    else
+    {
+      rangeBuf = finiteValue(curVal)
+                     ? fmt::format("min {:.{}f}  max {:.{}f}  step {}/{}  now {:.{}f}",
+                                   dataLo, decimals, dataHi, decimals, markerIdx + 1,
+                                   static_cast<int>(series.size()), curVal, decimals)
+                     : fmt::format("min {:.{}f}  max {:.{}f}  step {}/{}  now -",
+                                   dataLo, decimals, dataHi, decimals, markerIdx + 1,
+                                   static_cast<int>(series.size()));
+    }
 
     std::ostringstream os;
 
@@ -1172,24 +1267,42 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
         os << " \xe2\x94\x82";  // axis │
       }
 
-      // Chart cells.
+      // Per-series colour. Min/max are dim grey (envelope), mean is dim
+      // cyan, point series stays bright white. Marker cells override fg
+      // to red to keep the time cursor unambiguous.
+      static constexpr std::array<std::string_view, kSeriesCount> kSeriesFg = {
+          "\x1b[38;5;240m",  // min — dark grey
+          "\x1b[38;5;240m",  // max — dark grey
+          "\x1b[38;5;38m",   // mean — teal
+          "\x1b[38;5;15m",   // point series — white
+      };
       for (int cx = 0; cx < chartW; ++cx)
       {
         const bool inMarker = (markerSubX >= 0 && (markerSubX / 2) == cx);
-        const unsigned mask = grid[static_cast<std::size_t>(cy) * chartW + cx];
-        if (inMarker && mask == 0)
+        const std::size_t cellIdx = static_cast<std::size_t>(cy) * chartW + cx;
+        // Pick the highest-priority series with a dot in this cell.
+        int chosen = -1;
+        for (int s = kSeriesCount - 1; s >= 0; --s)
+        {
+          if (grids[s][cellIdx] != 0U)
+          {
+            chosen = s;
+            break;
+          }
+        }
+        if (inMarker && chosen < 0)
         {
           os << kEscFgRed << "\xe2\x94\x82" << kEscFgWhite;
         }
-        else if (mask == 0)
+        else if (chosen < 0)
         {
           os << ' ';
         }
         else
         {
-          if (inMarker) os << kEscFgRed;
-          os << brailleGlyph(mask);
-          if (inMarker) os << kEscFgWhite;
+          os << (inMarker ? kEscFgRed : kSeriesFg[chosen]);
+          os << brailleGlyph(grids[chosen][cellIdx]);
+          os << kEscFgWhite;
         }
       }
       // Right-side padding inside the box.
@@ -1262,6 +1375,26 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
       {
         idx = static_cast<int>(series.size()) - 1;
         invokeChange();
+      }
+      continue;
+    }
+    if (ch == 's' || ch == 'S')
+    {
+      // Toggle the viewport-stats overlay. First toggle pulls the data
+      // from the App-side cache (computeStats); subsequent toggles just
+      // hide/show — the popup keeps its own copy alive.
+      if (!statsAttempted && computeStats)
+      {
+        statsAttempted = true;
+        stats = computeStats();
+      }
+      const bool hasAnyStats = !stats.empty();
+      if (hasAnyStats)
+      {
+        statsVisible = !statsVisible;
+        rebuildAxis();
+        rebuildLabels();
+        rebuildGrids();
       }
       continue;
     }

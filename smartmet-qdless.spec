@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 9%{?dist}.fmi
+Release: 10%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,18 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-10.fmi
+- Time-series probe: press `s` inside the popup to overlay viewport
+  min/mean/max curves on top of the point series. Stats are computed
+  once across the visible cells (256x128 samples per time step) and
+  cached at the App level keyed on (param, level, viewport), so
+  re-toggling, re-probing at a new coordinate, or animating across
+  time within the same view reuses the result without rescanning.
+  The chart's Y axis auto-expands to fit the stats range, and the
+  info line switches from point-series min/max to viewport min/mean/
+  max. Cache invalidates when the viewport, parameter, or level
+  changes.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-9.fmi
 - New `M` key opens a metadata popup listing file path, format (GRIB1/2,
   NetCDF, QueryData), grid type and dimensions, lat/lon extent, reference
