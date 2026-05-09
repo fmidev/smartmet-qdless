@@ -81,6 +81,13 @@ class GridFilesSource : public DataSource
   // call; returns false if the grid is missing or has < 2x2 dimensions.
   bool ensureGridGeometry() const;
 
+  // Swap-aware wrappers around getGridLatLonCoordinatesByGridPosition /
+  // getGridPointByLatLonCoordinates. See `itsCoordsSwapped`.
+  bool readGridLatLon(SmartMet::GRID::Message* msg, double gi, double gj,
+                      double& lat, double& lon) const;
+  bool lookupGridPoint(SmartMet::GRID::Message* msg, double lat, double lon,
+                       double& gi, double& gj) const;
+
   std::unique_ptr<SmartMet::GRID::GridFile> itsFile;
   std::vector<int> itsParamIds;            // newbase IDs (resolved via name)
   std::vector<std::string> itsParamUnits;  // parallel to itsParamIds
@@ -108,5 +115,13 @@ class GridFilesSource : public DataSource
   // True if grid_j=0 is at the northern edge (j increases southward).
   // False if grid_j=0 is at the southern edge (j increases northward).
   mutable bool itsScanFromNorth = false;
+  // grid-files' getGridLatLonCoordinatesByGridPosition / getGridPointBy-
+  // LatLonCoordinates document `(lat, lon)` ordering, but the NetCDF
+  // implementation actually returns / expects `(lon, lat)` (verified
+  // against the file's getGridLatLonArea corners). Detect at startup by
+  // comparing the (0,0) result to the bottom-left corner; if swapped, we
+  // unswap on every call so the rest of the code can treat the API
+  // consistently.
+  mutable bool itsCoordsSwapped = false;
 };
 }  // namespace Qdless

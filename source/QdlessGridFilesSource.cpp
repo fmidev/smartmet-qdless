@@ -340,6 +340,10 @@ float GridFilesSource::interpolatedValue(double lat, double lon) const
   if (msg == nullptr)
     return std::numeric_limits<float>::quiet_NaN();
   // 1 = Linear (bilinear) per T::AreaInterpolationMethod.
+  // Note: unlike getGridLatLonCoordinatesByGridPosition / getGridPointBy-
+  // LatLonCoordinates (whose argument ordering varies per backend — see
+  // itsCoordsSwapped), getGridValueByLatLonCoordinate consistently takes
+  // (lat, lon), so no swap-aware wrapper is needed here.
   return static_cast<float>(msg->getGridValueByLatLonCoordinate(lat, lon, 1));
 }
 
@@ -363,13 +367,37 @@ bool GridFilesSource::ensureGridGeometry() const
     itsNy = d.ny();
     if (itsNx < 2 || itsNy < 2)
       return false;
+
+    // Detect the lat/lon argument-ordering of getGridLatLonCoordinates-
+    // ByGridPosition by comparing its (0, 0) output to the bottom-left
+    // corner reported by getGridLatLonArea (which uses (x=lon, y=lat) and
+    // is reliable). Different grid-files backends fill the (lat, lon) out-
+    // params in different orders — GRIB returns (lat, lon) per the docs,
+    // NetCDF actually returns (lon, lat).
+    itsCoordsSwapped = false;
+    T::Coordinate tl;
+    T::Coordinate tr;
+    T::Coordinate bl;
+    T::Coordinate br;
+    if (msg->getGridLatLonArea(tl, tr, bl, br))
+    {
+      double a = 0;
+      double b = 0;
+      if (msg->getGridLatLonCoordinatesByGridPosition(0, 0, a, b))
+      {
+        const double dDirect = std::abs(a - bl.y()) + std::abs(b - bl.x());
+        const double dSwapped = std::abs(a - bl.x()) + std::abs(b - bl.y());
+        itsCoordsSwapped = (dSwapped < dDirect);
+      }
+    }
+
     double lat0 = 0;
     double lon0 = 0;
     double lat1 = 0;
     double lon1 = 0;
-    if (!msg->getGridLatLonCoordinatesByGridPosition(0, 0, lat0, lon0))
+    if (!readGridLatLon(msg, 0, 0, lat0, lon0))
       return false;
-    if (!msg->getGridLatLonCoordinatesByGridPosition(0, itsNy - 1, lat1, lon1))
+    if (!readGridLatLon(msg, 0, itsNy - 1, lat1, lon1))
       return false;
     itsScanFromNorth = (lat0 > lat1);
     itsGeometryValid = true;
@@ -379,6 +407,34 @@ bool GridFilesSource::ensureGridGeometry() const
   {
     return false;
   }
+}
+
+bool GridFilesSource::readGridLatLon(SmartMet::GRID::Message* msg, double gi, double gj,
+                                     double& lat, double& lon) const
+{
+  double a = 0;
+  double b = 0;
+  if (!msg->getGridLatLonCoordinatesByGridPosition(gi, gj, a, b))
+    return false;
+  if (itsCoordsSwapped)
+  {
+    lat = b;
+    lon = a;
+  }
+  else
+  {
+    lat = a;
+    lon = b;
+  }
+  return true;
+}
+
+bool GridFilesSource::lookupGridPoint(SmartMet::GRID::Message* msg, double lat, double lon,
+                                      double& gi, double& gj) const
+{
+  if (itsCoordsSwapped)
+    return msg->getGridPointByLatLonCoordinates(lon, lat, gi, gj);
+  return msg->getGridPointByLatLonCoordinates(lat, lon, gi, gj);
 }
 
 void GridFilesSource::uvToLatLon(double u, double v, double& lat, double& lon) const
@@ -396,7 +452,7 @@ void GridFilesSource::uvToLatLon(double u, double v, double& lat, double& lon) c
   const double gj = itsScanFromNorth ? v * (itsNy - 1) : (1.0 - v) * (itsNy - 1);
   try
   {
-    if (msg->getGridLatLonCoordinatesByGridPosition(gi, gj, lat, lon))
+    if (readGridLatLon(msg, gi, gj, lat, lon))
       return;
   }
   catch (const std::exception&)
@@ -417,7 +473,7 @@ void GridFilesSource::latLonToUV(double lat, double lon, double& u, double& v) c
   double gj = 0;
   try
   {
-    if (!msg->getGridPointByLatLonCoordinates(lat, lon, gi, gj))
+    if (!lookupGridPoint(msg, lat, lon, gi, gj))
     {
       DataSource::latLonToUV(lat, lon, u, v);
       return;
@@ -555,7 +611,7 @@ LatLonBox GridFilesSource::boundingBox() const
     double lon = 0;
     try
     {
-      if (!msg->getGridLatLonCoordinatesByGridPosition(gi, gj, lat, lon)) return;
+      if (!readGridLatLon(msg, gi, gj, lat, lon)) return;
     }
     catch (const std::exception&)
     {

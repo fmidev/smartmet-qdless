@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 13%{?dist}.fmi
+Release: 14%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,19 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-14.fmi
+- Fix blank rendering of curvilinear NetCDF files (e.g. NEMO ocean SST):
+  grid-files' getGridLatLonCoordinatesByGridPosition / getGridPointBy-
+  LatLonCoordinates fill the (lat, lon) out-params in different orders
+  per backend — GRIB is (lat, lon), NetCDF is actually (lon, lat) —
+  causing the new uvToLatLon override to query SST at axis-swapped
+  coordinates and return only the all-neighbours-missing sentinel.
+  Detect the convention at startup by comparing the (0,0) result to the
+  bottom-left corner reported by getGridLatLonArea, and unswap inside
+  thin wrappers so the rest of the code stays format-agnostic.
+  getGridValueByLatLonCoordinate is consistent across backends and is
+  left untouched.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-13.fmi
 - Bracket each redraw in DEC mode 2026 (synchronized output) so the
   timeline header, map, and any persistent overlay (cross-section,
