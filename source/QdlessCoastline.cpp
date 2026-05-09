@@ -1,5 +1,6 @@
 #include "QdlessCoastline.h"
 
+#include <gis/OGR.h>
 #include <netcdf>
 
 #include <cmath>
@@ -168,9 +169,7 @@ std::vector<Polyline> Coastline::read(const std::string& filename, double minLak
             if (area < minLakeAreaKm2) continue;
             if (wantRoundness)
             {
-              const double L = polyPerim[pid];
-              const double roundness = (L > 0) ? (4.0 * M_PI * area / (L * L)) : 0.0;
-              if (roundness < minLakeRoundness) continue;
+              if (Fmi::OGR::compactness(area, polyPerim[pid]) < minLakeRoundness) continue;
             }
           }
         }
