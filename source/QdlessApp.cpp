@@ -403,6 +403,7 @@ void Viewport::pan(float duFrac, float dvFrac)
 App::App(Options opts) : itsOpts(std::move(opts))
 {
   itsSource = DataSource::open(itsOpts.filename);
+  itsPanels.resize(1);
   buildIndices();
 
   // Apply parameter override.
@@ -413,7 +414,8 @@ App::App(Options opts) : itsOpts(std::move(opts))
     if (id == kFmiBadParameter || !itsSource->selectParamId(id))
       throw std::runtime_error("qdless: parameter not found: " + itsOpts.parameterOverride);
     auto it = std::find(itsParamIds.begin(), itsParamIds.end(), id);
-    if (it != itsParamIds.end()) itsParamIndex = static_cast<int>(it - itsParamIds.begin());
+    if (it != itsParamIds.end())
+      activePanel().paramIndex = static_cast<int>(it - itsParamIds.begin());
   }
 
   auto resolveIndex = [](int requested, std::size_t size) -> std::size_t {
@@ -437,17 +439,18 @@ float App::transform(float v) const
 {
   // Same sentinel detection as Palette::lookup; keep them in sync.
   if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F) return v;
-  return v * itsValueScale + itsValueOffset;
+  const auto& p = activePanel();
+  return v * p.valueScale + p.valueOffset;
 }
 
 void App::buildIndices()
 {
   itsParamIds = itsSource->paramIds();
-  itsParamIndex = 0;
 }
 
 void App::loadPalette()
 {
+  Panel& panel = activePanel();
   const int id = itsSource->currentParamId();
   const std::string shortName = itsSource->paramShortName(id);
   const std::string longName = itsSource->paramLongName(id);
@@ -457,8 +460,8 @@ void App::loadPalette()
   // the data into the palette's canonical unit system, plus a palette name
   // suggestion (used only as a last-resort fallback).
   const UnitGuess guess = guessFromUnits(shortName, longName, units);
-  itsValueScale = guess.scale;
-  itsValueOffset = guess.offset;
+  panel.valueScale = guess.scale;
+  panel.valueOffset = guess.offset;
   if (guess.scale != 1.0F || guess.offset != 0.0F)
   {
     if (guess.scale == 1.0F)
@@ -504,7 +507,7 @@ void App::loadPalette()
     {
       try
       {
-        itsPalette = Palette::loadFromFile(path.string());
+        panel.palette = Palette::loadFromFile(path.string());
         return;
       }
       catch (const std::exception&)
@@ -531,7 +534,7 @@ void App::loadPalette()
       hi = std::max(hi, v);
     }
   }
-  itsPalette = Palette::builtinRamp(lo, hi);
+  panel.palette = Palette::builtinRamp(lo, hi);
 }
 
 void App::loadCoastlines()
@@ -605,7 +608,7 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
         dataMin = std::min(dataMin, val);
         dataMax = std::max(dataMax, val);
       }
-      out[static_cast<std::size_t>(sy) * subWidth + sx] = itsPalette.lookup(val);
+      out[static_cast<std::size_t>(sy) * subWidth + sx] = activePanel().palette.lookup(val);
     }
   }
   return out;
@@ -675,7 +678,7 @@ void App::renderCrossSection(int x1, int y1, int x2, int y2, UI& ui)
       const double lat = lat1 + frac * (lat2 - lat1);
       const double lon = lon1 + frac * (lon2 - lon1);
       const float val = transform(itsSource->interpolatedValue(lat, lon));
-      const Rgb c = itsPalette.lookup(val);
+      const Rgb c = activePanel().palette.lookup(val);
       pixels[static_cast<std::size_t>(li * 2) * subW + sx] = c;
       pixels[static_cast<std::size_t>(li * 2 + 1) * subW + sx] = c;
     }
@@ -895,7 +898,7 @@ std::string App::exportPng(std::string& err) const
       double lon = 0;
       itsSource->uvToLatLon(u, v, lat, lon);
       const float val = transform(itsSource->interpolatedValue(lat, lon));
-      Rgb c = itsPalette.lookup(val);
+      Rgb c = activePanel().palette.lookup(val);
       if (c.transparent) continue;  // leave white for "no data"
       image(px, py) = Imagine::NFmiColorTools::MakeColor(c.r, c.g, c.b);
     }
@@ -1483,9 +1486,9 @@ std::vector<std::string> App::levelLabels() const
 void App::selectParam(int newIndex)
 {
   if (newIndex < 0 || newIndex >= static_cast<int>(itsParamIds.size())) return;
-  itsParamIndex = newIndex;
+  activePanel().paramIndex = newIndex;
   itsSource->selectParamId(itsParamIds[newIndex]);
-  loadPalette();  // re-resolve palette for the new parameter
+  loadPalette();  // re-resolve palette for the active panel's new parameter
 }
 
 void App::selectLevel(int newIndex)
@@ -1589,8 +1592,9 @@ void App::openProbeAt(double lat, double lon, UI& ui)
     int clickRow = -1;
     int clickCol = -1;
     int finalIdx = ui.popupTimeseries(param, lat, lon, series, timeLabels,
-                                      static_cast<int>(savedTime), itsRenderer, itsPalette,
-                                      onTimeChange, avoidRow, avoidCol, &clickRow, &clickCol);
+                                      static_cast<int>(savedTime), itsRenderer,
+                                      activePanel().palette, onTimeChange, avoidRow, avoidCol,
+                                      &clickRow, &clickCol);
     itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
 
     if (clickRow < 0 || clickCol < 0) break;  // closed via keyboard
@@ -1647,7 +1651,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'p':
     case 'P':
     {
-      int picked = ui.popupMenu("Parameters", paramLabels(), itsParamIndex);
+      int picked = ui.popupMenu("Parameters", paramLabels(), activePanel().paramIndex);
       if (picked >= 0) selectParam(picked);
       return true;  // even on cancel, we need to repaint over the popup
     }
@@ -1676,7 +1680,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     {
       NFmiEnumConverter conv;
       std::string param = itsSource->paramShortName(itsSource->currentParamId());
-      ui.popupLegend(param, itsPalette.name(), itsPalette, itsRenderer);
+      const Palette& pal = activePanel().palette;
+      ui.popupLegend(param, pal.name(), pal, itsRenderer);
       return true;
     }
 
@@ -2014,7 +2019,8 @@ int App::runOnce()
   if (!origLabel.empty()) std::cout << " | analysis: " << origLabel;
   std::cout << " | level: " << itsSource->levelValueAt(itsSource->currentLevelIndex())
             << " (" << (itsSource->currentLevelIndex() + 1) << "/" << itsSource->levelCount()
-            << ") | range: [" << dataMin << ", " << dataMax << "] | palette: " << itsPalette.name()
+            << ") | range: [" << dataMin << ", " << dataMax
+            << "] | palette: " << activePanel().palette.name()
             << " | coast: " << itsCoastlines.size() << "+" << itsBorders.size() << " polylines\n";
 
   std::ostringstream os;

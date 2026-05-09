@@ -32,6 +32,21 @@ struct Options
   bool dumpAndExit = false;       // print one frame to stdout and exit (no curses)
 };
 
+// Per-panel state. Today there is always exactly one panel; the field set
+// is structured so the upcoming side-by-side and 2x2 layouts can extend the
+// vector without further plumbing changes. `paramIndex` is an index into
+// `App::itsParamIds`; `palette` is resolved per-panel via the same logic as
+// the single-panel case (config lookup → built-in ramp). `valueScale` /
+// `valueOffset` carry the auto Kelvin → Celsius (etc.) shift produced by
+// `guessFromUnits` for that panel's parameter.
+struct Panel
+{
+  int paramIndex = 0;
+  Palette palette;
+  float valueScale = 1.0F;
+  float valueOffset = 0.0F;
+};
+
 // Sub-rectangle of NFmiArea coordinates we are currently displaying.
 struct Viewport
 {
@@ -91,7 +106,6 @@ class App
 
   Options itsOpts;
   std::unique_ptr<DataSource> itsSource;
-  Palette itsPalette;
   Renderer itsRenderer;
   std::vector<Polyline> itsCoastlines;
   std::vector<Polyline> itsBorders;
@@ -100,7 +114,14 @@ class App
 
   // Available parameters (newbase numeric IDs), in file order.
   std::vector<int> itsParamIds;
-  int itsParamIndex = 0;
+
+  // Display panels. Always non-empty; today size() == 1 (single full-screen
+  // panel). Side-by-side and 2x2 layouts will grow this vector. The active
+  // panel receives parameter / level / palette / probe commands.
+  std::vector<Panel> itsPanels;
+  int itsActivePanel = 0;
+  Panel& activePanel() { return itsPanels[itsActivePanel]; }
+  const Panel& activePanel() const { return itsPanels[itsActivePanel]; }
 
   Viewport itsViewport;
 
@@ -131,12 +152,8 @@ class App
   // (e.g. "Saved foo.png"). Cleared by the next non-message-producing key.
   std::string itsLastMessage;
 
-  // Optional value transform applied to each sampled value before palette
-  // lookup. Used to auto-shift Kelvin → Celsius so K-unit data picks up the
-  // temperature palette correctly. value' = value * scale + offset.
-  float itsValueScale = 1.0F;
-  float itsValueOffset = 0.0F;
-  // Helper: apply transform, but keep missing/sentinel as-is.
+  // Helper: apply the active panel's value transform (auto Kelvin → Celsius
+  // etc.) before palette lookup, but keep missing/sentinel as-is.
   float transform(float v) const;
 
   // City lookup index, lazily loaded on first '/' (place search).
