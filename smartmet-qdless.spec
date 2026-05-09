@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.9
-Release: 10%{?dist}.fmi
+Release: 11%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-11.fmi
+- Time-series probe: render the point-series trace in bright green
+  instead of white when the viewport-stats overlay is visible. Stats
+  curves stay grey (envelope) and teal (mean), and the user's chosen-
+  coordinate signal now reads as the primary line at a glance.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-10.fmi
 - Time-series probe: press `s` inside the popup to overlay viewport
   min/mean/max curves on top of the point series. Stats are computed

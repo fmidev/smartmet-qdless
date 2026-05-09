@@ -1267,14 +1267,15 @@ int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
         os << " \xe2\x94\x82";  // axis │
       }
 
-      // Per-series colour. Min/max are dim grey (envelope), mean is dim
-      // cyan, point series stays bright white. Marker cells override fg
-      // to red to keep the time cursor unambiguous.
+      // Per-series colour. Min/max are dim grey (envelope), mean is
+      // teal, point series is bright green so the user's chosen-
+      // coordinate trace stands out as the primary signal. Marker
+      // cells override fg to red to keep the time cursor unambiguous.
       static constexpr std::array<std::string_view, kSeriesCount> kSeriesFg = {
           "\x1b[38;5;240m",  // min — dark grey
           "\x1b[38;5;240m",  // max — dark grey
           "\x1b[38;5;38m",   // mean — teal
-          "\x1b[38;5;15m",   // point series — white
+          "\x1b[38;5;46m",   // point series — bright green
       };
       for (int cx = 0; cx < chartW; ++cx)
       {
