@@ -288,6 +288,15 @@ ShapeSource::ShapeSource(const std::string& filename, Options opts)
       }
     }
     itsAttributes.push_back(std::move(attrs));
+    // Capture the feature's bbox centre (already in WGS84 after the
+    // optional reproject) as the centroid for marker placement. True
+    // centroid via OGR_G_Centroid would be accurate but expensive on
+    // a 50k-vertex MultiPolygon; bbox-centre is fine for dropping a
+    // pin in the right neighbourhood.
+    OGREnvelope env;
+    clone->getEnvelope(&env);
+    itsCentroids.emplace_back((env.MinY + env.MaxY) / 2.0,
+                              (env.MinX + env.MaxX) / 2.0);
     const int featureIdx = itsFeatureCount++;
     registerLeaves(clone, featureIdx);
     OGRGeometryFactory::destroyGeometry(clone);
@@ -439,6 +448,20 @@ Palette ShapeSource::recommendedPalette() const
   if (itsOpts.rainbow || !itsOpts.colorByField.empty())
     return Palette::rainbowCycle(std::max(1, itsBurnIdCount));
   return Palette::flatFill(itsOpts.fillColor);
+}
+
+const std::vector<std::pair<std::string, std::string>>& ShapeSource::featureAttributes(
+    int idx) const
+{
+  static const std::vector<std::pair<std::string, std::string>> kEmpty;
+  if (idx < 0 || static_cast<std::size_t>(idx) >= itsAttributes.size()) return kEmpty;
+  return itsAttributes[static_cast<std::size_t>(idx)];
+}
+
+std::pair<double, double> ShapeSource::featureCentroid(int idx) const
+{
+  if (idx < 0 || static_cast<std::size_t>(idx) >= itsCentroids.size()) return {0.0, 0.0};
+  return itsCentroids[static_cast<std::size_t>(idx)];
 }
 
 std::vector<std::pair<std::string, std::string>> ShapeSource::attributesAt(double lat,

@@ -671,11 +671,14 @@ void App::loadPalette()
     panel.valueScale = 1.0F;
     panel.valueOffset = 0.0F;
     // Mode 0 = flat (per the source's own recommendation, which honours
-    // any --color flag). Mode 1 = rainbow over the actual feature count.
+    // any --color flag). Mode 1 = rainbow over the actual burn-id range.
     // Cycled by [R] at runtime; itsShapePaletteMode is the persistent
-    // bit. Future modes (e.g. attribute-derived) plug in here.
+    // bit. Future modes (e.g. attribute-derived) plug in here. Size by
+    // burnIdCount() rather than featureCount() — a single MultiPolygon
+    // feature can contribute many burn ids and a too-short palette
+    // leaves the higher-id polygons transparent.
     if (itsShapePaletteMode == 1)
-      panel.palette = Palette::rainbowCycle(std::max(1, shp->featureCount()));
+      panel.palette = Palette::rainbowCycle(std::max(1, shp->burnIdCount()));
     else
       panel.palette = shp->recommendedPalette();
     return;
@@ -2458,6 +2461,81 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       else
       {
         itsLastMessage = "Palette cycle is only available for shapefiles";
+      }
+      return true;
+    }
+
+    case 'a':
+    case 'A':
+    {
+      // Attributes table for shapefiles. popupSearch already gives us
+      // a scrollable, type-to-filter list; build one row per feature
+      // showing "#NN  field1=val1 | field2=val2 | …" and filter the
+      // search query as a substring match against the whole row.
+      // On Enter we drop the marker on the picked feature's centroid
+      // and pop up its full attribute table (popupMetadata).
+      auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get());
+      if (shp == nullptr)
+      {
+        itsLastMessage = "Attributes table is only available for shapefiles";
+        return true;
+      }
+      const int n = shp->featureCount();
+      // Pre-render all rows once: matcher is called repeatedly during
+      // typing, so building rows on every keystroke would be wasteful.
+      std::vector<std::string> rows;
+      rows.reserve(static_cast<std::size_t>(n));
+      for (int i = 0; i < n; ++i)
+      {
+        std::string row = "#" + std::to_string(i + 1) + "  ";
+        const auto& attrs = shp->featureAttributes(i);
+        bool first = true;
+        for (const auto& [k, v] : attrs)
+        {
+          if (!first) row += " | ";
+          row += k + "=" + v;
+          first = false;
+        }
+        rows.push_back(std::move(row));
+      }
+      // Indexed matcher: return matching rows AND remember which
+      // feature each match maps to. popupSearch returns the index
+      // into the most recent matches array, so we capture that here.
+      std::vector<int> lastMatchIdx;
+      auto matcher = [&](const std::string& query) {
+        std::vector<std::string> hits;
+        lastMatchIdx.clear();
+        // Case-insensitive substring search across the whole row.
+        std::string q = query;
+        std::transform(q.begin(), q.end(), q.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        for (int i = 0; i < n; ++i)
+        {
+          if (q.empty())
+          {
+            hits.push_back(rows[i]);
+            lastMatchIdx.push_back(i);
+            continue;
+          }
+          std::string lower = rows[i];
+          std::transform(lower.begin(), lower.end(), lower.begin(),
+                         [](unsigned char c) { return std::tolower(c); });
+          if (lower.find(q) != std::string::npos)
+          {
+            hits.push_back(rows[i]);
+            lastMatchIdx.push_back(i);
+          }
+        }
+        return hits;
+      };
+      const int matchSel = ui.popupSearch("Attributes (search to filter)", matcher);
+      if (matchSel >= 0 && matchSel < static_cast<int>(lastMatchIdx.size()))
+      {
+        const int featureIdx = lastMatchIdx[matchSel];
+        const auto [lat, lon] = shp->featureCentroid(featureIdx);
+        itsMarker = std::make_pair(lat, lon);
+        ui.popupMetadata("Feature #" + std::to_string(featureIdx + 1),
+                         shp->featureAttributes(featureIdx));
       }
       return true;
     }

@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 11%{?dist}.fmi
+Release: 12%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,23 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-12.fmi
+- Fix: rainbow palette sized by featureCount() instead of
+  burnIdCount(), so a shapefile whose features fan out into more
+  burn ids than features (any MultiPolygon) painted the
+  higher-id sub-polygons transparent — they showed as terminal
+  background, looking white on a default-light terminal. Flat
+  fill was unaffected because every non-zero burn id maps to the
+  same band there. Now sized correctly so every sub-polygon
+  picks up its hue.
+- New [A] keyboard shortcut: shapefile attributes table.
+  popupSearch already gives scrollable + type-to-filter; build
+  one row per feature as "#NN  field1=value1 | field2=value2 …"
+  (case-insensitive substring filter against the whole row),
+  drop the click marker on the picked feature's centroid, and
+  pop up popupMetadata with that feature's full .dbf row. Listed
+  in the help popup and the shape-mode status bar.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-11.fmi
 - Animated WebP support: ImageSource now tries libwebpdemux first
   on .webp inputs and, when the file carries more than one frame,

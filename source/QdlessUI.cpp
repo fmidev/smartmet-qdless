@@ -216,6 +216,7 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode)
     put("[B]orders", 1);
     if (shapeMode)
     {
+      put("[A]ttrs", 1);
       put("[O]utlines", 1);
       put("[R]ainbow", 1);
     }
@@ -596,6 +597,7 @@ void UI::popupHelp()
       {"",                          ""},
       {"g",                         "Legend"},
       {"r",                         "Cycle palette (shapefiles: flat \xe2\x86\x92 rainbow)"},
+      {"a",                         "Shapefile attributes table (search, pick to highlight)"},
       {"c",                         "Coastlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off"},
       {"b",                         "Borders: braille \xe2\x86\x92 thick \xe2\x86\x92 off"},
       {"t",                         "Cell style: sextants \xe2\x86\x92 triangles \xe2\x86\x92 squares (font fallback)"},

@@ -107,6 +107,15 @@ class ShapeSource : public DataSource
   // every polygon, or if the shapefile has no .dbf fields.
   std::vector<std::pair<std::string, std::string>> attributesAt(double lat,
                                                                 double lon) const;
+  // Per-feature accessors used by the [A] attributes-table popup.
+  // Indices are 0..featureCount()-1.
+  const std::vector<std::pair<std::string, std::string>>& featureAttributes(int idx) const;
+  // Bounding-box centre (lat, lon) of feature `idx`. Cheap proxy for
+  // a true centroid; good enough for dropping the click marker on a
+  // user-picked row.
+  std::pair<double, double> featureCentroid(int idx) const;
+  // Field names from the .dbf — used as table column headers.
+  const std::vector<std::string>& fieldNames() const { return itsFieldNames; }
 
  private:
   std::string itsFilename;
@@ -129,6 +138,9 @@ class ShapeSource : public DataSource
   // Per-feature .dbf attributes captured at construction (the OGR
   // features themselves are destroyed before we exit the ctor).
   std::vector<std::vector<std::pair<std::string, std::string>>> itsAttributes;
+  // Per-feature bounding-box centre (lat, lon) — used as the marker
+  // position when the user picks a feature from the [A] table.
+  std::vector<std::pair<double, double>> itsCentroids;
   // Geometric details for the metadata popup.
   std::string itsGeometryType;
   std::string itsLayerName;
