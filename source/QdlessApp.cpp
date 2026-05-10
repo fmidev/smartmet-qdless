@@ -1902,7 +1902,8 @@ void App::renderTimeline(UI& ui)
   }
   ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
                   static_cast<int>(itsSource->timeCount()));
-  ui.drawStatusBar(itsSource->isRawImage());
+  ui.drawStatusBar(itsSource->isRawImage(),
+                   dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr);
   doupdate();
 }
 

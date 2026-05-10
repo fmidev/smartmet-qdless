@@ -188,7 +188,7 @@ void UI::drawTimeline(const std::string& label, int idx, int total)
   wnoutrefresh(itsTimeWin);
 }
 
-void UI::drawStatusBar(bool imageMode)
+void UI::drawStatusBar(bool imageMode, bool shapeMode)
 {
   werase(itsStatusWin);
   // Layout: [Q]uit  [P]aram  [L]evel  Time ←→  Zoom +/-  Pan hjkl  [0]Reset  [?]Help
@@ -200,26 +200,31 @@ void UI::drawStatusBar(bool imageMode)
   put("[Q]uit", 1);
   if (!imageMode)
   {
-    // Items hidden in image mode: parameter / level pickers (one
-    // synthetic param, no levels), legend (palette is bypassed),
-    // graticule / wind / cities / coast / borders / place search /
-    // cross-section (all projection-dependent — naked images have no
-    // projection, and the FMI radar PNGs we target already burn
-    // their coastline in).
-    put("[P]aram", 1);
-    put("[L]evel", 1);
+    if (!shapeMode)
+    {
+      // Param / Level pickers don't apply to a single synthetic
+      // shape parameter; cross-section over feature ids has no
+      // useful interpretation either.
+      put("[P]aram", 1);
+      put("[L]evel", 1);
+    }
     put("[G]Legend", 1);
     put("[N]Grid", 1);
     put("[W]ind", 1);
     put("[I]Cities", 1);
     put("[C]oast", 1);
     put("[B]orders", 1);
+    if (shapeMode)
+    {
+      put("[O]utlines", 1);
+      put("[R]ainbow", 1);
+    }
   }
   put("[E]xport", 1);
   if (!imageMode)
   {
     put("[/]Search", 1);
-    put("[X]Section", 1);
+    if (!shapeMode) put("[X]Section", 1);
   }
   put("[?]Help", 1);
   put("[\xe2\x90\xa3]Play", 1);  // [␣]Play

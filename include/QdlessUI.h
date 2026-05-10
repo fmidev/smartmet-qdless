@@ -44,11 +44,14 @@ class UI
   int waitInput(int timeoutMs = -1);
 
   void drawTimeline(const std::string& label, int idx, int total);
-  // When `imageMode` is true the status bar omits items that have no
-  // meaning for a naked image (palette legend, parameter / level
-  // pickers, projection-dependent overlays, place search, cross
-  // section). Default false preserves the full data-source UI.
-  void drawStatusBar(bool imageMode = false);
+  // Status-bar layout shifts based on the source kind:
+  //   imageMode  — naked image (PNG/WebP/...): drop param/level/
+  //                legend/projection-dependent overlays/probe.
+  //   shapeMode  — shapefile: keep the full bar and add [O]utlines
+  //                + [R]ainbow which only make sense for shapes.
+  // The two flags are mutually exclusive in practice; if both are
+  // somehow set, imageMode wins.
+  void drawStatusBar(bool imageMode = false, bool shapeMode = false);
 
   // Re-blank ncurses windows (after popup close). Caller redraws map.
   void touch();
