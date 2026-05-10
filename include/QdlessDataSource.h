@@ -20,6 +20,30 @@ struct LatLonBox
   double maxLon = 180;
 };
 
+// What kind of UI the source wants. Sources self-report via
+// `category()`; the App branches on this single tag instead of
+// scattering isRawImage() / dynamic_cast<ShapeSource*> checks
+// across the constructor, key handler, status bar, help popup, etc.
+//
+//   Gridded  — value-per-cell + palette → colour. The original
+//              data path: QueryData, GRIB, NetCDF, ODIM, GeoTIFF.
+//              Time-series probe, parameter / level menus, palette
+//              legend, cross-section all apply.
+//   Image    — naked PNG/WebP/JPEG/GIF/BMP. No projection, no
+//              scalar value; pixels go straight from the source's
+//              pixelAtUV() to the renderer. Geographic overlays
+//              suppressed.
+//   Vector   — shapefile or PostGIS layer rasterised to feature ids
+//              with outline polylines on top. Click → attributes,
+//              [A] table, [O] outlines, [R] palette cycle. No time
+//              animation, no cross-section.
+enum class SourceCategory
+{
+  Gridded,
+  Image,
+  Vector,
+};
+
 // Format-agnostic interface to a gridded weather file (.sqd / .grib /
 // .grib2 / .nc). Concrete backends wrap NFmiFastQueryInfo (newbase) or
 // SmartMet::GRID::GridFile (grid-files).
@@ -91,16 +115,21 @@ class DataSource
   // backends should format with stable precision.
   virtual std::string gridSignature() const;
 
-  // True when the source is a raw image (PNG/WebP/JPEG with no spatial
-  // georeference). The renderer bypasses palette lookup and overlays
-  // (coastline, borders, graticule, cities) and samples colours through
-  // pixelAtUV() directly. Probe / place-search / cross-section are also
-  // suppressed since RGB triplets have no scalar interpretation.
-  virtual bool isRawImage() const { return false; }
-  // Sample the image at viewport coordinate (u, v) ∈ [0, 1]² (v=0 is top).
-  // Used only when isRawImage() is true. Returns a transparent Rgb for
-  // out-of-image samples so zoomed-out viewports show the terminal default
-  // outside the image bounds.
+  // What kind of UI this source wants — the App branches on this
+  // tag rather than guessing from method behaviour. Default is the
+  // gridded-data path; ImageSource and ShapeSource override.
+  virtual SourceCategory category() const { return SourceCategory::Gridded; }
+  // Convenience predicates over `category()` so call sites read
+  // naturally (`if (src.isImage())`) without each having to spell
+  // out the enum compare.
+  bool isImage() const { return category() == SourceCategory::Image; }
+  bool isVector() const { return category() == SourceCategory::Vector; }
+  bool isGridded() const { return category() == SourceCategory::Gridded; }
+  // Sample the source at viewport (u, v) ∈ [0, 1]² (v=0 is top).
+  // Only meaningful when category() == Image; the gridded path
+  // goes through interpolatedValue + palette instead. Returns a
+  // transparent Rgb for out-of-image samples so zoomed-out
+  // viewports show the terminal default outside the image bounds.
   virtual Rgb pixelAtUV(double /*u*/, double /*v*/) const { return Rgb{0, 0, 0, true}; }
 };
 }  // namespace Qdless

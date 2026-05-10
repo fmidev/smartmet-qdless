@@ -225,7 +225,7 @@ std::string MultiFileSource::gridSignature() const
   return refSource().gridSignature();
 }
 
-bool MultiFileSource::isRawImage() const { return refSource().isRawImage(); }
+SourceCategory MultiFileSource::category() const { return refSource().category(); }
 
 Rgb MultiFileSource::pixelAtUV(double u, double v) const
 {

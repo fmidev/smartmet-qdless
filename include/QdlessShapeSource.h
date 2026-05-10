@@ -91,6 +91,7 @@ class ShapeSource : public DataSource
 
   std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
   std::string gridSignature() const override;
+  SourceCategory category() const override { return SourceCategory::Vector; }
 
   // Polygon (and polyline) boundaries in lat/lon. App keeps these in
   // a dedicated `itsShapeOutlines` slot so the regular [B] cycling

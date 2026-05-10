@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 20%{?dist}.fmi
+Release: 21%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,23 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-21.fmi
+- DataSource gains a SourceCategory enum (Gridded / Image /
+  Vector) and a `category()` virtual; ImageSource and ShapeSource
+  override; MultiFileSource forwards to its reference. Convenience
+  predicates isImage() / isVector() / isGridded() let App branches
+  read naturally. Replaces the scatter of `isRawImage()` and
+  `dynamic_cast<ShapeSource*>()` checks across the constructor,
+  loadPalette, status bar, help popup, and key handlers — every
+  branch now switches on one self-reported tag.
+- ImageSource: bilinear sampling in pixelAtUV. Sampling at the
+  pixel-centre convention with weights that exclude transparent
+  neighbours (so anti-aliased PNG edges don't leak colour past
+  their alpha). Visible improvement when zooming in heavily on a
+  raw image (no more blocky aliasing) AND when zooming out (no
+  moiré from one screen cell sampling many source pixels at
+  random offsets).
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-20.fmi
 - Help popup ('?') is now context-aware. Pass a HelpContext flag
   set down from App; popupHelp builds the entry list dynamically

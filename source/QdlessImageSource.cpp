@@ -392,12 +392,65 @@ Rgb ImageSource::pixelAtUV(double u, double v) const
     return Rgb{0, 0, 0, true};
   if (u < 0 || u >= 1 || v < 0 || v >= 1)
     return Rgb{0, 0, 0, true};
-  // Nearest neighbour. Bilinear blending between adjacent pixels would
-  // smudge the producer's antialiasing in unpredictable ways — for a
-  // pre-rendered image the user expects pixel-faithful display.
-  const auto col = static_cast<std::size_t>(u * static_cast<double>(itsNx));
-  const auto row = static_cast<std::size_t>(v * static_cast<double>(itsNy));
-  return itsFrames[itsCurrentFrame][row * itsNx + col];
+
+  const auto& frame = itsFrames[itsCurrentFrame];
+
+  // Sample at the pixel-CENTRE convention so u/v=0 hits the centre
+  // of pixel 0 and u/v=1 hits the centre of pixel N-1, with edge
+  // bands handled by clamping. Bilinear when zoomed out (one screen
+  // cell covers many source pixels: averaging avoids moiré) AND
+  // when zoomed in heavily (one source pixel covers many screen
+  // cells: avoids the blocky aliased look the previous nearest
+  // sampler produced).
+  const double fx = u * static_cast<double>(itsNx) - 0.5;
+  const double fy = v * static_cast<double>(itsNy) - 0.5;
+  const long x0 = static_cast<long>(std::floor(fx));
+  const long y0 = static_cast<long>(std::floor(fy));
+  const double dx = fx - static_cast<double>(x0);
+  const double dy = fy - static_cast<double>(y0);
+
+  auto fetch = [&](long x, long y) -> Rgb {
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x >= static_cast<long>(itsNx)) x = static_cast<long>(itsNx) - 1;
+    if (y >= static_cast<long>(itsNy)) y = static_cast<long>(itsNy) - 1;
+    return frame[static_cast<std::size_t>(y) * itsNx +
+                 static_cast<std::size_t>(x)];
+  };
+  const Rgb p00 = fetch(x0, y0);
+  const Rgb p10 = fetch(x0 + 1, y0);
+  const Rgb p01 = fetch(x0, y0 + 1);
+  const Rgb p11 = fetch(x0 + 1, y0 + 1);
+
+  // Transparency is binary: any of the four neighbours opaque means
+  // the result is opaque (with the opaque ones' colours blended).
+  // If all four are transparent, the output is transparent — keeps
+  // anti-aliased PNG edges from leaking colour past their alpha.
+  const int opaqueCount = (p00.transparent ? 0 : 1) + (p10.transparent ? 0 : 1) +
+                          (p01.transparent ? 0 : 1) + (p11.transparent ? 0 : 1);
+  if (opaqueCount == 0) return Rgb{0, 0, 0, true};
+
+  // Re-weight so transparent neighbours don't darken the bilinear
+  // average. A neighbour with `transparent=true` contributes 0 to
+  // the weight sum AND 0 to the colour sum.
+  const double w00 = (p00.transparent ? 0.0 : (1 - dx) * (1 - dy));
+  const double w10 = (p10.transparent ? 0.0 : dx * (1 - dy));
+  const double w01 = (p01.transparent ? 0.0 : (1 - dx) * dy);
+  const double w11 = (p11.transparent ? 0.0 : dx * dy);
+  const double wsum = w00 + w10 + w01 + w11;
+  if (wsum == 0.0) return Rgb{0, 0, 0, true};
+  const double inv = 1.0 / wsum;
+  auto chan = [&](std::uint8_t a, std::uint8_t b, std::uint8_t c, std::uint8_t d) {
+    const double v = (w00 * a + w10 * b + w01 * c + w11 * d) * inv;
+    if (v <= 0) return std::uint8_t{0};
+    if (v >= 255) return std::uint8_t{255};
+    return static_cast<std::uint8_t>(v + 0.5);
+  };
+  Rgb out;
+  out.r = chan(p00.r, p10.r, p01.r, p11.r);
+  out.g = chan(p00.g, p10.g, p01.g, p11.g);
+  out.b = chan(p00.b, p10.b, p01.b, p11.b);
+  return out;
 }
 
 std::vector<std::pair<std::string, std::string>> ImageSource::extraMetadata() const

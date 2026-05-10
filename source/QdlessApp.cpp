@@ -553,7 +553,7 @@ void App::initFromSource()
   // pre-rendered radar PNG that already burned its coastline in. The
   // keyboard handler also gates the `c`/`b` toggles so the user can't
   // accidentally turn them back on.
-  if (itsSource->isRawImage())
+  if (itsSource->isImage())
   {
     itsCoastlineStyle = LineStyle::None;
     itsBorderStyle = LineStyle::None;
@@ -983,7 +983,7 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
   // sub-cell buffer with no value/palette layer. Min/max are left at their
   // sentinel infinities so the legend bar (which the App's drawer also
   // suppresses in image mode) doesn't display "[inf, -inf]".
-  if (itsSource->isRawImage())
+  if (itsSource->isImage())
   {
     for (int sy = 0; sy < subHeight; ++sy)
     {
@@ -2060,11 +2060,11 @@ void App::renderTimeline(UI& ui)
     label += itsLastMessage;
     itsLastMessage.clear();
   }
-  const bool isShape = dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr;
+  const bool isShape = itsSource->isVector();
   const bool pgMode = (itsPgDataset != nullptr);
   ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
                   static_cast<int>(itsSource->timeCount()));
-  ui.drawStatusBar(itsSource->isRawImage(), isShape, pgMode);
+  ui.drawStatusBar(itsSource->isImage(), isShape, pgMode);
   doupdate();
 }
 
@@ -2380,7 +2380,7 @@ void App::openProbe(int cellX, int cellY, UI& ui)
   // The probe is a time-series chart of the scalar value at the clicked
   // (lat, lon) over every available timestep. RGB triplets from a raw
   // image have no scalar interpretation — silently no-op.
-  if (itsSource->isRawImage()) return;
+  if (itsSource->isImage()) return;
   double lat = 0;
   double lon = 0;
   if (!cellToLatLon(ui, cellX, cellY, lat, lon)) return;
@@ -2525,7 +2525,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
   // parameter to switch, no palette legend, no projection. Intercept
   // them up front so the user gets a clear status message instead of
   // an empty popup or a silently-toggled flag with no visible effect.
-  if (itsSource->isRawImage())
+  if (itsSource->isImage())
   {
     switch (key)
     {
@@ -2619,8 +2619,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case '?':
     {
       UI::HelpContext ctx;
-      ctx.isImage = itsSource->isRawImage();
-      ctx.isShape = (dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr);
+      ctx.isImage = itsSource->isImage();
+      ctx.isShape = itsSource->isVector();
       ctx.isPg = (itsPgDataset != nullptr);
       ctx.hasTimeAxis = itsSource->timeCount() > 1;
       ctx.hasMultipleParams = itsSource->paramIds().size() > 1;
@@ -2635,7 +2635,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       // Palette cycle. Currently only meaningful for shapefile sources
       // (flat fill ↔ rainbow per burn id); a no-op with a status hint
       // for other backends so the user gets feedback either way.
-      if (dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr)
+      if (itsSource->isVector())
       {
         itsShapePaletteMode = (itsShapePaletteMode + 1) % 2;
         loadPalette();

@@ -65,7 +65,7 @@ class ImageSource : public DataSource
   std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
   std::string gridSignature() const override;
 
-  bool isRawImage() const override { return true; }
+  SourceCategory category() const override { return SourceCategory::Image; }
   Rgb pixelAtUV(double u, double v) const override;
 
  private:

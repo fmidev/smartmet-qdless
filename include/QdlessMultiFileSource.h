@@ -55,11 +55,11 @@ class MultiFileSource : public DataSource
   std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
   std::string gridSignature() const override;
 
-  // Image-mode pass-through: when the reference is a raw image, every
-  // sibling shares the same gridSignature (which encodes the image
-  // dimensions) and is therefore also a raw image. Forwarding through
-  // the reference is enough.
-  bool isRawImage() const override;
+  // Source-kind pass-through: every sibling shares the reference's
+  // gridSignature (which encodes dimensions / projection / format),
+  // so they all belong to the same SourceCategory. One delegation
+  // covers them all.
+  SourceCategory category() const override;
   Rgb pixelAtUV(double u, double v) const override;
 
  private:
