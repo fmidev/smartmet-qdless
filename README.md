@@ -14,9 +14,9 @@ series, place search, wind arrows, lat/lon graticule, PNG export and
 cross-section views across pressure / height levels.
 
 Despite the `qd` prefix (a long-standing SmartMet convention), `qdless`
-reads three formats through a unified
-[smartmet-library-grid-files](https://github.com/fmidev/smartmet-library-grid-files)
-back-end:
+reads a wide range of geospatial formats through dedicated backends.
+
+**Gridded weather data** (data values × palette → colour):
 
 - **QueryData** (`.sqd`) — FMI's native gridded format. See the
   [QueryData file format and usage guide](https://github.com/fmidev/smartmet-library-newbase/blob/master/docs/querydata.md)
@@ -25,10 +25,56 @@ back-end:
   command-line toolkit.
 - **GRIB1 / GRIB2**
 - **NetCDF**
+- **ODIM HDF5** (`.h5`) — EUMETNET OPERA radar 2-D composites
+  (`object=IMAGE/COMP/CVOL`). Reuses the `h5toqd` quantity → newbase
+  mapping; gain/offset applied; both `nodata` and `undetect` render
+  transparent (radar dBZ can be legitimately negative, so painting
+  clear-air as zero would mislead).
+- **GeoTIFF** — read directly through GDAL. When the file carries an
+  FMI-style `GDAL_METADATA` blob (TIFF tag 42112 with `Observation
+  time`, `Quantity`, `Gain`, `Offset`, `Nodata`, `Undetect`), those
+  override filename / mtime guesses.
 
 For QueryData input, `qdless` uses the native newbase path directly
 (faster, projection-aware); GRIB and NetCDF go through the grid-files
-adapter.
+adapter; ODIM and GeoTIFF have their own dedicated readers.
+
+**Multi-file animation**: pass several files (`qdless f1 f2 …`) or a
+directory (`qdless --dir <path>`). The newest-by-mtime file's grid is
+the canonical projection; mismatched files are warned-and-skipped.
+Time is parsed from a 12- or 14-digit timestamp anywhere in the
+basename (e.g. `HAV_202605081430_RR.png`), falling back to mtime. All
+times are interpreted as UTC.
+
+**Raw images** (no spatial georeference): PNG / WebP / JPEG / GIF /
+BMP. The image fills the viewport directly; geographic overlays
+(coastline, borders, graticule, cities, probe) are suppressed since
+the file has no projection. Pan and zoom still work in image
+coordinates. Useful for previewing pre-rendered radar/satellite
+products over slow links where X11 is impractical.
+
+**Animated WebP**: frames are exposed as a time axis. Cursor keys
+step through them and Space plays/pauses the same way it does for a
+multi-file batch. Frame timestamps are mtime + cumulative
+`frame_duration_ms`.
+
+**Vector data** (rasterised + outline overlay):
+
+- **ESRI shapefiles** (`.shp`) — read through OGR. Polygons are
+  rasterised into a uint16 grid of feature ids at construction;
+  outlines are extracted as polylines and drawn in green over the
+  fill, on their own [O] cycle independent of GSHHS borders. The
+  default rainbow palette colours one hue per unique `NAME` /
+  `NIMI` / first non-numeric `.dbf` field (or `#N` if the feature
+  has no name); features that share a name share a hue, and the
+  legend lists each unique area once.
+- **PostGIS** (PostgreSQL with PostGIS) — `qdless --pg "<dsn>"`
+  opens a PostgreSQL connection through OGR's PostgreSQL driver
+  and presents a layer picker. `--schema` filters the picker;
+  `--table schema.name` skips it entirely. The connection stays
+  open for the App's lifetime; [D] re-opens the picker without
+  another libpq round-trip. Selected layers go through the same
+  rasterise / outline / palette pipeline as shapefiles.
 
 ## Features
 
@@ -85,7 +131,7 @@ The full list is in the in-app help popup (`?`). Quick reference:
 | dbl-click L / R | Zoom in / out at cursor |
 | `0` | Reset view |
 | `h` `j` `k` `l` or Shift+arrow or drag | Pan |
-| click | Time-series probe at point |
+| click | Time-series probe at point (gridded data) — or polygon attributes (shapefiles / PostGIS) |
 | `g` | Legend popup |
 | `c` | Coastlines: braille → thick → off |
 | `b` | Borders: braille → thick → off |
@@ -97,11 +143,17 @@ The full list is in the in-app help popup (`?`). Quick reference:
 | `/` | Place search (auto-opens probe at the pick) |
 | `x` | Cross-section (click two endpoints) |
 | `e` | Export PNG (active panel) |
+| `M` (Shift+M) | Source metadata popup |
 | `F2` | Cycle panel layout: single → side-by-side → 2x2 |
 | `Tab` / `Shift+Tab` | Next / previous active panel |
 | `1`–`4` | Activate panel by number |
 | click | Activate the panel under the cursor |
 | `?` | This help |
+| **Shapefile / PostGIS only** | |
+| `a` | Attributes table — searchable, scrollable; Enter highlights the picked feature |
+| `o` | Shape outlines: braille → thick → off (independent of `b`) |
+| `r` | Palette cycle: rainbow per unique label ↔ flat fill |
+| `d` | (PostGIS) Re-open the layer picker without quitting |
 
 PgUp / PgDn were chosen for the city density step because they're in the
 same physical position on every common keyboard layout (US, AZERTY,
@@ -148,6 +200,31 @@ qdless --dump data.sqd                       # render one frame to stdout and ex
 qdless -p Temperature,Pressure data.sqd      # side-by-side
 qdless -p T,RH,P,W data.sqd                  # 2x2 quad
 qdless --layout side data.sqd                # explicit override
+
+# Multi-file animation. Cursor keys step through times; Space plays.
+# Filenames must contain a 12-/14-digit YYYYMMDDhhmm[ss] timestamp
+# (anywhere in the basename) for time ordering — falls back to mtime.
+# All files must share a grid; the newest by mtime is the reference,
+# others are warn-and-skip if they don't match.
+qdless f1.tif f2.tif f3.tif                  # explicit list
+qdless --dir radar_finland_rr1h_3067         # one frame per file in the dir
+
+# Raw images (PNG/WebP/JPEG/GIF/BMP). Geographic overlays are
+# suppressed (no projection). Animated WebP exposes its frames as
+# the time axis automatically.
+qdless screenshot.png
+qdless --dir scandinavia_radar_pngs
+
+# Shapefiles. Default rainbow palette colours one hue per unique
+# NAME/NIMI; click on a polygon to see its .dbf row; [a] opens the
+# attributes table; [r] toggles flat fill ↔ rainbow.
+qdless itameri_isot_alueet.shp
+
+# PostGIS browser. Opens a popup picker over the available layers.
+# --schema filters the picker; --table opens directly.
+qdless --pg "host=foo dbname=bar user=baz"
+qdless --pg "..." --schema public
+qdless --pg "..." --table public.itameri_isot_alueet
 ```
 
 In `--dump` mode the first stdout line is a header summarising the
@@ -162,7 +239,11 @@ Run `qdless --help` for the full option list.
   `calculator`, `imagine`, `grid-files`
 - `ncursesw` (input only — the map and popups are rendered with raw ANSI
   for full opacity control)
-- `jsoncpp`, `netcdf-cxx4`
+- `jsoncpp`, `netcdf-cxx4`, `hdf5` (ODIM HDF reader)
+- GDAL (vector + raster I/O for shapefiles, PostGIS, GeoTIFF, raw
+  images); the PostgreSQL driver must be enabled in the GDAL build
+  for `--pg`
+- `libwebpdemux`, `libwebp` (animated WebP)
 - `gshhg-gmt-nc4` (runtime, for coastlines / borders / rivers)
 - Boost (program_options, regex, iostreams, thread)
 

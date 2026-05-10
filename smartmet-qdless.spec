@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 16%{?dist}.fmi
+Release: 17%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,15 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-17.fmi
+- README updated to cover the new input formats (ODIM HDF,
+  GeoTIFF, raw images, animated WebP, shapefiles, PostGIS), the
+  multi-file animation flow (--dir / positional list),
+  shape-mode keys [A] / [O] / [R] and the PostGIS picker [D],
+  the click-to-attributes behaviour for vector sources, and the
+  expanded dependency list (GDAL with PostgreSQL driver,
+  libwebpdemux, libhdf5).
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-16.fmi
 - PostGIS browser: launch with `qdless --pg "<dsn>"` to open a
   PostgreSQL connection through OGR's PostgreSQL driver and pick
