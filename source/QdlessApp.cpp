@@ -11,8 +11,6 @@
 #include <newbase/NFmiGlobals.h>
 #include <newbase/NFmiPoint.h>
 
-#include <imagine/NFmiColorTools.h>
-#include <imagine/NFmiImage.h>
 
 #include <ncurses.h>
 
@@ -1426,8 +1424,20 @@ std::string App::exportPng(std::string& err) const
   const int height = targetH;
   const int width = std::max(100, static_cast<int>(targetH * aspect));
 
-  Imagine::NFmiImage image(width, height);
-  image.Erase(Imagine::NFmiColorTools::MakeColor(255, 255, 255));
+  // Hand-rolled RGB buffer (interleaved RGBRGB…). Writing PNGs needs
+  // a library either way; we use GDAL's PNG driver below since GDAL
+  // is already a dependency for shapefiles / PostGIS / GeoTIFF.
+  // Background = white so "no data" cells leave a clean canvas.
+  std::vector<std::uint8_t> rgb(static_cast<std::size_t>(width) *
+                                    static_cast<std::size_t>(height) * 3,
+                                255);
+  auto setPixel = [&](int x, int y, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    const auto idx = (static_cast<std::size_t>(y) * width + x) * 3;
+    rgb[idx] = r;
+    rgb[idx + 1] = g;
+    rgb[idx + 2] = b;
+  };
 
   for (int py = 0; py < height; ++py)
   {
@@ -1441,13 +1451,13 @@ std::string App::exportPng(std::string& err) const
       const float val = transform(itsSource->interpolatedValue(lat, lon));
       Rgb c = activePanel().palette.lookup(val);
       if (c.transparent) continue;  // leave white for "no data"
-      image(px, py) = Imagine::NFmiColorTools::MakeColor(c.r, c.g, c.b);
+      setPixel(px, py, c.r, c.g, c.b);
     }
   }
 
-  // Coastline + border overlay (Bresenham into image pixels).
+  // Coastline + border overlay (Bresenham into the RGB buffer).
   auto drawPolylineImg = [&](const std::vector<Polyline>& polys,
-                             Imagine::NFmiColorTools::Color color) {
+                             std::uint8_t r, std::uint8_t g, std::uint8_t b) {
     if (polys.empty()) return;
     auto toPixel = [&](float lon, float lat) -> std::pair<int, int> {
       double u = 0;
@@ -1457,9 +1467,6 @@ std::string App::exportPng(std::string& err) const
       const double v01 = (v - itsViewport.vMin) / spanV;
       return {static_cast<int>(u01 * width), static_cast<int>(v01 * height)};
     };
-    auto plot = [&](int x, int y) {
-      if (x >= 0 && x < width && y >= 0 && y < height) image(x, y) = color;
-    };
     auto line = [&](int x0, int y0, int x1, int y1) {
       int dx = std::abs(x1 - x0);
       int dy = -std::abs(y1 - y0);
@@ -1468,7 +1475,7 @@ std::string App::exportPng(std::string& err) const
       int err2 = dx + dy;
       while (true)
       {
-        plot(x0, y0);
+        setPixel(x0, y0, r, g, b);
         if (x0 == x1 && y0 == y1) break;
         int e2 = 2 * err2;
         if (e2 >= dy) { err2 += dy; x0 += sx; }
@@ -1489,8 +1496,8 @@ std::string App::exportPng(std::string& err) const
       }
     }
   };
-  drawPolylineImg(itsCoastlines, Imagine::NFmiColorTools::MakeColor(0, 0, 0));
-  drawPolylineImg(itsBorders, Imagine::NFmiColorTools::MakeColor(90, 90, 90));
+  drawPolylineImg(itsCoastlines, 0, 0, 0);
+  drawPolylineImg(itsBorders, 90, 90, 90);
 
   // Build filename: <basename>_<param>_<YYYYMMDD_HHMM>.png in cwd.
   NFmiEnumConverter conv;
@@ -1504,21 +1511,59 @@ std::string App::exportPng(std::string& err) const
                   static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
                   static_cast<int>(t.GetMin()));
 
-#ifdef IMAGINE_IGNORE_FORMATS
-  err = "PNG support disabled in imagine build";
-  return {};
-#else
+  // Encode via GDAL's PNG driver. Build an in-memory MEM dataset
+  // with three Byte bands, blit our interleaved RGB buffer into it
+  // (one stride trick replaces three per-band RasterIO calls),
+  // CreateCopy to PNG. GDAL is already linked for shapefiles /
+  // GeoTIFF / PostGIS / raw images so this drops the
+  // smartmet-library-imagine dependency entirely.
+  GDALAllRegister();
+  GDALDriver* memDrv = GetGDALDriverManager()->GetDriverByName("MEM");
+  GDALDriver* pngDrv = GetGDALDriverManager()->GetDriverByName("PNG");
+  if (memDrv == nullptr || pngDrv == nullptr)
+  {
+    err = "GDAL MEM/PNG driver unavailable";
+    return {};
+  }
+  GDALDataset* mem = memDrv->Create("", width, height, 3, GDT_Byte, nullptr);
+  if (mem == nullptr)
+  {
+    err = "GDAL MEM Create failed";
+    return {};
+  }
+  // Dataset-level RasterIO with explicit pixel/line/band spacing
+  // writes the interleaved RGB buffer in one call. nPixelSpace=3
+  // (3 bytes per pixel), nLineSpace=width*3, nBandSpace=1 (band 0
+  // is at offset 0, band 1 at offset 1, …).
+  const int bandList[3] = {1, 2, 3};
+  CPLErr cerr = mem->RasterIO(GF_Write, 0, 0, width, height, rgb.data(), width,
+                              height, GDT_Byte, 3, const_cast<int*>(bandList), 3,
+                              static_cast<GSpacing>(width) * 3, 1, nullptr);
+  if (cerr != CE_None)
+  {
+    GDALClose(mem);
+    err = "GDAL RasterIO write failed";
+    return {};
+  }
   try
   {
-    image.WritePng(filename);
+    GDALDataset* png =
+        pngDrv->CreateCopy(filename.c_str(), mem, FALSE, nullptr, nullptr, nullptr);
+    GDALClose(mem);
+    if (png == nullptr)
+    {
+      err = "GDAL PNG CreateCopy failed";
+      return {};
+    }
+    GDALClose(png);
     return filename;
   }
   catch (const std::exception& e)
   {
+    GDALClose(mem);
     err = e.what();
     return {};
   }
-#endif
 }
 
 void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const

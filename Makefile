@@ -22,7 +22,6 @@ LIBS += $(PREFIX_LDFLAGS) \
 	-lsmartmet-newbase \
 	-lsmartmet-macgyver \
 	-lsmartmet-gis \
-	-lsmartmet-imagine \
 	-lboost_regex \
 	-lboost_program_options \
 	-lboost_iostreams \

@@ -236,7 +236,7 @@ Run `qdless --help` for the full option list.
 ## Dependencies
 
 - SmartMet libraries: `newbase`, `macgyver`, `smarttools`, `gis`,
-  `calculator`, `imagine`, `grid-files`
+  `calculator`, `grid-files`
 - `ncursesw` (input only — the map and popups are rendered with raw ANSI
   for full opacity control)
 - `jsoncpp`, `netcdf-cxx4`, `hdf5` (ODIM HDF reader)

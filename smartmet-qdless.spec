@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 22%{?dist}.fmi
+Release: 23%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -41,7 +41,6 @@ BuildRequires: rpm-build
 BuildRequires: smartmet-library-calculator-devel >= 26.4.13
 BuildRequires: smartmet-library-gis-devel >= 26.4.13
 BuildRequires: smartmet-library-grid-files-devel >= 26.4.22
-BuildRequires: smartmet-library-imagine-devel >= 26.4.13
 BuildRequires: smartmet-library-macgyver-devel >= 26.4.13
 BuildRequires: smartmet-library-newbase-devel >= 26.2.4
 BuildRequires: smartmet-library-smarttools-devel >= 26.4.13
@@ -71,7 +70,6 @@ Requires: netcdf-cxx4
 Requires: smartmet-library-calculator >= 26.4.13
 Requires: smartmet-library-gis >= 26.4.13
 Requires: smartmet-library-grid-files >= 26.4.22
-Requires: smartmet-library-imagine >= 26.4.13
 Requires: smartmet-library-macgyver >= 26.4.13
 Requires: smartmet-library-newbase >= 26.2.4
 Requires: smartmet-library-smarttools >= 26.4.13
@@ -110,6 +108,17 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-23.fmi
+- Drop the smartmet-library-imagine dependency. PNG export now
+  goes through GDAL's PNG driver (CreateCopy from an in-memory
+  MEM raster of three Byte bands). GDAL was already linked for
+  shapefiles, PostGIS, GeoTIFF, raw images, and animated WebP, so
+  the new path adds no transitive dependencies — just removes
+  one. The PNG bytes-on-disk format and overlay rendering are
+  unchanged from the user's side; only the encoder changes.
+- README + RPM spec no longer list smartmet-library-imagine in
+  the build- or runtime-requires.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-22.fmi
 - Zoom-aware re-rasterisation for shapefiles / PostGIS layers.
   ShapeSource now grows a `prepareViewport(bbox, cellsX, cellsY)`
