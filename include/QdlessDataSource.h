@@ -1,5 +1,7 @@
 #pragma once
 
+#include "QdlessPalette.h"
+
 #include <newbase/NFmiMetTime.h>
 
 #include <memory>
@@ -88,5 +90,17 @@ class DataSource
   // the same lat/lon bbox don't compare equal. Equality is exact-string;
   // backends should format with stable precision.
   virtual std::string gridSignature() const;
+
+  // True when the source is a raw image (PNG/WebP/JPEG with no spatial
+  // georeference). The renderer bypasses palette lookup and overlays
+  // (coastline, borders, graticule, cities) and samples colours through
+  // pixelAtUV() directly. Probe / place-search / cross-section are also
+  // suppressed since RGB triplets have no scalar interpretation.
+  virtual bool isRawImage() const { return false; }
+  // Sample the image at viewport coordinate (u, v) ∈ [0, 1]² (v=0 is top).
+  // Used only when isRawImage() is true. Returns a transparent Rgb for
+  // out-of-image samples so zoomed-out viewports show the terminal default
+  // outside the image bounds.
+  virtual Rgb pixelAtUV(double /*u*/, double /*v*/) const { return Rgb{0, 0, 0, true}; }
 };
 }  // namespace Qdless

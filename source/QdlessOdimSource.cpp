@@ -351,7 +351,25 @@ std::vector<std::pair<std::string, std::string>> OdimSource::extraMetadata() con
 
 std::string OdimSource::gridSignature() const
 {
+  // Two ODIM files often share one projdef (a network-wide projection
+  // anchored on a producer's reference radar) but crop a different
+  // (UL,LR) window. Same projdef + same dimensions ≠ same grid — we
+  // also need the corner coords or the aggregator would render the
+  // wrong area for any time step but the reference.
+  char corners[160];
+  if (itsArea)
+  {
+    const auto tl = itsArea->TopLeftLatLon();
+    const auto br = itsArea->BottomRightLatLon();
+    std::snprintf(corners, sizeof(corners), "%.4f,%.4f-%.4f,%.4f",
+                  tl.Y(), tl.X(), br.Y(), br.X());
+  }
+  else
+  {
+    corners[0] = '?';
+    corners[1] = '\0';
+  }
   return std::string("odim:") + itsProjDef + "|" + std::to_string(itsNx) + "x" +
-         std::to_string(itsNy);
+         std::to_string(itsNy) + "|" + corners;
 }
 }  // namespace Qdless

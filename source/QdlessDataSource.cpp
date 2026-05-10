@@ -2,6 +2,7 @@
 
 #include "QdlessGeoTiffSource.h"
 #include "QdlessGridFilesSource.h"
+#include "QdlessImageSource.h"
 #include "QdlessOdimSource.h"
 #include "QdlessQueryDataSource.h"
 
@@ -20,6 +21,7 @@ enum class FileKind
   kNetCDF,
   kHdf5,
   kGeoTiff,
+  kImage,
   kUnknown,
 };
 
@@ -44,6 +46,26 @@ FileKind detectKind(const std::string& filename)
     return FileKind::kGeoTiff;
   if (n >= 4 && hdr[0] == 0x4D && hdr[1] == 0x4D && hdr[2] == 0x00 && hdr[3] == 0x2A)
     return FileKind::kGeoTiff;
+  // Raw image formats. These have no spatial georeference — qdless renders
+  // them in image-only mode (pixels straight to screen, overlays
+  // suppressed). Detection is by magic only so we don't have to trial-open
+  // every file with GDAL.
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (n >= 4 && hdr[0] == 0x89 && hdr[1] == 'P' && hdr[2] == 'N' && hdr[3] == 'G')
+    return FileKind::kImage;
+  // JPEG: FF D8 FF
+  if (n >= 3 && hdr[0] == 0xFF && hdr[1] == 0xD8 && hdr[2] == 0xFF)
+    return FileKind::kImage;
+  // GIF: "GIF87a" / "GIF89a"
+  if (n >= 4 && hdr[0] == 'G' && hdr[1] == 'I' && hdr[2] == 'F' && hdr[3] == '8')
+    return FileKind::kImage;
+  // BMP: "BM"
+  if (n >= 2 && hdr[0] == 'B' && hdr[1] == 'M')
+    return FileKind::kImage;
+  // WebP: "RIFF" .... "WEBP"
+  if (n >= 12 && hdr[0] == 'R' && hdr[1] == 'I' && hdr[2] == 'F' && hdr[3] == 'F' &&
+      hdr[8] == 'W' && hdr[9] == 'E' && hdr[10] == 'B' && hdr[11] == 'P')
+    return FileKind::kImage;
   // Fall through: assume newbase QueryData.
   return FileKind::kQueryData;
 }
@@ -65,6 +87,8 @@ std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
       return std::make_unique<GridFilesSource>(filename);
     case FileKind::kGeoTiff:
       return std::make_unique<GeoTiffSource>(filename);
+    case FileKind::kImage:
+      return std::make_unique<ImageSource>(filename);
     case FileKind::kUnknown:
       break;
   }

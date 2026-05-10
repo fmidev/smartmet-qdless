@@ -506,6 +506,20 @@ App::App(Options opts) : itsOpts(std::move(opts))
   // updated further.
   if (itsOpts.noCoastline) itsCoastlineStyle = LineStyle::None;
   if (itsOpts.noBorders) itsBorderStyle = LineStyle::None;
+  // Image mode (naked PNG/WebP/JPEG/...): force every geographic overlay
+  // off. The image has no projection — drawing a coastline at unit-square
+  // (lat,lon) coords would spew lines at the wrong scale on top of a
+  // pre-rendered radar PNG that already burned its coastline in. The
+  // keyboard handler also gates the `c`/`b` toggles so the user can't
+  // accidentally turn them back on.
+  if (itsSource->isRawImage())
+  {
+    itsCoastlineStyle = LineStyle::None;
+    itsBorderStyle = LineStyle::None;
+    itsShowGraticule = false;
+    itsShowWindArrows = false;
+    itsShowCities = false;
+  }
 
   // Apply parameter overrides. -p accepts a comma-separated list:
   //   1 entry  -> Single layout
@@ -770,6 +784,24 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
 
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
+
+  // Image-mode short-circuit: pixels go straight from the source to the
+  // sub-cell buffer with no value/palette layer. Min/max are left at their
+  // sentinel infinities so the legend bar (which the App's drawer also
+  // suppresses in image mode) doesn't display "[inf, -inf]".
+  if (itsSource->isRawImage())
+  {
+    for (int sy = 0; sy < subHeight; ++sy)
+    {
+      const float vp = itsViewport.vMin + (static_cast<float>(sy) + 0.5F) / subHeight * spanV;
+      for (int sx = 0; sx < subWidth; ++sx)
+      {
+        const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / subWidth * spanU;
+        out[static_cast<std::size_t>(sy) * subWidth + sx] = itsSource->pixelAtUV(up, vp);
+      }
+    }
+    return out;
+  }
 
   // Viewport (u,v) ∈ [0..1]² of the source's native rectangle (NFmiArea XY
   // for projected sources, lat/lon bbox otherwise). Image-coord convention

@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 1%{?dist}.fmi
+Release: 2%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,27 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-2.fmi
+- Raw image mode for PNG/WebP/JPEG/GIF/BMP. New ImageSource reads
+  pixels straight through GDAL and exposes them via a new virtual
+  pixelAtUV() on DataSource; the renderer short-circuits palette
+  lookup when isRawImage() is true. App suppresses every geographic
+  overlay (coastline, borders, graticule, cities, wind arrows) since
+  naked images have no projection. Pan and zoom work for free
+  through the existing viewport machinery.
+- Animation across naked images: a leading YYYYMMDDhhmm in the
+  basename feeds MultiFileSource the same way the GeoTIFF backend
+  does, so `qdless --dir <path>` plays a directory of PNGs as a
+  time-sorted series.
+- Fix: OdimSource gridSignature now includes the (UL,LR) corner
+  coords. Two ODIM files often share one projdef (a network-wide
+  projection anchored on a producer's reference radar) but crop a
+  different bbox; the previous projdef+dimensions signature would
+  falsely merge them and the renderer would draw the wrong area
+  for any time step but the reference. Verified against the
+  qdtools test corpus: 13 of 18 files now correctly rejected when
+  passed via --dir.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-1.fmi
 - ODIM HDF5 support: new OdimSource backend for 2D composites
   (object=IMAGE/COMP/CVOL). Reuses qdtools' Hdf5File reader and
