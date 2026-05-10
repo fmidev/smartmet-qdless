@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 19%{?dist}.fmi
+Release: 20%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,30 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-20.fmi
+- Help popup ('?') is now context-aware. Pass a HelpContext flag
+  set down from App; popupHelp builds the entry list dynamically
+  and drops sections that don't apply (no time-series probe stuff
+  on shapes; no panel-layout / Tab / 1-4 / "click activates panel"
+  on shape or image mode; no wind / cross-section / coastline
+  toggles where there's no projection; no Param/Level menus when
+  the source has only one). Consecutive blank separators collapse
+  so a heavily filtered context doesn't leave stacks of empty
+  rows.
+- Status bar in shapefile mode adds [D]Tables when the source was
+  opened over PostGIS (--pg) so the layer-picker re-open
+  shortcut is discoverable.
+- Status bar drops [Space]Play in shape mode (no time animation).
+- Time-axis bar is suppressed when timeCount() == 1. The label
+  on the timeline still tells the user what they're looking at;
+  a stuck slider would otherwise suggest a time axis exists when
+  it doesn't.
+- PostGIS layer picker filters out non-spatial tables (geometry
+  type wkbNone). OGR's PG driver lists every table visible to
+  the role, including pure attribute tables and metadata views;
+  those have no geometry to render and shouldn't appear in the
+  picker as a candidate layer.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-19.fmi
 - Fix: PostGIS layer picker (and any popup opened before the App
   draws the map for the first time) now appears immediately. UI

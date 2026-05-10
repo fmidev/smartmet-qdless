@@ -183,25 +183,29 @@ void UI::drawTimeline(const std::string& label, int idx, int total)
   werase(itsTimeWin);
   mvwaddstr(itsTimeWin, 0, 1, label.c_str());
 
-  // Slider: ├─────●─────┤ across full width.
-  int barWidth = itsLayout.time.width - 4;
-  if (barWidth < 4) barWidth = 4;
-  if (total < 1) total = 1;
-  int pos = (total > 1) ? idx * (barWidth - 1) / (total - 1) : 0;
-
-  wattron(itsTimeWin, itsBoxAttr);
-  mvwaddstr(itsTimeWin, 1, 1, "├");  // ├
-  for (int i = 0; i < barWidth - 2; ++i) mvwaddstr(itsTimeWin, 1, 2 + i, "─");  // ─
-  mvwaddstr(itsTimeWin, 1, barWidth - 1, "┤");  // ┤
-  wattroff(itsTimeWin, itsBoxAttr);
-  wattron(itsTimeWin, itsHotAttr);
-  mvwaddstr(itsTimeWin, 1, 1 + pos, "●");  // ●
-  wattroff(itsTimeWin, itsHotAttr);
+  // No slider for single-time sources (shapefiles, single images).
+  // The label still tells the user what they're looking at; an
+  // animation bar with a stuck dot would be clutter that suggests
+  // a time axis exists when it doesn't.
+  if (total > 1)
+  {
+    int barWidth = itsLayout.time.width - 4;
+    if (barWidth < 4) barWidth = 4;
+    int pos = idx * (barWidth - 1) / (total - 1);
+    wattron(itsTimeWin, itsBoxAttr);
+    mvwaddstr(itsTimeWin, 1, 1, "├");
+    for (int i = 0; i < barWidth - 2; ++i) mvwaddstr(itsTimeWin, 1, 2 + i, "─");
+    mvwaddstr(itsTimeWin, 1, barWidth - 1, "┤");
+    wattroff(itsTimeWin, itsBoxAttr);
+    wattron(itsTimeWin, itsHotAttr);
+    mvwaddstr(itsTimeWin, 1, 1 + pos, "●");
+    wattroff(itsTimeWin, itsHotAttr);
+  }
 
   wnoutrefresh(itsTimeWin);
 }
 
-void UI::drawStatusBar(bool imageMode, bool shapeMode)
+void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode)
 {
   werase(itsStatusWin);
   // Layout: [Q]uit  [P]aram  [L]evel  Time ←→  Zoom +/-  Pan hjkl  [0]Reset  [?]Help
@@ -232,6 +236,7 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode)
       put("[A]ttrs", 1);
       put("[O]utlines", 1);
       put("[R]ainbow", 1);
+      if (pgMode) put("[D]Tables", 1);
     }
   }
   put("[E]xport", 1);
@@ -241,7 +246,11 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode)
     if (!shapeMode) put("[X]Section", 1);
   }
   put("[?]Help", 1);
-  put("[\xe2\x90\xa3]Play", 1);  // [␣]Play
+  // [Space]Play makes no sense for a single-frame source. Shape mode
+  // and image mode have a static time axis; gate the entry there.
+  // (Animated WebP and multi-file batches are imageMode=true but
+  // they DO have time — keep showing it for the multi-file case.)
+  if (!shapeMode) put("[\xe2\x90\xa3]Play", 1);
   wnoutrefresh(itsStatusWin);
 }
 
@@ -656,56 +665,104 @@ int UI::popupSearch(const std::string& title,
   }
 }
 
-void UI::popupHelp()
+void UI::popupHelp() { popupHelp(HelpContext{}); }
+
+void UI::popupHelp(HelpContext ctx)
 {
-  // Two-column listing: keys on the left (highlighted), action on the right.
-  // Empty key/action pair = visual separator (blank row).
-  static const std::vector<std::pair<std::string, std::string>> kEntries = {
-      {"q  Esc",                    "Quit"},
-      {"p",                         "Parameter menu"},
-      {"L (Shift)",                 "Level menu"},
-      {"\xe2\x86\x90 \xe2\x86\x92", "Previous / next time"},
-      {"Home  End",                 "First / last time"},
-      {"",                          ""},
-      {"Space",                     "Play / pause animation"},
-      {"\xe2\x86\x91 \xe2\x86\x93", "Animation speed up / down"},
-      {"",                          ""},
-      {"+  -",                      "Zoom in / out (centre)"},
-      {"dbl-click L / R",           "Zoom in / out at cursor"},
-      {"0",                         "Reset view"},
-      {"h j k l",                   "Pan left / down / up / right"},
-      {"Shift+arrow",               "Pan"},
-      {"drag (mouse)",              "Pan"},
-      {"",                          ""},
-      {"click (mouse)",             "Time-series probe at point"},
-      {"\xe2\x86\x90 \xe2\x86\x92 in probe",
-                                    "Step time, map updates"},
-      {"Space in probe",            "Play / pause animation (\xe2\x86\x91\xe2\x86\x93 speed)"},
-      {"s in probe",                "Toggle viewport min/mean/max overlay"},
-      {"",                          ""},
-      {"g",                         "Legend"},
-      {"r",                         "Cycle palette (shapefiles: flat \xe2\x86\x92 rainbow)"},
-      {"a",                         "Shapefile attributes table (search, pick to highlight)"},
-      {"d",                         "PostGIS: re-open the layer picker (--pg only)"},
-      {"c",                         "Coastlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off"},
-      {"b",                         "Borders: braille \xe2\x86\x92 thick \xe2\x86\x92 off"},
-      {"t",                         "Cell style: sextants \xe2\x86\x92 triangles \xe2\x86\x92 squares (font fallback)"},
-      {"n",                         "Toggle lat/lon graticule"},
-      {"w",                         "Toggle wind arrows"},
-      {"i",                         "Toggle city overlay"},
-      {"PgUp PgDn",                 "Cities: sparser / denser"},
-      {"/",                         "Place search"},
-      {"x",                         "Cross-section"},
-      {"e",                         "Export PNG (active panel)"},
-      {"",                          ""},
-      {"M",                         "File metadata"},
-      {"F2",                        "Cycle layout: single \xe2\x86\x92 side \xe2\x86\x92 2x2"},
-      {"Tab  Shift+Tab",            "Next / previous active panel"},
-      {"1 2 3 4",                   "Activate panel by number"},
-      {"click (mouse)",             "Activate the panel under the cursor"},
-      {"",                          ""},
-      {"?",                         "This help"},
-  };
+  // Build the entry list dynamically based on the source kind. Empty
+  // (label, value) pair renders as a visual separator (blank row);
+  // we collapse consecutive separators on the way out so a heavily
+  // filtered context doesn't end up with stacks of blank rows.
+  using Pair = std::pair<std::string, std::string>;
+  std::vector<Pair> raw;
+  auto add = [&](std::string a, std::string b) { raw.emplace_back(std::move(a), std::move(b)); };
+
+  // The shape and image sources (vector / naked raster) have no
+  // probe, no time axis, no parameter/level menus; image mode
+  // additionally lacks projection-dependent overlays.
+  const bool noTime = !ctx.hasTimeAxis || ctx.isShape || ctx.isImage;
+  const bool noProbe = ctx.isImage || ctx.isShape;
+  const bool noProj = ctx.isImage;
+  const bool multiPanel = !(ctx.isImage || ctx.isShape);
+
+  add("q  Esc", "Quit");
+  if (ctx.hasMultipleParams && !ctx.isImage && !ctx.isShape) add("p", "Parameter menu");
+  if (ctx.hasMultipleLevels && !ctx.isImage && !ctx.isShape) add("L (Shift)", "Level menu");
+  if (!noTime)
+  {
+    add("\xe2\x86\x90 \xe2\x86\x92", "Previous / next time");
+    add("Home  End", "First / last time");
+    add("", "");
+    add("Space", "Play / pause animation");
+    add("\xe2\x86\x91 \xe2\x86\x93", "Animation speed up / down");
+  }
+  add("", "");
+  add("+  -", "Zoom in / out (centre)");
+  add("dbl-click L / R", "Zoom in / out at cursor");
+  add("0", "Reset view");
+  add("h j k l", "Pan left / down / up / right");
+  add("Shift+arrow", "Pan");
+  add("drag (mouse)", "Pan");
+  add("", "");
+  if (!noProbe)
+  {
+    add("click (mouse)", "Time-series probe at point");
+    add("\xe2\x86\x90 \xe2\x86\x92 in probe", "Step time, map updates");
+    add("Space in probe", "Play / pause animation (\xe2\x86\x91\xe2\x86\x93 speed)");
+    add("s in probe", "Toggle viewport min/mean/max overlay");
+  }
+  if (ctx.isShape)
+  {
+    add("click (mouse)", "Show clicked polygon's attributes");
+    add("a", "Attributes table (search, pick to highlight)");
+    add("o", "Shape outlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
+    add("r", "Palette cycle: rainbow \xe2\x86\x94 flat fill");
+    if (ctx.isPg) add("d", "Re-open PostGIS layer picker");
+  }
+  add("", "");
+  if (!noProj)
+  {
+    add("g", "Legend");
+    add("c", "Coastlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
+    add("b", "Borders: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
+  }
+  add("t", "Cell style: sextants \xe2\x86\x92 triangles \xe2\x86\x92 squares (font fallback)");
+  if (!noProj)
+  {
+    add("n", "Toggle lat/lon graticule");
+    if (!ctx.isShape) add("w", "Toggle wind arrows");
+    add("i", "Toggle city overlay");
+    add("PgUp PgDn", "Cities: sparser / denser");
+    add("/", "Place search");
+    if (!noProbe) add("x", "Cross-section");
+  }
+  add("e", "Export PNG");
+  add("", "");
+  add("M", "File metadata");
+  if (multiPanel)
+  {
+    add("F2", "Cycle layout: single \xe2\x86\x92 side \xe2\x86\x92 2x2");
+    add("Tab  Shift+Tab", "Next / previous active panel");
+    add("1 2 3 4", "Activate panel by number");
+    add("click (mouse)", "Activate the panel under the cursor");
+    add("", "");
+  }
+  add("?", "This help");
+
+  // Collapse leading, trailing, and back-to-back empty separators.
+  std::vector<Pair> kEntries;
+  kEntries.reserve(raw.size());
+  for (auto& e : raw)
+  {
+    const bool blank = e.first.empty() && e.second.empty();
+    if (blank && (kEntries.empty() ||
+                  (kEntries.back().first.empty() && kEntries.back().second.empty())))
+      continue;
+    kEntries.push_back(std::move(e));
+  }
+  while (!kEntries.empty() &&
+         kEntries.back().first.empty() && kEntries.back().second.empty())
+    kEntries.pop_back();
 
   int maxL = 0;
   int maxR = 0;

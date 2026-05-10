@@ -724,7 +724,14 @@ bool App::openPgPicker(UI& ui)
     if (layer == nullptr) continue;
     std::string name = layer->GetName();
     if (!prefix.empty() && name.compare(0, prefix.size(), prefix) != 0) continue;
-    const char* gtype = OGRGeometryTypeToName(layer->GetGeomType());
+    // Hide non-spatial tables. OGR's PostgreSQL driver lists ALL
+    // tables visible to the role, including pure attribute tables
+    // (no geometry column) — those would land in the picker as
+    // e.g. "wind" without anything renderable. wkbUnknown is OK
+    // (mixed geometries), only wkbNone means "no geometry column".
+    const OGRwkbGeometryType gt = layer->GetGeomType();
+    if (gt == wkbNone) continue;
+    const char* gtype = OGRGeometryTypeToName(gt);
     // GetFeatureCount(false) skips the COUNT(*) round-trip; OGR
     // returns -1 if the driver can't supply a fast estimate.
     GIntBig n = layer->GetFeatureCount(/*force=*/0);
@@ -2053,10 +2060,11 @@ void App::renderTimeline(UI& ui)
     label += itsLastMessage;
     itsLastMessage.clear();
   }
+  const bool isShape = dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr;
+  const bool pgMode = (itsPgDataset != nullptr);
   ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
                   static_cast<int>(itsSource->timeCount()));
-  ui.drawStatusBar(itsSource->isRawImage(),
-                   dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr);
+  ui.drawStatusBar(itsSource->isRawImage(), isShape, pgMode);
   doupdate();
 }
 
@@ -2609,7 +2617,16 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     }
 
     case '?':
-      ui.popupHelp();
+    {
+      UI::HelpContext ctx;
+      ctx.isImage = itsSource->isRawImage();
+      ctx.isShape = (dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr);
+      ctx.isPg = (itsPgDataset != nullptr);
+      ctx.hasTimeAxis = itsSource->timeCount() > 1;
+      ctx.hasMultipleParams = itsSource->paramIds().size() > 1;
+      ctx.hasMultipleLevels = itsSource->levelCount() > 1;
+      ui.popupHelp(ctx);
+    }
       return true;
 
     case 'r':

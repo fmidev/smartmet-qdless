@@ -48,11 +48,14 @@ class UI
   // Status-bar layout shifts based on the source kind:
   //   imageMode  — naked image (PNG/WebP/...): drop param/level/
   //                legend/projection-dependent overlays/probe.
-  //   shapeMode  — shapefile: keep the full bar and add [O]utlines
-  //                + [R]ainbow which only make sense for shapes.
-  // The two flags are mutually exclusive in practice; if both are
-  // somehow set, imageMode wins.
-  void drawStatusBar(bool imageMode = false, bool shapeMode = false);
+  //   shapeMode  — shapefile / PostGIS layer: keep the full bar and
+  //                add [O]utlines + [R]ainbow + [A]ttrs.
+  //   pgMode     — PostGIS connection: also offer [D]Tables to
+  //                re-open the layer picker.
+  // imageMode wins when both image and shape flags are set.
+  void drawStatusBar(bool imageMode = false, bool shapeMode = false,
+                     bool pgMode = false);
+
 
   // Re-blank ncurses windows (after popup close). Caller redraws map.
   void touch();
@@ -70,7 +73,21 @@ class UI
 
   // Centred help popup listing key bindings and mouse gestures.
   // Dismissed by any key.
-  void popupHelp();
+  // Help popup. The context flags hide entries that don't apply to
+  // the current source so the help reads as a contextually relevant
+  // cheat sheet rather than an exhaustive list. Defaults match the
+  // gridded data path (the original full help).
+  struct HelpContext
+  {
+    bool isImage = false;        // raw image: no projection / no time
+    bool isShape = false;        // shapefile / PostGIS: no time / no probe
+    bool isPg = false;           // PostGIS connection: show [D]Tables
+    bool hasTimeAxis = true;     // false when timeCount() <= 1
+    bool hasMultipleParams = true;
+    bool hasMultipleLevels = true;
+  };
+  void popupHelp(HelpContext ctx);
+  void popupHelp();  // gridded-data default — calls popupHelp({}) internally
 
   // Centred metadata popup listing (label, value) rows. Used to display
   // file-level info: filename, format, grid type, dimensions, parameter
