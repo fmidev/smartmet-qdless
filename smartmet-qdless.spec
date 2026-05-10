@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 13%{?dist}.fmi
+Release: 14%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,17 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-14.fmi
+- Attributes table column padding now counts UTF-8 codepoints
+  rather than bytes. Finnish placenames (Ähtäri, Selkämeri) have
+  2-byte chars whose .size() is double their visible width, so
+  any row containing them threw the column edges off and the
+  table looked unaligned. Header column widths are derived the
+  same way so the bold header lines up under the values.
+- popupSearch query row now reads "Search:" instead of just ">",
+  so a stray keystroke that filters everything is obviously the
+  search field doing its job rather than the popup glitching.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-13.fmi
 - Shape legend ([G]) now lists one swatch per visible polygon
   instead of one per registered burn id; sub-pixel children of a

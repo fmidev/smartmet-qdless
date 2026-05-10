@@ -2488,26 +2488,36 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       // exactly.
       const auto& fields = shp->fieldNames();
       const std::size_t nfields = fields.size();
-      // Index column is just wide enough for "#" + the largest id.
+      // Count UTF-8 codepoints, not bytes — Finnish placenames
+      // (Ähtäri, Selkämeri) have 2-byte chars whose .size() is double
+      // their visible width, which mis-pads the columns.
+      auto utf8Len = [](const std::string& s) {
+        int w = 0;
+        for (unsigned char c : s)
+          if ((c & 0xC0) != 0x80) ++w;
+        return w;
+      };
+      auto padRight = [&](const std::string& s, int w) {
+        const int len = utf8Len(s);
+        // Overlong values are left as-is (the popup clips on the
+        // right edge); shorter values get spaces added.
+        if (len >= w) return s;
+        return s + std::string(static_cast<std::size_t>(w - len), ' ');
+      };
+      // Index column is just wide enough for "#" + largest id.
       int idxColW = static_cast<int>(std::to_string(n).size()) + 1;
       idxColW = std::max(idxColW, 3);
+      // Per-column width = max of header + all values, capped at 24.
       std::vector<int> colW(nfields, 0);
       for (std::size_t k = 0; k < nfields; ++k)
-        colW[k] = static_cast<int>(fields[k].size());
+        colW[k] = utf8Len(fields[k]);
       for (int i = 0; i < n; ++i)
       {
         const auto& attrs = shp->featureAttributes(i);
         for (std::size_t k = 0; k < nfields && k < attrs.size(); ++k)
-          colW[k] = std::max(colW[k], static_cast<int>(attrs[k].second.size()));
+          colW[k] = std::max(colW[k], utf8Len(attrs[k].second));
       }
-      // Cap any one column at 24 chars so a runaway free-text field
-      // doesn't push everything off-screen. Rows wider than the
-      // popup's interior already get clipped by the existing layout.
       for (auto& w : colW) w = std::min(w, 24);
-      auto padRight = [](const std::string& s, int w) {
-        if (static_cast<int>(s.size()) >= w) return s.substr(0, w);
-        return s + std::string(w - s.size(), ' ');
-      };
       // Header row: " #  | FIELD1 | FIELD2 | …"
       std::string header = padRight("#", idxColW);
       for (std::size_t k = 0; k < nfields; ++k)

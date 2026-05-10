@@ -434,12 +434,15 @@ int UI::popupSearch(const std::string& title,
     for (int i = 0; i < width - titleConsumed - 1; ++i) os << "\xe2\x94\x80";
     os << "\xe2\x94\x90" << kEscReset;
 
-    // Query row (with cursor caret).
+    // Query row (with cursor caret). Label as "Search:" so a stray
+    // keystroke that filters everything is obviously the search box
+    // doing its job, not the popup glitching.
+    static const char* kSearchLbl = " Search: ";
     putAt(os, top + 1, left);
     os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
-       << kEscFgWhite << " > " << kEscBold << query << kEscReset << kEscBgBlack << kEscFgWhite
-       << "_";
-    pad(os, interiorW - 4 - utf8Width(query));
+       << kEscFgWhite << kSearchLbl << kEscBold << query << kEscReset << kEscBgBlack
+       << kEscFgWhite << "_";
+    pad(os, interiorW - utf8Width(kSearchLbl) - 1 - utf8Width(query));
     os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
 
     // Separator row.
