@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 2%{?dist}.fmi
+Release: 3%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,15 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-3.fmi
+- Fix: paletted PNGs (1 band of indices + a separate ColorTable;
+  GCI_PaletteIndex) rendered as grayscale because the index byte
+  was replicated to R/G/B. ImageSource now detects the palette
+  and looks up each pixel's RGB(A) from the table; the alpha
+  channel folds into Rgb::transparent below 128 the same way the
+  RGBA branch does. Verified on FMI marine radar PNGs which use
+  a 41-entry indexed palette.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-2.fmi
 - Raw image mode for PNG/WebP/JPEG/GIF/BMP. New ImageSource reads
   pixels straight through GDAL and exposes them via a new virtual

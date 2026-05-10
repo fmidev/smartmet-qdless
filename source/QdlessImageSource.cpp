@@ -4,6 +4,7 @@
 #include <gdal_priv.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -77,18 +78,17 @@ ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
     if (const char* sn = drv->GetDescription(); sn != nullptr) itsFormat = sn;
   }
 
-  // Read R/G/B bands. Most PNG/JPEG/WebP files have either 1 (grayscale),
-  // 3 (RGB), or 4 (RGBA) bands. Read up to 3 colour channels; if the file
-  // is grayscale, replicate the single band to all three. Alpha is folded
-  // into Rgb::transparent when present (alpha < 128 → transparent cell).
+  // Pick the right reader for the PNG/WebP/... colour model:
+  //   - Paletted (1 band, GCI_PaletteIndex, has ColorTable): index → RGB(A).
+  //   - Truecolour RGB / RGBA (3 / 4 bands): channel-per-band.
+  //   - Grayscale (1 band, no palette): replicate single channel to all three.
+  // Alpha (band 4 in RGBA, or palette entry c4 in paletted) below 128 maps
+  // to Rgb::transparent so semi/transparent pixels don't paint a colour.
   const int nBands = ds->GetRasterCount();
   if (nBands < 1) throw std::runtime_error("no raster bands: " + filename);
 
   const std::size_t pixelCount = itsNx * itsNy;
-  std::vector<std::uint8_t> rband(pixelCount);
-  std::vector<std::uint8_t> gband;
-  std::vector<std::uint8_t> bband;
-  std::vector<std::uint8_t> aband;
+  itsPixels.resize(pixelCount);
 
   auto readBand = [&](int idx, std::vector<std::uint8_t>& dst) {
     dst.resize(pixelCount);
@@ -100,33 +100,65 @@ ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
     if (err != CE_None) throw std::runtime_error("RasterIO failed: " + filename);
   };
 
-  readBand(1, rband);
-  if (nBands >= 3)
-  {
-    readBand(2, gband);
-    readBand(3, bband);
-  }
-  if (nBands >= 4)
-    readBand(4, aband);
+  GDALRasterBand* band1 = ds->GetRasterBand(1);
+  GDALColorTable* ct = nBands == 1 ? band1->GetColorTable() : nullptr;
+  const bool paletted = (ct != nullptr) &&
+                        (band1->GetColorInterpretation() == GCI_PaletteIndex);
 
-  itsPixels.resize(pixelCount);
-  for (std::size_t i = 0; i < pixelCount; ++i)
+  if (paletted)
   {
-    Rgb px;
+    // Pre-flatten the palette to a 256-entry Rgb table indexed by byte
+    // value. Out-of-range indices (palette has fewer than 256 entries)
+    // render transparent.
+    std::array<Rgb, 256> lut{};
+    for (auto& e : lut) e.transparent = true;
+    const int n = ct->GetColorEntryCount();
+    for (int k = 0; k < n && k < 256; ++k)
+    {
+      GDALColorEntry e;
+      ct->GetColorEntryAsRGB(k, &e);
+      Rgb px;
+      px.r = static_cast<std::uint8_t>(e.c1);
+      px.g = static_cast<std::uint8_t>(e.c2);
+      px.b = static_cast<std::uint8_t>(e.c3);
+      px.transparent = (e.c4 < 128);
+      lut[static_cast<std::size_t>(k)] = px;
+    }
+    std::vector<std::uint8_t> idx;
+    readBand(1, idx);
+    for (std::size_t i = 0; i < pixelCount; ++i)
+      itsPixels[i] = lut[idx[i]];
+  }
+  else
+  {
+    std::vector<std::uint8_t> rband;
+    std::vector<std::uint8_t> gband;
+    std::vector<std::uint8_t> bband;
+    std::vector<std::uint8_t> aband;
+    readBand(1, rband);
     if (nBands >= 3)
     {
-      px.r = rband[i];
-      px.g = gband[i];
-      px.b = bband[i];
+      readBand(2, gband);
+      readBand(3, bband);
     }
-    else
+    if (nBands >= 4) readBand(4, aband);
+
+    for (std::size_t i = 0; i < pixelCount; ++i)
     {
-      // Grayscale: replicate single channel.
-      px.r = px.g = px.b = rband[i];
+      Rgb px;
+      if (nBands >= 3)
+      {
+        px.r = rband[i];
+        px.g = gband[i];
+        px.b = bband[i];
+      }
+      else
+      {
+        px.r = px.g = px.b = rband[i];
+      }
+      if (nBands >= 4 && aband[i] < 128) px.transparent = true;
+      itsPixels[i] = px;
     }
-    if (nBands >= 4 && aband[i] < 128)
-      px.transparent = true;
-    itsPixels[i] = px;
   }
 
   itsValidTime = parseTimeFromName(filename);
