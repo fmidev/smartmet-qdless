@@ -1868,7 +1868,7 @@ void App::renderTimeline(UI& ui)
   }
   ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
                   static_cast<int>(itsSource->timeCount()));
-  ui.drawStatusBar();
+  ui.drawStatusBar(itsSource->isRawImage());
   doupdate();
 }
 
@@ -2287,6 +2287,30 @@ void App::openProbeAt(double lat, double lon, UI& ui)
 
 bool App::handleKey(int key, UI& ui, bool& quit)
 {
+  // In raw-image mode the keys for parameter / level / legend popups,
+  // overlay toggles (graticule, wind, cities, coast, borders), place
+  // search, and cross-section all do nothing useful — there's no
+  // parameter to switch, no palette legend, no projection. Intercept
+  // them up front so the user gets a clear status message instead of
+  // an empty popup or a silently-toggled flag with no visible effect.
+  if (itsSource->isRawImage())
+  {
+    switch (key)
+    {
+      case 'p': case 'P':
+      case 'L':
+      case 'g': case 'G':
+      case 'b': case 'B':
+      case 'c': case 'C':
+      case 'n': case 'N':
+      case 'w': case 'W':
+      case 'i': case 'I':
+      case '/':
+      case 'x': case 'X':
+        itsLastMessage = "Not available in image mode";
+        return true;
+    }
+  }
   switch (key)
   {
     case 'q':

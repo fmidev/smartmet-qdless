@@ -26,7 +26,12 @@ NFmiMetTime parseUtcStamp(const std::string& s)
     short h = static_cast<short>(std::stoi(s.substr(8, 2)));
     short mi = static_cast<short>(std::stoi(s.substr(10, 2)));
     short se = (s.size() >= 14) ? static_cast<short>(std::stoi(s.substr(12, 2))) : 0;
-    return NFmiMetTime(yy, mm, dd, h, mi, se);
+    // 1-minute time step. NFmiMetTime defaults to 60-minute resolution
+    // and silently snaps incoming minutes to the nearest hour, which
+    // collapses a quarter-hourly radar batch (14:30, 14:45, 15:00, 15:15)
+    // into duplicate 15:00 timestamps. Sub-minute precision isn't needed
+    // for our filename timestamps.
+    return NFmiMetTime(yy, mm, dd, h, mi, se, /*timeStep=*/1);
   }
   catch (...)
   {
@@ -37,7 +42,12 @@ NFmiMetTime parseUtcStamp(const std::string& s)
 NFmiMetTime parseTimeFromName(const std::string& filename)
 {
   const std::string base = std::filesystem::path(filename).filename().string();
-  static const std::regex re(R"(^(\d{12,14}))");
+  // Locate a 12- or 14-digit run anywhere in the basename. Producers
+  // vary on placement: some prefix the file with the timestamp
+  // (`202605081430_RR.png`), others put it in the middle
+  // (`HAV_202605081430_RR.png`). The {12,14} length bound avoids
+  // false matches against shorter numeric tokens (versions, indices).
+  static const std::regex re(R"((\d{12,14}))");
   std::smatch m;
   if (std::regex_search(base, m, re))
     return parseUtcStamp(m[1]);

@@ -44,7 +44,11 @@ class UI
   int waitInput(int timeoutMs = -1);
 
   void drawTimeline(const std::string& label, int idx, int total);
-  void drawStatusBar();
+  // When `imageMode` is true the status bar omits items that have no
+  // meaning for a naked image (palette legend, parameter / level
+  // pickers, projection-dependent overlays, place search, cross
+  // section). Default false preserves the full data-source UI.
+  void drawStatusBar(bool imageMode = false);
 
   // Re-blank ncurses windows (after popup close). Caller redraws map.
   void touch();

@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 3%{?dist}.fmi
+Release: 4%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,22 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-4.fmi
+- Filename time: match a 12-digit timestamp anywhere in the
+  basename (was anchored to the start), so producers that put the
+  date after a prefix (`HAV_202605081430_RR.png`) work the same as
+  those with a leading timestamp.
+- Filename time: construct NFmiMetTime with a 1-minute time step.
+  The 60-minute default snapped sub-hourly stamps to the nearest
+  hour, so a 15-minute radar batch (14:30, 14:45, 15:00, 15:15)
+  collapsed into duplicate 15:00 slots in MultiFileSource.
+- Image-mode UI: hide the parameter / level / legend / overlay /
+  search / cross-section status-bar items when the source is a
+  naked image, and intercept the corresponding key shortcuts so
+  pressing them shows "Not available in image mode" instead of
+  popping up an empty menu or silently toggling a flag with no
+  visible effect.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-3.fmi
 - Fix: paletted PNGs (1 band of indices + a separate ColorTable;
   GCI_PaletteIndex) rendered as grayscale because the index byte

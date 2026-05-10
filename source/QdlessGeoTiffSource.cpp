@@ -34,7 +34,10 @@ NFmiMetTime parseUtcStamp(const std::string& s)
     short h = static_cast<short>(std::stoi(s.substr(8, 2)));
     short mi = static_cast<short>(std::stoi(s.substr(10, 2)));
     short se = (s.size() >= 14) ? static_cast<short>(std::stoi(s.substr(12, 2))) : 0;
-    return NFmiMetTime(yy, mm, dd, h, mi, se);
+    // 1-minute time step — NFmiMetTime's 60-minute default snaps
+    // sub-hourly timestamps to the nearest hour (collapsing 14:30 and
+    // 14:45 into the same 15:00 slot in a multi-file animation).
+    return NFmiMetTime(yy, mm, dd, h, mi, se, /*timeStep=*/1);
   }
   catch (...)
   {
@@ -45,7 +48,10 @@ NFmiMetTime parseUtcStamp(const std::string& s)
 NFmiMetTime parseTimeFromName(const std::string& filename)
 {
   const std::string base = std::filesystem::path(filename).filename().string();
-  static const std::regex re(R"(^(\d{12,14}))");
+  // Match a 12- or 14-digit timestamp anywhere in the basename so files
+  // named `<prefix>_<timestamp>_<suffix>.tif` work the same as those
+  // with the timestamp at the start.
+  static const std::regex re(R"((\d{12,14}))");
   std::smatch m;
   if (std::regex_search(base, m, re))
     return parseUtcStamp(m[1]);
