@@ -131,5 +131,17 @@ class DataSource
   // transparent Rgb for out-of-image samples so zoomed-out
   // viewports show the terminal default outside the image bounds.
   virtual Rgb pixelAtUV(double /*u*/, double /*v*/) const { return Rgb{0, 0, 0, true}; }
+
+  // Hint that the renderer is about to sample from `bbox` at
+  // approximately `cellsX × cellsY` resolution. Sources that
+  // pre-rasterise at construction (currently only ShapeSource) can
+  // use this to refine the rasterisation when the viewport shows a
+  // small enough portion that the base grid undersamples it.
+  // Default no-op for sources that already serve interpolatedValue
+  // at full source resolution.
+  virtual void prepareViewport(const LatLonBox& /*bbox*/, int /*cellsX*/,
+                               int /*cellsY*/) const
+  {
+  }
 };
 }  // namespace Qdless

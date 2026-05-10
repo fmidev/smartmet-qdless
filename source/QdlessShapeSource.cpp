@@ -123,6 +123,7 @@ ShapeSource::ShapeSource(OGRLayer* layer, const std::string& displayName, Option
 {
   GDALAllRegister();  // idempotent — guards against PG-only callers
   if (layer == nullptr) throw std::runtime_error("ShapeSource: null layer");
+  itsLayerNonOwned = layer;
   init(layer);
 }
 
@@ -212,26 +213,6 @@ void ShapeSource::init(OGRLayer* layer)
   if (!itsArea) throw std::runtime_error("ShapeSource: failed to construct area");
 
   // ----- Rasterise -----
-  // In-memory MEM raster of uint16 feature IDs. We rasterise feature
-  // by feature with sequentially-incrementing burn values so each
-  // polygon ends up tagged with a distinct id; the renderer then maps
-  // id → colour via the palette.
-  GDALDriver* memDrv = GetGDALDriverManager()->GetDriverByName("MEM");
-  if (!memDrv) throw std::runtime_error("ShapeSource: MEM driver missing");
-  auto* mem = memDrv->Create("", static_cast<int>(itsNx), static_cast<int>(itsNy), 1,
-                             GDT_UInt16, nullptr);
-  if (!mem) throw std::runtime_error("ShapeSource: MEM Create failed");
-  struct MemGuard
-  {
-    GDALDataset* p;
-    ~MemGuard() { if (p) GDALClose(p); }
-  } memGuard{mem};
-  double gt[6] = {itsOriginX, itsPixelW, 0.0, itsOriginY, 0.0, itsPixelH};
-  mem->SetGeoTransform(gt);
-  char* dstWkt = nullptr;
-  dstSrs.exportToWkt(&dstWkt);
-  if (dstWkt) { mem->SetProjection(dstWkt); CPLFree(dstWkt); }
-
   // Walk every feature; for each, walk its geometry tree down to leaf
   // Polygons (or single LineStrings) and assign a distinct burn id to
   // each one. This way a shapefile containing a single MultiPolygon
@@ -240,12 +221,14 @@ void ShapeSource::init(OGRLayer* layer)
   // itsAttributes; itsBurnToFeature lets a click look back up the
   // original feature row.
   layer->ResetReading();
-  std::vector<OGRGeometry*> ownedGeoms;
-  std::vector<OGRGeometryH> handles;
-  std::vector<double> burn;
+  // Pass 1 (this loop): collect every metadata side-effect — burn-id
+  // map, .dbf attributes, centroid, outline polylines — and discard
+  // the geometries when done. Subsequent rasterise() calls re-walk
+  // the layer to refetch geometries on demand. The trade-off vs
+  // caching is more I/O on each zoom step but no per-source memory
+  // tied up in OGRGeometry copies; for huge PostGIS tables the
+  // caching alternative was untenable.
 
-  // Recursive helper: walk a geometry, register each leaf polygon /
-  // line string for rasterisation under its own burn value.
   std::function<void(OGRGeometry*, int)> registerLeaves =
       [&](OGRGeometry* geom, int featureIdx)
   {
@@ -253,14 +236,6 @@ void ShapeSource::init(OGRLayer* layer)
     const auto t = wkbFlatten(geom->getGeometryType());
     if (t == wkbPolygon || t == wkbLineString || t == wkbPoint)
     {
-      // Cycle modulo 65535 — uint16 raster can address that many
-      // ids; on overflow rainbow hues repeat (still finer than the
-      // single colour you'd see otherwise).
-      const double v = static_cast<double>((itsBurnIdCount % 65535) + 1);
-      auto* clone = geom->clone();
-      ownedGeoms.push_back(clone);
-      handles.push_back(static_cast<OGRGeometryH>(clone));
-      burn.push_back(v);
       itsBurnToFeature.push_back(featureIdx);
       ++itsBurnIdCount;
     }
@@ -319,39 +294,161 @@ void ShapeSource::init(OGRLayer* layer)
     OGRGeometryFactory::destroyGeometry(clone);
   }
 
-  if (itsFeatureCount > 0)
-  {
-    int bandList[1] = {1};
-    // ALL_TOUCHED ensures thin polygons / points / lines paint at
-    // least one pixel per cell crossed instead of vanishing into
-    // nothing on coarse rasterisation.
-    char** rasterOpts = nullptr;
-    rasterOpts = CSLSetNameValue(rasterOpts, "ALL_TOUCHED", "TRUE");
-    CPLErr err = GDALRasterizeGeometries(
-        mem, 1, bandList, static_cast<int>(handles.size()), handles.data(),
-        nullptr, nullptr, burn.data(), rasterOpts, nullptr, nullptr);
-    CSLDestroy(rasterOpts);
-    if (err != CE_None)
-    {
-      for (auto* g : ownedGeoms) OGRGeometryFactory::destroyGeometry(g);
-      throw std::runtime_error("ShapeSource: GDALRasterizeGeometries failed");
-    }
-  }
-
-  for (auto* g : ownedGeoms) OGRGeometryFactory::destroyGeometry(g);
-
-  // Read the burned raster back into our flat buffer.
-  itsGrid.resize(itsNx * itsNy);
-  CPLErr err = mem->GetRasterBand(1)->RasterIO(
-      GF_Read, 0, 0, static_cast<int>(itsNx), static_cast<int>(itsNy),
-      itsGrid.data(), static_cast<int>(itsNx), static_cast<int>(itsNy),
-      GDT_UInt16, 0, 0);
-  if (err != CE_None)
-    throw std::runtime_error("ShapeSource: failed to read back rasterised grid");
-
+  // Build the base raster covering the entire envelope. The same
+  // helper is reused by prepareViewport() for zoom-time refinement.
+  itsGrid = rasterise(itsNx, itsNy, minLon, minLat, maxLon, maxLat);
 }
 
 ShapeSource::~ShapeSource() = default;
+
+namespace
+{
+// Re-walk an OGR layer, optionally reproject every feature into
+// `dst`, and append (geom, burn) pairs in a deterministic order
+// matching ShapeSource::init's first walk. Caller owns the cloned
+// geometries — destroyed via OGRGeometryFactory::destroyGeometry
+// after rasterisation.
+void collectLeavesForRaster(OGRLayer* layer, OGRSpatialReference* dst,
+                            std::vector<OGRGeometry*>& geoms,
+                            std::vector<double>& burnValues)
+{
+  if (layer == nullptr) return;
+  std::unique_ptr<OGRCoordinateTransformation> ct;
+  if (auto* src = layer->GetSpatialRef(); src != nullptr && !src->IsSame(dst))
+  {
+    auto* clone = src->Clone();
+    clone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    ct.reset(OGRCreateCoordinateTransformation(clone, dst));
+    OGRSpatialReference::DestroySpatialReference(clone);
+  }
+  layer->ResetReading();
+  int nextBurn = 1;
+
+  std::function<void(OGRGeometry*)> registerLeaves =
+      [&](OGRGeometry* geom)
+  {
+    if (geom == nullptr) return;
+    const auto t = wkbFlatten(geom->getGeometryType());
+    if (t == wkbPolygon || t == wkbLineString || t == wkbPoint)
+    {
+      const double v = static_cast<double>(((nextBurn - 1) % 65535) + 1);
+      geoms.push_back(geom->clone());
+      burnValues.push_back(v);
+      ++nextBurn;
+    }
+    else if (auto* gc = geom->toGeometryCollection(); gc != nullptr)
+    {
+      for (int i = 0; i < gc->getNumGeometries(); ++i)
+        registerLeaves(gc->getGeometryRef(i));
+    }
+  };
+
+  while (auto* feat = layer->GetNextFeature())
+  {
+    OGRGeometry* g = feat->GetGeometryRef();
+    if (g != nullptr)
+    {
+      OGRGeometry* clone = g->clone();
+      if (ct && clone->transform(ct.get()) != OGRERR_NONE)
+      {
+        OGRGeometryFactory::destroyGeometry(clone);
+        OGRFeature::DestroyFeature(feat);
+        continue;
+      }
+      registerLeaves(clone);
+      OGRGeometryFactory::destroyGeometry(clone);
+    }
+    OGRFeature::DestroyFeature(feat);
+  }
+}
+}  // namespace
+
+std::vector<std::uint16_t> ShapeSource::rasterise(std::size_t nx, std::size_t ny,
+                                                  double minX, double minY,
+                                                  double maxX, double maxY) const
+{
+  std::vector<std::uint16_t> out(nx * ny, 0);
+
+  // Re-walk the source on each rasterise. The OGRLayer pointer is
+  // valid for the App's lifetime (PostGIS) or we re-open the file
+  // (shapefile path). For huge PostGIS tables this means each zoom
+  // step costs one query — acceptable for an interactive viewer.
+  GDALDataset* tempDs = nullptr;
+  OGRLayer* layer = itsLayerNonOwned;
+  if (layer == nullptr)
+  {
+    tempDs = static_cast<GDALDataset*>(GDALOpenEx(itsFilename.c_str(),
+                                                  GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                                  nullptr, nullptr, nullptr));
+    if (tempDs == nullptr) return out;
+    if (tempDs->GetLayerCount() < 1)
+    {
+      GDALClose(tempDs);
+      return out;
+    }
+    layer = tempDs->GetLayer(0);
+  }
+  struct DsGuard
+  {
+    GDALDataset* p;
+    ~DsGuard() { if (p) GDALClose(p); }
+  } dsGuard{tempDs};
+
+  OGRSpatialReference dst;
+  dst.SetWellKnownGeogCS("WGS84");
+  dst.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+  std::vector<OGRGeometry*> geoms;
+  std::vector<double> burnValues;
+  collectLeavesForRaster(layer, &dst, geoms, burnValues);
+  if (geoms.empty()) return out;
+
+  GDALDriver* memDrv = GetGDALDriverManager()->GetDriverByName("MEM");
+  if (memDrv == nullptr)
+  {
+    for (auto* g : geoms) OGRGeometryFactory::destroyGeometry(g);
+    throw std::runtime_error("ShapeSource::rasterise: MEM missing");
+  }
+  auto* mem = memDrv->Create("", static_cast<int>(nx), static_cast<int>(ny), 1,
+                             GDT_UInt16, nullptr);
+  if (mem == nullptr)
+  {
+    for (auto* g : geoms) OGRGeometryFactory::destroyGeometry(g);
+    throw std::runtime_error("ShapeSource::rasterise: MEM Create failed");
+  }
+  struct MemGuard
+  {
+    GDALDataset* p;
+    ~MemGuard() { if (p) GDALClose(p); }
+  } memGuard{mem};
+  const double pxW = (maxX - minX) / static_cast<double>(nx);
+  const double pxH = (minY - maxY) / static_cast<double>(ny);
+  double gt[6] = {minX, pxW, 0.0, maxY, 0.0, pxH};
+  mem->SetGeoTransform(gt);
+
+  std::vector<OGRGeometryH> handles;
+  handles.reserve(geoms.size());
+  for (auto* g : geoms) handles.push_back(static_cast<OGRGeometryH>(g));
+
+  int bandList[1] = {1};
+  char** rasterOpts = nullptr;
+  rasterOpts = CSLSetNameValue(rasterOpts, "ALL_TOUCHED", "TRUE");
+  CPLErr err = GDALRasterizeGeometries(
+      mem, 1, bandList, static_cast<int>(handles.size()), handles.data(),
+      nullptr, nullptr, burnValues.data(), rasterOpts, nullptr, nullptr);
+  CSLDestroy(rasterOpts);
+  for (auto* g : geoms) OGRGeometryFactory::destroyGeometry(g);
+  if (err != CE_None)
+    throw std::runtime_error("ShapeSource::rasterise: GDALRasterizeGeometries failed");
+
+  err = mem->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, static_cast<int>(nx),
+                                        static_cast<int>(ny), out.data(),
+                                        static_cast<int>(nx), static_cast<int>(ny),
+                                        GDT_UInt16, 0, 0);
+  if (err != CE_None)
+    throw std::runtime_error("ShapeSource::rasterise: read-back failed");
+  return out;
+}
+
 
 std::vector<int> ShapeSource::paramIds() const { return {1}; }
 std::string ShapeSource::paramShortName(int /*paramId*/) const
@@ -376,17 +473,113 @@ float ShapeSource::levelValueAt(std::size_t /*i*/) const { return 0; }
 
 float ShapeSource::interpolatedValue(double lat, double lon) const
 {
+  // Try the zoom raster first when populated — it covers a smaller
+  // window at higher resolution. Falls back to the base raster for
+  // anything outside the zoom bbox or when no zoom is active.
+  if (itsZoomNx > 0 && itsZoomPixelW != 0 && itsZoomPixelH != 0)
+  {
+    const double col = (lon - itsZoomOriginX) / itsZoomPixelW;
+    const double row = (lat - itsZoomOriginY) / itsZoomPixelH;
+    if (col >= 0 && row >= 0 && col < static_cast<double>(itsZoomNx) &&
+        row < static_cast<double>(itsZoomNy))
+    {
+      const auto i = static_cast<std::size_t>(col);
+      const auto j = static_cast<std::size_t>(row);
+      return static_cast<float>(itsZoomGrid[j * itsZoomNx + i]);
+    }
+  }
   if (itsGrid.empty() || itsPixelW == 0 || itsPixelH == 0)
     return std::numeric_limits<float>::quiet_NaN();
-  // Inverse of the GeoTransform (lon ≡ x, lat ≡ y).
   const double col = (lon - itsOriginX) / itsPixelW;
   const double row = (lat - itsOriginY) / itsPixelH;
   if (col < 0 || row < 0 || col >= static_cast<double>(itsNx) ||
       row >= static_cast<double>(itsNy))
-    return 0.0F;  // outside layer extent → "no feature"
+    return 0.0F;
   const auto i = static_cast<std::size_t>(col);
   const auto j = static_cast<std::size_t>(row);
   return static_cast<float>(itsGrid[j * itsNx + i]);
+}
+
+void ShapeSource::prepareViewport(const LatLonBox& bbox, int cellsX, int cellsY) const
+{
+  if (itsBurnIdCount == 0) return;
+  if (cellsX <= 0 || cellsY <= 0) return;
+
+  // What's the visible bbox in WGS84? The viewport's lat/lon span
+  // tells us the source-pixel size we'd need to match the screen.
+  const double lonSpan = bbox.maxLon - bbox.minLon;
+  const double latSpan = bbox.maxLat - bbox.minLat;
+  if (lonSpan <= 0 || latSpan <= 0) return;
+
+  // Refinement threshold: if the base-raster pixel size is finer
+  // than what one screen cell covers, the existing grid already has
+  // enough detail and a zoom raster wouldn't improve the look.
+  // Compare in degrees of longitude (the dominant axis for our
+  // typical mid-latitude shapefiles).
+  const double basePxLon = std::abs(itsPixelW);
+  const double screenPxLon = lonSpan / static_cast<double>(cellsX);
+  if (basePxLon <= screenPxLon)
+  {
+    // Base resolution already adequate — drop any stale zoom raster
+    // so we don't keep memory tied up.
+    itsZoomGrid.clear();
+    itsZoomNx = itsZoomNy = 0;
+    return;
+  }
+
+  // Pick a target zoom resolution that gives at least screen scale
+  // plus a 2× headroom so a small pan keeps us on the cached
+  // raster. Don't exceed itsOpts.rasterMax in either dimension —
+  // extreme zoom-ins would otherwise allocate huge buffers.
+  const int desiredX = std::min(static_cast<int>(itsOpts.rasterMax),
+                                std::max(cellsX * 2, 256));
+  const int desiredY = std::min(static_cast<int>(itsOpts.rasterMax),
+                                std::max(cellsY * 2, 256));
+
+  // Expand the viewport bbox by 25% on each side so panning within
+  // a small region doesn't trigger constant re-rasterisation. The
+  // expansion is clamped to the source's own bbox.
+  const double padLon = lonSpan * 0.25;
+  const double padLat = latSpan * 0.25;
+  double minX = bbox.minLon - padLon;
+  double maxX = bbox.maxLon + padLon;
+  double minY = bbox.minLat - padLat;
+  double maxY = bbox.maxLat + padLat;
+  // Clamp to the source extent so we never rasterise empty space
+  // beyond what the geometries actually cover.
+  const double srcMinX = itsOriginX;
+  const double srcMaxX = itsOriginX + static_cast<double>(itsNx) * itsPixelW;
+  const double srcMinY = itsOriginY + static_cast<double>(itsNy) * itsPixelH;
+  const double srcMaxY = itsOriginY;
+  minX = std::max(minX, srcMinX);
+  maxX = std::min(maxX, srcMaxX);
+  minY = std::max(minY, srcMinY);
+  maxY = std::min(maxY, srcMaxY);
+  if (maxX <= minX || maxY <= minY) return;
+
+  // Skip the work if the existing zoom raster already covers the
+  // requested bbox at sufficient resolution. "Covers" = the new
+  // bbox is entirely inside the cached one and the cached
+  // pixel-per-degree is at least as fine.
+  if (itsZoomNx > 0)
+  {
+    const double zMinX = itsZoomOriginX;
+    const double zMaxX = itsZoomOriginX + static_cast<double>(itsZoomNx) * itsZoomPixelW;
+    const double zMinY = itsZoomOriginY + static_cast<double>(itsZoomNy) * itsZoomPixelH;
+    const double zMaxY = itsZoomOriginY;
+    if (bbox.minLon >= zMinX && bbox.maxLon <= zMaxX && bbox.minLat >= zMinY &&
+        bbox.maxLat <= zMaxY && std::abs(itsZoomPixelW) <= screenPxLon * 1.5)
+      return;
+  }
+
+  itsZoomGrid = rasterise(static_cast<std::size_t>(desiredX),
+                          static_cast<std::size_t>(desiredY), minX, minY, maxX, maxY);
+  itsZoomNx = static_cast<std::size_t>(desiredX);
+  itsZoomNy = static_cast<std::size_t>(desiredY);
+  itsZoomOriginX = minX;
+  itsZoomOriginY = maxY;
+  itsZoomPixelW = (maxX - minX) / static_cast<double>(itsZoomNx);
+  itsZoomPixelH = (minY - maxY) / static_cast<double>(itsZoomNy);
 }
 
 LatLonBox ShapeSource::boundingBox() const

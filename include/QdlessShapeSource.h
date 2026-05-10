@@ -145,6 +145,24 @@ class ShapeSource : public DataSource
   std::size_t itsNx = 0;
   std::size_t itsNy = 0;
   std::vector<Polyline> itsOutlines;
+  // Non-owning layer pointer when the ctor was given an OGRLayer*;
+  // null on the filename path. rasterise() walks this directly; on
+  // the filename path it re-opens the file from itsFilename. The
+  // App keeps the parent dataset alive (PostGIS connection) so the
+  // pointer stays valid for the lifetime of this source.
+  OGRLayer* itsLayerNonOwned = nullptr;
+  // Optional refined raster covering only the current viewport. When
+  // populated (zoomNx > 0), interpolatedValue checks it first; the
+  // base raster (itsGrid / itsOriginX / …) handles cells outside the
+  // refined bbox or the zoomed-out case. Rebuilt by prepareViewport
+  // when the viewport shifts enough to warrant a fresh rasterisation.
+  mutable std::vector<std::uint16_t> itsZoomGrid;
+  mutable std::size_t itsZoomNx = 0;
+  mutable std::size_t itsZoomNy = 0;
+  mutable double itsZoomOriginX = 0;
+  mutable double itsZoomOriginY = 0;
+  mutable double itsZoomPixelW = 0;
+  mutable double itsZoomPixelH = 0;
   // For each burn id i ∈ [1..itsBurnIdCount], itsBurnToFeature[i-1]
   // is the index of the original OGR feature it came from. Multiple
   // burn ids can map to the same feature when that feature is a
@@ -175,5 +193,15 @@ class ShapeSource : public DataSource
   // attributes/centroids/outlines) shared by both ctors. The caller
   // owns the OGRDataset that hosts `layer`.
   void init(OGRLayer* layer);
+  // Rasterise itsCachedGeoms into a fresh uint16 grid with the
+  // given dimensions and bbox-in-WGS84. Common helper used by
+  // init() (for the base raster) and prepareViewport() (zoom).
+  std::vector<std::uint16_t> rasterise(std::size_t nx, std::size_t ny,
+                                       double minX, double minY,
+                                       double maxX, double maxY) const;
+
+ public:
+  // see DataSource::prepareViewport
+  void prepareViewport(const LatLonBox& bbox, int cellsX, int cellsY) const override;
 };
 }  // namespace Qdless

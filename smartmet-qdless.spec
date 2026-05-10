@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 21%{?dist}.fmi
+Release: 22%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,28 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-22.fmi
+- Zoom-aware re-rasterisation for shapefiles / PostGIS layers.
+  ShapeSource now grows a `prepareViewport(bbox, cellsX, cellsY)`
+  hook (added to the DataSource interface as a no-op default);
+  the App calls it in sampleSlice with the visible lat/lon
+  bbox plus the screen's cell count. When the user zooms in past
+  the base raster's pixel size, ShapeSource builds a
+  high-resolution refined raster covering the visible bbox plus
+  a 25% margin so panning within the region doesn't trigger
+  constant rebuilds. interpolatedValue checks the zoom raster
+  first and falls back to the base for cells outside the
+  refined bbox or at zoomed-out scales.
+- ShapeSource no longer caches OGR geometries past construction.
+  rasterise() re-walks the layer (PostGIS connection stays open;
+  shapefile re-opens its file) on each call. Trade-off: more I/O
+  per zoom step, no per-source memory tied up in geometry copies
+  — important for huge PostGIS tables where the cache would have
+  been untenable. Burn-id assignment is deterministic across
+  walks (sequential by leaf-polygon iteration order) so the
+  base and zoom rasters stay consistent and click-to-attribute
+  keeps mapping the right feature.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-21.fmi
 - DataSource gains a SourceCategory enum (Gridded / Image /
   Vector) and a `category()` virtual; ImageSource and ShapeSource

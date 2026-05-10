@@ -979,6 +979,37 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
 
+  // Hint the source about the viewport — vector sources (ShapeSource)
+  // use this to refine their rasterisation when the user zooms in
+  // past the base resolution. Compute the lat/lon bbox by sampling
+  // the four corners through uvToLatLon; non-shapefile sources
+  // ignore the hint via the no-op default.
+  {
+    LatLonBox vbox;
+    vbox.minLat = std::numeric_limits<double>::infinity();
+    vbox.maxLat = -std::numeric_limits<double>::infinity();
+    vbox.minLon = std::numeric_limits<double>::infinity();
+    vbox.maxLon = -std::numeric_limits<double>::infinity();
+    auto sample = [&](double u, double v) {
+      double lat = 0;
+      double lon = 0;
+      itsSource->uvToLatLon(u, v, lat, lon);
+      if (std::isfinite(lat) && std::isfinite(lon))
+      {
+        vbox.minLat = std::min(vbox.minLat, lat);
+        vbox.maxLat = std::max(vbox.maxLat, lat);
+        vbox.minLon = std::min(vbox.minLon, lon);
+        vbox.maxLon = std::max(vbox.maxLon, lon);
+      }
+    };
+    sample(itsViewport.uMin, itsViewport.vMin);
+    sample(itsViewport.uMax, itsViewport.vMin);
+    sample(itsViewport.uMin, itsViewport.vMax);
+    sample(itsViewport.uMax, itsViewport.vMax);
+    if (std::isfinite(vbox.minLat))
+      itsSource->prepareViewport(vbox, subWidth, subHeight);
+  }
+
   // Image-mode short-circuit: pixels go straight from the source to the
   // sub-cell buffer with no value/palette layer. Min/max are left at their
   // sentinel infinities so the legend bar (which the App's drawer also
