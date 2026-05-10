@@ -226,11 +226,18 @@ class App
   // levels (5, 10, 25, 50, 100, 250, 500). Default = a comfortable mid value.
   int itsCityOverlayN = 25;
 
-  // Shapefile palette mode, cycled by [R]. 0 = flat (mid grey, default),
-  // 1 = rainbow per feature ID. Only used when the source is a
-  // ShapeSource; for any other backend the [R] key is a no-op and this
-  // member is ignored.
-  int itsShapePaletteMode = 0;
+  // Shapefile palette mode, cycled by [R]. 0 = flat (mid grey),
+  // 1 = rainbow per burn id (default — distinguishes adjacent
+  // polygons immediately). Only used when the source is a
+  // ShapeSource; for any other backend the [R] key is a no-op and
+  // this member is ignored.
+  int itsShapePaletteMode = 1;
+  // Polylines extracted from the shapefile (polygon exterior + hole
+  // rings, plus any LineString geometries). Lives in its own slot so
+  // [B] keeps cycling GSHHS political borders unchanged; [O] cycles
+  // this overlay.
+  std::vector<Polyline> itsShapeOutlines;
+  LineStyle itsShapeOutlineStyle = LineStyle::Braille;
 
   // Transient status message shown on the timeline header for one redraw
   // (e.g. "Saved foo.png"). Cleared by the next non-message-producing key.

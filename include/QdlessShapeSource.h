@@ -83,17 +83,30 @@ class ShapeSource : public DataSource
   std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
   std::string gridSignature() const override;
 
-  // Polygon (and polyline) boundaries in lat/lon. The App swaps these
-  // into the existing GSHHS-borders slot so the cycling-style
-  // (Braille / Thick / None) keypress applies to them. Empty if the
-  // shapefile carries only points.
+  // Polygon (and polyline) boundaries in lat/lon. App keeps these in
+  // a dedicated `itsShapeOutlines` slot so the regular [B] cycling
+  // for GSHHS political borders is unaffected; outline styling is on
+  // its own [O] toggle.
   const std::vector<Polyline>& outlines() const { return itsOutlines; }
-  // Recommended palette for this shapefile, given the constructor's
-  // options (flat fill or rainbow over the feature count). Used by
-  // the App when no --palette override was supplied.
+  // Recommended palette for this shapefile (flat fill, or rainbow
+  // over the burn-id range when the constructor was passed
+  // `Options::rainbow`). Used by the App when no --palette override
+  // was supplied.
   Palette recommendedPalette() const;
-  // Number of features actually rasterised — used by App / metadata.
+  // Number of original OGR features in the shapefile (for the
+  // metadata popup). Distinct from burn-value count: a shapefile
+  // with one MultiPolygon feature of N sub-polygons has 1 feature
+  // but N burn ids.
   int featureCount() const { return itsFeatureCount; }
+  // Number of distinct burn ids in the rasterised grid (1..N). Used
+  // by the App when sizing the rainbow palette so each sub-polygon
+  // of a MultiPolygon gets its own hue.
+  int burnIdCount() const { return itsBurnIdCount; }
+  // Attribute (label, value) pairs of the feature whose burn id
+  // contains the given lat/lon. Empty if the click landed outside
+  // every polygon, or if the shapefile has no .dbf fields.
+  std::vector<std::pair<std::string, std::string>> attributesAt(double lat,
+                                                                double lon) const;
 
  private:
   std::string itsFilename;
@@ -106,11 +119,22 @@ class ShapeSource : public DataSource
   std::size_t itsNx = 0;
   std::size_t itsNy = 0;
   std::vector<Polyline> itsOutlines;
+  // For each burn id i ∈ [1..itsBurnIdCount], itsBurnToFeature[i-1]
+  // is the index of the original OGR feature it came from. Multiple
+  // burn ids can map to the same feature when that feature is a
+  // MultiPolygon — every leaf polygon gets its own burn value so the
+  // rainbow palette can colour them separately, but they all share
+  // the same .dbf attribute row.
+  std::vector<int> itsBurnToFeature;
+  // Per-feature .dbf attributes captured at construction (the OGR
+  // features themselves are destroyed before we exit the ctor).
+  std::vector<std::vector<std::pair<std::string, std::string>>> itsAttributes;
   // Geometric details for the metadata popup.
   std::string itsGeometryType;
   std::string itsLayerName;
   std::vector<std::string> itsFieldNames;
   int itsFeatureCount = 0;
+  int itsBurnIdCount = 0;
   // GeoTransform of itsGrid: x = origX + col*pixelW, y = origY + row*pixelH.
   // Used by interpolatedValue to map (lat,lon) → grid cell directly.
   double itsOriginX = 0;

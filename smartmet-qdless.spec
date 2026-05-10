@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 8%{?dist}.fmi
+Release: 9%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,31 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-9.fmi
+- Shapefile burn ids now per leaf polygon. A feature that is a
+  MultiPolygon (or GeometryCollection) used to burn all its
+  sub-polygons under one id, so the rainbow palette gave one hue
+  to a whole MultiPolygon feature. Walk the tree to leaves and
+  give each polygon / line / point its own burn value, while
+  keeping the .dbf attribute row keyed to the original feature so
+  the click-popup still shows the correct attributes.
+- Click → attribute popup (replaces the time-series probe for
+  shapefile sources). RGB triplets / feature ids have no scalar
+  interpretation, so the time-series chart is meaningless. The
+  click now finds the polygon under the cursor and shows its full
+  .dbf row in the existing metadata-popup widget.
+- Shape outlines moved out of the GSHHS political-borders slot
+  into their own [O] toggle. [B] cycles GSHHS borders again as it
+  used to; [O] cycles shapefile outlines (Braille → Thick → None).
+  The two layers can be styled and toggled independently.
+- Default palette mode for shapefiles is now rainbow per burn id
+  (was flat). [R] still toggles flat / rainbow.
+- Metadata popup ('M') for a shapefile now shows the burn-id
+  count separately from the feature count, so users can spot
+  files where one feature is a MultiPolygon of N sub-polygons
+  (or one big polygon dominates the rasterised area) without
+  digging through the source.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-8.fmi
 - Shapefile outlines drawn in green (RGB 0,220,0) instead of the
   GSHHS-borders grey-90. Grey on the default mid-grey flat fill

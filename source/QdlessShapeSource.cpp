@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 
@@ -214,16 +215,44 @@ ShapeSource::ShapeSource(const std::string& filename, Options opts)
   dstSrs.exportToWkt(&dstWkt);
   if (dstWkt) { mem->SetProjection(dstWkt); CPLFree(dstWkt); }
 
-  // Walk the layer once, building (geometry, burnValue) pairs and the
-  // outline polylines. Reprojects each feature's geometry to WGS84.
+  // Walk every feature; for each, walk its geometry tree down to leaf
+  // Polygons (or single LineStrings) and assign a distinct burn id to
+  // each one. This way a shapefile containing a single MultiPolygon
+  // feature still gets one hue per sub-polygon under the rainbow
+  // palette. Per-feature .dbf attributes are captured into
+  // itsAttributes; itsBurnToFeature lets a click look back up the
+  // original feature row.
   layer->ResetReading();
-  std::vector<OGRGeometry*> ownedGeoms;  // reproject creates new OGRGeometry instances
+  std::vector<OGRGeometry*> ownedGeoms;
   std::vector<OGRGeometryH> handles;
   std::vector<double> burn;
-  ownedGeoms.reserve(static_cast<std::size_t>(layer->GetFeatureCount()));
-  handles.reserve(ownedGeoms.capacity());
-  burn.reserve(ownedGeoms.capacity());
-  itsOutlines.reserve(ownedGeoms.capacity());
+
+  // Recursive helper: walk a geometry, register each leaf polygon /
+  // line string for rasterisation under its own burn value.
+  std::function<void(OGRGeometry*, int)> registerLeaves =
+      [&](OGRGeometry* geom, int featureIdx)
+  {
+    if (geom == nullptr) return;
+    const auto t = wkbFlatten(geom->getGeometryType());
+    if (t == wkbPolygon || t == wkbLineString || t == wkbPoint)
+    {
+      // Cycle modulo 65535 — uint16 raster can address that many
+      // ids; on overflow rainbow hues repeat (still finer than the
+      // single colour you'd see otherwise).
+      const double v = static_cast<double>((itsBurnIdCount % 65535) + 1);
+      auto* clone = geom->clone();
+      ownedGeoms.push_back(clone);
+      handles.push_back(static_cast<OGRGeometryH>(clone));
+      burn.push_back(v);
+      itsBurnToFeature.push_back(featureIdx);
+      ++itsBurnIdCount;
+    }
+    else if (auto* gc = geom->toGeometryCollection(); gc != nullptr)
+    {
+      for (int i = 0; i < gc->getNumGeometries(); ++i)
+        registerLeaves(gc->getGeometryRef(i), featureIdx);
+    }
+  };
 
   while (auto* feat = layer->GetNextFeature())
   {
@@ -244,15 +273,24 @@ ShapeSource::ShapeSource(const std::string& filename, Options opts)
       }
     }
     collectOutlines(clone, /*ct already applied*/ nullptr, itsOutlines);
-    // Burn value = feature index + 1 (0 is reserved for "outside").
-    // Cycle modulo 65535 if a shapefile has more features than fit in
-    // uint16; rainbow palette will repeat hues but flat fill doesn't
-    // care.
-    const double v = static_cast<double>((itsFeatureCount % 65535) + 1);
-    ownedGeoms.push_back(clone);
-    handles.push_back(static_cast<OGRGeometryH>(clone));
-    burn.push_back(v);
-    ++itsFeatureCount;
+
+    // Capture .dbf attributes verbatim (no type conversion) so the
+    // click-popup shows the file's own representation.
+    std::vector<std::pair<std::string, std::string>> attrs;
+    if (auto* defn = layer->GetLayerDefn())
+    {
+      attrs.reserve(static_cast<std::size_t>(defn->GetFieldCount()));
+      for (int i = 0; i < defn->GetFieldCount(); ++i)
+      {
+        const char* name = defn->GetFieldDefn(i)->GetNameRef();
+        const char* val = feat->GetFieldAsString(i);
+        attrs.emplace_back(name ? name : "", val ? val : "");
+      }
+    }
+    itsAttributes.push_back(std::move(attrs));
+    const int featureIdx = itsFeatureCount++;
+    registerLeaves(clone, featureIdx);
+    OGRGeometryFactory::destroyGeometry(clone);
   }
 
   if (itsFeatureCount > 0)
@@ -284,6 +322,7 @@ ShapeSource::ShapeSource(const std::string& filename, Options opts)
       GDT_UInt16, 0, 0);
   if (err != CE_None)
     throw std::runtime_error("ShapeSource: failed to read back rasterised grid");
+
 }
 
 ShapeSource::~ShapeSource() = default;
@@ -370,6 +409,7 @@ std::vector<std::pair<std::string, std::string>> ShapeSource::extraMetadata() co
   if (!itsLayerName.empty()) rows.emplace_back("Layer", itsLayerName);
   if (!itsGeometryType.empty()) rows.emplace_back("Geometry", itsGeometryType);
   rows.emplace_back("Features", std::to_string(itsFeatureCount));
+  rows.emplace_back("Polygons", std::to_string(itsBurnIdCount));
   rows.emplace_back("Outlines", std::to_string(itsOutlines.size()));
   rows.emplace_back("Raster", std::to_string(itsNx) + "x" + std::to_string(itsNy));
   if (!itsFieldNames.empty())
@@ -397,7 +437,30 @@ std::string ShapeSource::gridSignature() const
 Palette ShapeSource::recommendedPalette() const
 {
   if (itsOpts.rainbow || !itsOpts.colorByField.empty())
-    return Palette::rainbowCycle(std::max(1, itsFeatureCount));
+    return Palette::rainbowCycle(std::max(1, itsBurnIdCount));
   return Palette::flatFill(itsOpts.fillColor);
+}
+
+std::vector<std::pair<std::string, std::string>> ShapeSource::attributesAt(double lat,
+                                                                           double lon) const
+{
+  if (itsGrid.empty() || itsPixelW == 0 || itsPixelH == 0) return {};
+  const double col = (lon - itsOriginX) / itsPixelW;
+  const double row = (lat - itsOriginY) / itsPixelH;
+  if (col < 0 || row < 0 || col >= static_cast<double>(itsNx) ||
+      row >= static_cast<double>(itsNy))
+    return {};
+  const auto i = static_cast<std::size_t>(col);
+  const auto j = static_cast<std::size_t>(row);
+  const auto burn = itsGrid[j * itsNx + i];
+  if (burn == 0) return {};
+  // burn ids are 1-based and may have wrapped past 65535; the
+  // lookup table is the authoritative mapping back to the original
+  // feature index.
+  const std::size_t idx = (static_cast<std::size_t>(burn) - 1) % itsBurnToFeature.size();
+  const int featureIdx = itsBurnToFeature[idx];
+  if (featureIdx < 0 || static_cast<std::size_t>(featureIdx) >= itsAttributes.size())
+    return {};
+  return itsAttributes[static_cast<std::size_t>(featureIdx)];
 }
 }  // namespace Qdless

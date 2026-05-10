@@ -502,6 +502,13 @@ App::App(Options opts) : itsOpts(std::move(opts))
   itsPanels.resize(1);
   buildIndices();
 
+  // Capture shapefile outlines into their own slot so [B] / [C] keep
+  // cycling GSHHS political borders / coastlines unchanged. Drawn
+  // last in the overlay stack (on top of GSHHS) since the user is
+  // here to look at the shape, not the country lines.
+  if (auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()))
+    itsShapeOutlines = shp->outlines();
+
   // Seed live overlay styles from CLI flags. After startup these are
   // cycled by the `c` / `b` keys; itsOpts.noCoastline / noBorders are not
   // updated further.
@@ -646,14 +653,10 @@ void App::buildIndices()
 
 Rgb App::borderColor() const
 {
-  // Shapefile outlines get their own colour: green is distinct from
-  // GSHHS coastlines (black) and political borders (grey-90), so the
-  // viewer can tell at a glance which lines come from which layer.
-  // The bright saturated value reads on both the default flat-grey
-  // fill and the rainbow palette without clashing.
-  if (dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr)
-    return Rgb{0, 220, 0};
-  return Rgb{90, 90, 90};
+  // Bright saturated green for shapefile outlines — distinct from
+  // GSHHS coastlines (black) and political borders (grey-90), and
+  // legible on both the flat-grey fill and the rainbow palette.
+  return Rgb{0, 220, 0};
 }
 
 void App::loadPalette()
@@ -797,27 +800,11 @@ void App::loadCoastlines()
   }
   if (itsBorderStyle != LineStyle::None)
   {
-    // For a ShapeSource the borders come from the shapefile itself —
-    // its polygon and polyline boundaries replace the GSHHS political
-    // borders so the user sees outlines on top of the rasterised
-    // fill. Sentinel "shape:" path keeps us from re-loading from
-    // GSHHS each redraw; we set it once and never change it.
-    if (auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()))
+    auto path = Coastline::pickFile(itsOpts.coastlineDir, "border", span);
+    if (!path.empty() && path != itsBorderPath)
     {
-      if (itsBorderPath != "shape:")
-      {
-        itsBorders = shp->outlines();
-        itsBorderPath = "shape:";
-      }
-    }
-    else
-    {
-      auto path = Coastline::pickFile(itsOpts.coastlineDir, "border", span);
-      if (!path.empty() && path != itsBorderPath)
-      {
-        itsBorders = Coastline::read(path);
-        itsBorderPath = path;
-      }
+      itsBorders = Coastline::read(path);
+      itsBorderPath = path;
     }
   }
 }
@@ -2230,14 +2217,26 @@ void App::openProbe(int cellX, int cellY, UI& ui)
 {
   // The probe is a time-series chart of the scalar value at the clicked
   // (lat, lon) over every available timestep. RGB triplets from a raw
-  // image have no scalar interpretation — opening the probe on an image
-  // would produce an empty chart with NaN points everywhere — so the
-  // click is silently a no-op. (The status-bar item and keyboard-driven
-  // entry points to the probe are also gated out in image mode.)
+  // image have no scalar interpretation — silently no-op.
   if (itsSource->isRawImage()) return;
   double lat = 0;
   double lon = 0;
   if (!cellToLatLon(ui, cellX, cellY, lat, lon)) return;
+  // Shapefile sources don't have a scalar time axis either — every
+  // burn id is a feature index, not a measurement. Repurpose the
+  // click as "show this polygon's .dbf attributes".
+  if (auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()))
+  {
+    auto attrs = shp->attributesAt(lat, lon);
+    if (attrs.empty())
+    {
+      itsLastMessage = "No feature here";
+      return;
+    }
+    itsMarker = std::make_pair(lat, lon);
+    ui.popupMetadata("Feature attributes", attrs);
+    return;
+  }
   itsMarker = std::make_pair(lat, lon);
   openProbeAt(lat, lon, ui);
 }
@@ -2446,7 +2445,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'R':
     {
       // Palette cycle. Currently only meaningful for shapefile sources
-      // (flat fill ↔ rainbow per feature); a no-op with a status hint
+      // (flat fill ↔ rainbow per burn id); a no-op with a status hint
       // for other backends so the user gets feedback either way.
       if (dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr)
       {
@@ -2460,6 +2459,23 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         itsLastMessage = "Palette cycle is only available for shapefiles";
       }
       return true;
+    }
+
+    case 'o':
+    case 'O':
+    {
+      // Shapefile outline style cycle (Braille → Thick → None). Only
+      // active when there's something to outline; on other sources the
+      // key falls through silently (no message — there's no overlay
+      // for it to talk about).
+      if (!itsShapeOutlines.empty())
+      {
+        itsShapeOutlineStyle = nextLineStyle(itsShapeOutlineStyle);
+        itsLastMessage =
+            std::string("Shape outlines: ") + lineStyleLabel(itsShapeOutlineStyle);
+        return true;
+      }
+      return false;
     }
 
     case 'M':
@@ -2824,7 +2840,9 @@ void App::drawMap(UI& ui)
     if (itsCoastlineStyle == LineStyle::Thick)
       overlayPolylines(pixels, subW, subH, itsCoastlines, Rgb{0, 0, 0});
     if (itsBorderStyle == LineStyle::Thick)
-      overlayPolylines(pixels, subW, subH, itsBorders, borderColor());
+      overlayPolylines(pixels, subW, subH, itsBorders, Rgb{90, 90, 90});
+    if (itsShapeOutlineStyle == LineStyle::Thick)
+      overlayPolylines(pixels, subW, subH, itsShapeOutlines, borderColor());
     overlayCities(pixels, subW, subH);
     overlayMarker(pixels, subW, subH);
 
@@ -2835,7 +2853,9 @@ void App::drawMap(UI& ui)
     if (itsCoastlineStyle == LineStyle::Braille)
       appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subW, r.row, r.col);
     if (itsBorderStyle == LineStyle::Braille)
-      appendPolylineBraille(os, itsBorders, borderColor(), pixels, subW, r.row, r.col);
+      appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subW, r.row, r.col);
+    if (itsShapeOutlineStyle == LineStyle::Braille)
+      appendPolylineBraille(os, itsShapeOutlines, borderColor(), pixels, subW, r.row, r.col);
 
     if (itsShowWindArrows)
       os << buildWindArrows(r.width, r.height, r.row, r.col);
@@ -2913,7 +2933,9 @@ int App::runOnce()
   if (itsCoastlineStyle == LineStyle::Thick)
     overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
   if (itsBorderStyle == LineStyle::Thick)
-    overlayPolylines(pixels, subWidth, subHeight, itsBorders, borderColor());
+    overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
+  if (itsShapeOutlineStyle == LineStyle::Thick)
+    overlayPolylines(pixels, subWidth, subHeight, itsShapeOutlines, borderColor());
   overlayCities(pixels, subWidth, subHeight);
   overlayMarker(pixels, subWidth, subHeight);
 
@@ -2935,7 +2957,9 @@ int App::runOnce()
   if (itsCoastlineStyle == LineStyle::Braille)
     appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subWidth, 1, 0);
   if (itsBorderStyle == LineStyle::Braille)
-    appendPolylineBraille(os, itsBorders, borderColor(), pixels, subWidth, 1, 0);
+    appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subWidth, 1, 0);
+  if (itsShapeOutlineStyle == LineStyle::Braille)
+    appendPolylineBraille(os, itsShapeOutlines, borderColor(), pixels, subWidth, 1, 0);
   os << buildCityLabels(cellW, cellH, 1, 0);
   std::cout << os.str() << "\x1b[" << ts.rows << ";1H" << '\n';
   return 0;
