@@ -2387,8 +2387,25 @@ void App::openProbe(int cellX, int cellY, UI& ui)
       itsLastMessage = "No feature here";
       return;
     }
+    // Loop: clicking outside the popup re-probes the new location
+    // and pops up its attributes, so the user can hop between
+    // polygons by clicking around without keystrokes between.
     itsMarker = std::make_pair(lat, lon);
-    ui.popupMetadata("Feature attributes", attrs);
+    auto click = ui.popupMetadata("Feature attributes", attrs);
+    while (click.has_value())
+    {
+      double nlat = 0;
+      double nlon = 0;
+      if (!cellToLatLon(ui, click->x, click->y, nlat, nlon)) break;
+      auto next = shp->attributesAt(nlat, nlon);
+      if (next.empty())
+      {
+        itsLastMessage = "No feature here";
+        break;
+      }
+      itsMarker = std::make_pair(nlat, nlon);
+      click = ui.popupMetadata("Feature attributes", next);
+    }
     return;
   }
   itsMarker = std::make_pair(lat, lon);

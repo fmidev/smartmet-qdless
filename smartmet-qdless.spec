@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 17%{?dist}.fmi
+Release: 18%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,27 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-18.fmi
+- popupSearch (attribute table, layer picker, place search) now
+  scrolls when the selection moves past the visible window. Added
+  PgUp / PgDn / Home / End handlers; the digit hotkeys 1..9 pick
+  the visible row (relative to scroll), not the absolute index.
+- popupLegend gains scrolling for long legends. ↑/↓ step a row,
+  PgUp/PgDn step a screen, Home/End jump to the ends. Footer
+  reports the visible range (e.g. "1-25 of 192"). Labelled
+  rainbow legends (shapefiles) are sorted alphabetically;
+  numeric (lo..hi) bands keep their intrinsic order.
+- popupMetadata returns click coordinates when the user clicks
+  outside the popup. App's vector-source click handler chains:
+  the new click drops the marker on the next polygon and pops
+  up its attributes, so users can hop between features by
+  clicking around. Clicks inside the popup, or any keypress,
+  still dismiss it as before.
+- All popups force blocking input mode on entry (the App's
+  animation loop leaves wgetch in non-blocking 250ms mode, which
+  caused the popup body to redraw 4×/s and reportedly looked
+  like the popup didn't appear until the user pressed something).
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-17.fmi
 - README updated to cover the new input formats (ODIM HDF,
   GeoTIFF, raw images, animated WebP, shapefiles, PostGIS), the

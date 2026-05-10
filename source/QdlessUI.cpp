@@ -237,6 +237,7 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
                   int currentIndex)
 {
   if (items.empty()) return -1;
+  wtimeout(itsStatusWin, -1);  // see comment in popupSearch
 
   // Sizing.
   int maxLabel = 0;
@@ -387,8 +388,16 @@ int UI::popupSearch(const std::string& title,
                     std::function<std::vector<std::string>(const std::string&)> matcher,
                     const std::string& header)
 {
+  // Force blocking input. The App's animation loop leaves the
+  // window in non-blocking 250ms mode, which would have popupSearch
+  // re-render every quarter-second and (more importantly) the very
+  // first wgetch returns ERR before the user has typed anything,
+  // making the popup look like it doesn't appear until the user
+  // presses something. Restore on exit so animation keeps working.
+  wtimeout(itsStatusWin, -1);
   std::string query;
   int sel = 0;
+  int scroll = 0;  // index of the first match shown in the body
   // Per-session sticky dimensions. Each keystroke recomputes the natural
   // popup size from the current matches, but we never shrink within one
   // invocation — otherwise a smaller popup leaves the previous frame's
@@ -469,6 +478,11 @@ int UI::popupSearch(const std::string& title,
     // on screen when the result set shrinks (especially when the user
     // deletes the entire query and there are no matches).
     const int bodyRows = height - 4 - kFooterRows - headerRows;
+    // Keep the selected row inside the visible window. When the user
+    // arrows past the bottom, scroll down by one; same on the way up.
+    if (sel < scroll) scroll = sel;
+    if (sel >= scroll + bodyRows) scroll = sel - bodyRows + 1;
+    if (matches.empty()) scroll = 0;
     // When the query filters everything away, leaving the body
     // blank looks like the popup itself disappeared — show a hint
     // on the first body row so the user knows their typed query is
@@ -479,14 +493,17 @@ int UI::popupSearch(const std::string& title,
     {
       putAt(os, top + 3 + headerRows + i, left);
       os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82";
-      if (i < static_cast<int>(matches.size()))
+      const int matchIdx = scroll + i;
+      if (matchIdx >= 0 && matchIdx < static_cast<int>(matches.size()))
       {
-        const bool isSel = (i == sel);
+        const bool isSel = (matchIdx == sel);
         if (isSel)
           os << kEscBgWhite << kEscFgBlack << kEscBold;
         else
           os << kEscBgBlack << kEscFgWhite;
-        // Hotkey [N] for first 9.
+        // Hotkey [N] for the first 9 visible rows (digits track the
+        // scrolled view, not absolute index, so 1..9 always pick the
+        // nine matches currently on screen).
         const char hk = (i < 9) ? static_cast<char>('1' + i) : ' ';
         os << ' ';
         int consumed = 1;
@@ -508,8 +525,8 @@ int UI::popupSearch(const std::string& title,
           os << "    ";
           consumed += 4;
         }
-        os << matches[i];
-        consumed += utf8Width(matches[i]);
+        os << matches[matchIdx];
+        consumed += utf8Width(matches[matchIdx]);
         pad(os, interiorW - consumed);
       }
       else if (noMatchHint && i == 0)
@@ -573,9 +590,38 @@ int UI::popupSearch(const std::string& title,
       if (!matches.empty()) sel = std::min(static_cast<int>(matches.size()) - 1, sel + 1);
       continue;
     }
+    if (ch == KEY_NPAGE)
+    {
+      // Page-down: jump by one bodyRows worth, but never past the
+      // last match. Use the last computed bodyRows; safe because the
+      // current iteration just rendered with that height.
+      const int last = std::max(0, static_cast<int>(matches.size()) - 1);
+      sel = std::min(last, sel + std::max(1, bodyRows - 1));
+      continue;
+    }
+    if (ch == KEY_PPAGE)
+    {
+      sel = std::max(0, sel - std::max(1, bodyRows - 1));
+      continue;
+    }
+    if (ch == KEY_HOME)
+    {
+      sel = 0;
+      continue;
+    }
+    if (ch == KEY_END)
+    {
+      if (!matches.empty()) sel = static_cast<int>(matches.size()) - 1;
+      continue;
+    }
     if (ch >= '1' && ch <= '9')
     {
-      const int idx = ch - '1';
+      // Digits pick the visible row at position 1..9 (relative to
+      // the current scroll), not the absolute index — otherwise
+      // pressing '1' on a scrolled list would jump back to the
+      // top instead of picking the first visible match.
+      const int rel = ch - '1';
+      const int idx = scroll + rel;
       if (idx < static_cast<int>(matches.size()))
       {
         touch();
@@ -726,10 +772,12 @@ void UI::popupHelp()
   touch();
 }
 
-void UI::popupMetadata(const std::string& title,
-                       const std::vector<std::pair<std::string, std::string>>& rows)
+std::optional<UI::PopupClick> UI::popupMetadata(
+    const std::string& title,
+    const std::vector<std::pair<std::string, std::string>>& rows)
 {
-  if (rows.empty()) return;
+  if (rows.empty()) return std::nullopt;
+  wtimeout(itsStatusWin, -1);  // see comment in popupSearch
 
   // Width budget: clamp at the screen width. Long values (filename,
   // projection string, parameter listing) wrap across continuation rows
@@ -889,8 +937,36 @@ void UI::popupMetadata(const std::string& title,
   std::fwrite(s.data(), 1, s.size(), stdout);
   std::fflush(stdout);
 
-  wgetch(itsStatusWin);
+  // Block for input. A mouse click outside the popup's rectangle is
+  // returned to the caller so the App can re-probe at the new
+  // location (attribute-popup hops on a shapefile click). Clicks
+  // inside the popup, or any non-mouse key, dismiss as usual.
+  std::optional<PopupClick> result;
+  for (;;)
+  {
+    int ch = wgetch(itsStatusWin);
+    if (ch != KEY_MOUSE) break;
+    MEVENT ev;
+    if (getmouse(&ev) != OK) break;
+    // Coordinates the App handler expects are 0-based cells across
+    // the whole screen, same convention as the click handler in
+    // App::handleKey.
+    if (ev.y < top || ev.y >= top + height || ev.x < left || ev.x >= left + width)
+    {
+      // Only react to clicks that the App will recognise as a press;
+      // otherwise we'd loop on every drag/release report.
+      if ((ev.bstate & (BUTTON1_CLICKED | BUTTON1_PRESSED | BUTTON1_RELEASED)) != 0U)
+      {
+        result = PopupClick{ev.x, ev.y};
+        break;
+      }
+      continue;
+    }
+    // Click inside the popup → dismiss like a key press.
+    break;
+  }
   touch();
+  return result;
 }
 
 void UI::popupLegend(const std::string& paramName, const std::string& paletteName,
@@ -898,6 +974,7 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
 {
   const auto& bands = palette.bands();
   if (bands.empty()) return;
+  wtimeout(itsStatusWin, -1);  // see comment in popupSearch
 
   auto formatBound = [](std::optional<float> v) -> std::string {
     if (!v.has_value()) return "*";
@@ -918,7 +995,6 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
   std::vector<Row> rows;
   std::set<std::string> seenLabels;
   rows.reserve(bands.size());
-  int maxLabel = 0;
   for (std::size_t i = 0; i < bands.size(); ++i)
   {
     const auto& b = bands[i];
@@ -932,8 +1008,20 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
     {
       rows.push_back({i, formatBound(b.lo) + " .. " + formatBound(b.hi)});
     }
-    maxLabel = std::max(maxLabel, utf8Width(rows.back().label));
   }
+  // Labelled rows (shapefiles) are sorted alphabetically — feature
+  // order in the .dbf is rarely meaningful and a long alphabetised
+  // legend is much easier to scan. Numeric (lo..hi) bands keep their
+  // intrinsic numeric order; we detect them by checking the first
+  // band's label-presence.
+  const bool hasLabels = !bands.front().label.empty();
+  if (hasLabels)
+  {
+    std::sort(rows.begin(), rows.end(),
+              [](const Row& a, const Row& b) { return a.label < b.label; });
+  }
+  int maxLabel = 0;
+  for (const auto& r : rows) maxLabel = std::max(maxLabel, utf8Width(r.label));
 
   constexpr int kSwatchW = 4;
   int contentW = kSwatchW + 2 + maxLabel;
@@ -944,71 +1032,118 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
 
   constexpr int kHeaderRows = 2;
   constexpr int kFooterRows = 1;
+  // The popup grows up to the screen height; if rows overflow we
+  // scroll inside that fixed window. Reserve room for header,
+  // footer, and the two border rows.
   int maxBodyRows = std::max(1, LINES - 4 - kHeaderRows - kFooterRows);
   int n = std::min(static_cast<int>(rows.size()), maxBodyRows);
   int height = kHeaderRows + n + kFooterRows + 2;
   int top = std::max(0, (LINES - height) / 2);
   int left = std::max(0, (COLS - width) / 2);
 
-  std::ostringstream os;
-
-  // Top border.
-  putAt(os, top, left);
-  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x8c";
-  for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
-  os << "\xe2\x94\x90" << kEscReset;
-
-  // Title rows.
-  putAt(os, top + 1, left);
-  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
-     << kEscBold << ' ' << paramName << kEscReset << kEscBgBlack << kEscFgWhite;
-  pad(os, interiorW - 1 - utf8Width(paramName));
-  os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
-
-  putAt(os, top + 2, left);
-  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
-     << ' ' << paletteName;
-  pad(os, interiorW - 1 - utf8Width(paletteName));
-  os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
-
-  // Rows, largest first. Each row points at a band index for the
-  // swatch colour and carries its own pre-rendered label.
-  for (int i = 0; i < n; ++i)
+  // Scroll state lives inside the input loop. Numeric bands render
+  // largest-first (descending value); labelled bands render in
+  // sorted order (ascending name). Both go top-down on screen.
+  int scroll = 0;
+  while (true)
   {
-    const int rowIdx = static_cast<int>(rows.size()) - 1 - i;
-    const Row& r = rows[rowIdx];
-    putAt(os, top + kHeaderRows + 1 + i, left);
+    if (scroll < 0) scroll = 0;
+    const int maxScroll = std::max(0, static_cast<int>(rows.size()) - n);
+    if (scroll > maxScroll) scroll = maxScroll;
+
+    std::ostringstream os;
+
+    // Top border.
+    putAt(os, top, left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x8c";
+    for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
+    os << "\xe2\x94\x90" << kEscReset;
+
+    // Title rows.
+    putAt(os, top + 1, left);
     os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
-       << ' ' << renderer.bgEscape(bands[r.bandIdx].rgb);
-    for (int sp = 0; sp < kSwatchW; ++sp) os << ' ';
-    os << kEscReset << kEscBgBlack << kEscFgWhite << ' ' << r.label;
-    int consumed = 1 + kSwatchW + 1 + utf8Width(r.label);
-    pad(os, interiorW - consumed);
+       << kEscBold << ' ' << paramName << kEscReset << kEscBgBlack << kEscFgWhite;
+    pad(os, interiorW - 1 - utf8Width(paramName));
     os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+
+    putAt(os, top + 2, left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
+       << ' ' << paletteName;
+    pad(os, interiorW - 1 - utf8Width(paletteName));
+    os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+
+    // Body. Numeric bands (no labels): show largest-first within the
+    // visible window. Labelled bands: show in sorted (alphabetical)
+    // order. Either way `scroll` is the index of the first row
+    // shown in the body, counting from the top of the list.
+    for (int i = 0; i < n; ++i)
+    {
+      int rowIdx;
+      if (hasLabels)
+        rowIdx = scroll + i;
+      else
+        rowIdx = static_cast<int>(rows.size()) - 1 - (scroll + i);
+      putAt(os, top + kHeaderRows + 1 + i, left);
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite;
+      if (rowIdx < 0 || rowIdx >= static_cast<int>(rows.size()))
+      {
+        pad(os, interiorW);
+      }
+      else
+      {
+        const Row& r = rows[rowIdx];
+        os << ' ' << renderer.bgEscape(bands[r.bandIdx].rgb);
+        for (int sp = 0; sp < kSwatchW; ++sp) os << ' ';
+        os << kEscReset << kEscBgBlack << kEscFgWhite << ' ' << r.label;
+        const int consumed = 1 + kSwatchW + 1 + utf8Width(r.label);
+        pad(os, interiorW - consumed);
+      }
+      os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+    }
+
+    // Footer changes content based on whether there's anything to
+    // scroll. Stays fixed-width inside the popup.
+    putAt(os, top + height - 2, left);
+    std::string footerText;
+    if (static_cast<int>(rows.size()) > n)
+    {
+      const int total = static_cast<int>(rows.size());
+      footerText = "\xe2\x86\x91\xe2\x86\x93 PgUp/PgDn scroll  Esc close  (" +
+                   std::to_string(scroll + 1) + "-" +
+                   std::to_string(std::min(scroll + n, total)) + " of " +
+                   std::to_string(total) + ")";
+    }
+    else
+    {
+      footerText = "any key to close";
+    }
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
+       << ' ' << footerText;
+    pad(os, interiorW - 1 - utf8Width(footerText));
+    os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+
+    // Bottom border.
+    putAt(os, top + height - 1, left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
+    for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
+    os << "\xe2\x94\x98" << kEscReset;
+
+    const std::string s = os.str();
+    std::fwrite(s.data(), 1, s.size(), stdout);
+    std::fflush(stdout);
+
+    int ch = wgetch(itsStatusWin);
+    if (ch == 27 || ch == 'q' || ch == 'Q' || ch == '\n' || ch == KEY_ENTER) break;
+    if (ch == KEY_DOWN) { ++scroll; continue; }
+    if (ch == KEY_UP) { --scroll; continue; }
+    if (ch == KEY_NPAGE) { scroll += std::max(1, n - 1); continue; }
+    if (ch == KEY_PPAGE) { scroll -= std::max(1, n - 1); continue; }
+    if (ch == KEY_HOME) { scroll = 0; continue; }
+    if (ch == KEY_END) { scroll = std::max(0, static_cast<int>(rows.size()) - n); continue; }
+    // Anything else (space, letter, …) closes the popup, preserving
+    // the "any key to close" semantics for short legends.
+    if (static_cast<int>(rows.size()) <= n) break;
   }
-
-  // Footer.
-  putAt(os, top + height - 2, left);
-  std::string_view footer =
-      (n < static_cast<int>(rows.size())) ? "(more bands hidden)" : "any key to close";
-  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
-     << ' ' << footer;
-  pad(os, interiorW - 1 - utf8Width(footer));
-  os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
-
-  // Bottom border.
-  putAt(os, top + height - 1, left);
-  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
-  for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
-  os << "\xe2\x94\x98" << kEscReset;
-
-  const std::string s = os.str();
-  std::fwrite(s.data(), 1, s.size(), stdout);
-  std::fflush(stdout);
-
-  // Wait for any key to dismiss.
-  wgetch(itsStatusWin);
-
   touch();
 }
 

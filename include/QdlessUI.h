@@ -6,6 +6,7 @@
 #include <ncurses.h>
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -75,8 +76,18 @@ class UI
   // file-level info: filename, format, grid type, dimensions, parameter
   // / level / time counts, lat/lon extent, etc. An empty (label, value)
   // pair renders as a blank separator row. Dismissed by any key.
-  void popupMetadata(const std::string& title,
-                     const std::vector<std::pair<std::string, std::string>>& rows);
+  // Returns the (x, y) cell coordinates if the user clicked somewhere
+  // OUTSIDE the popup — caller can use that to re-probe the new
+  // location (chains attribute-popup hops on a vector source). Returns
+  // nullopt for any other dismissal.
+  struct PopupClick
+  {
+    int x;
+    int y;
+  };
+  std::optional<PopupClick> popupMetadata(
+      const std::string& title,
+      const std::vector<std::pair<std::string, std::string>>& rows);
 
   // Live-filter search popup. The matcher is invoked on every keystroke
   // with the current query string and must return formatted display rows.
