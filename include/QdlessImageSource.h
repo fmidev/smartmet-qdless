@@ -16,10 +16,13 @@ namespace Qdless
 // place search, and cross-section are all suppressed by App when
 // `isRawImage()` is true — RGB triplets have no scalar interpretation.
 //
-// Time is parsed from a leading YYYYMMDDhhmm in the filename basename
-// (UTC by convention; meteorological end-of-period); falls back to
-// filesystem mtime. One image == one timestep; multi-file animation
-// works through MultiFileSource as for any other backend.
+// Single-frame images: time parsed from a leading YYYYMMDDhhmm in
+// the filename basename (UTC), falling back to mtime. timeCount=1.
+// Animated WebP files: every frame is a separate timestep; cursor
+// keys + space play it like a multi-file batch. Frame times are
+// mtime + cumulative frame duration_ms, so the timeline scrolls
+// smoothly. Multi-file animation also works for single-frame
+// images through MultiFileSource.
 class ImageSource : public DataSource
 {
  public:
@@ -67,10 +70,14 @@ class ImageSource : public DataSource
 
  private:
   std::string itsFilename;
-  std::vector<Rgb> itsPixels;  // row-major, top-to-bottom, length = nx*ny
+  // For a single-frame image, itsFrames has exactly one entry. For
+  // an animated WebP, one entry per frame in display order.
+  std::vector<std::vector<Rgb>> itsFrames;
+  std::vector<NFmiMetTime> itsFrameTimes;  // parallel to itsFrames
+  std::size_t itsCurrentFrame = 0;
   std::size_t itsNx = 0;
   std::size_t itsNy = 0;
-  std::string itsFormat;       // PNG / WebP / JPEG / GIF / BMP — for the popup
-  NFmiMetTime itsValidTime;
+  std::string itsFormat;
+  NFmiMetTime itsValidTime;  // single-frame fallback (== itsFrameTimes[0])
 };
 }  // namespace Qdless

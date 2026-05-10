@@ -30,6 +30,7 @@ LIBS += $(PREFIX_LDFLAGS) \
 	-lboost_filesystem \
 	$(REQUIRED_LIBS) \
 	-lhdf5 \
+	-lwebpdemux -lwebp \
 	-lbz2 -ljpeg -lpng -lz -lrt \
 	-lpthread
 

@@ -35,9 +35,11 @@ NFmiMetTime parseUtcStamp(const std::string& s)
     short mi = static_cast<short>(std::stoi(s.substr(10, 2)));
     short se = (s.size() >= 14) ? static_cast<short>(std::stoi(s.substr(12, 2))) : 0;
     // 1-minute time step — NFmiMetTime's 60-minute default snaps
-    // sub-hourly timestamps to the nearest hour (collapsing 14:30 and
-    // 14:45 into the same 15:00 slot in a multi-file animation).
-    return NFmiMetTime(yy, mm, dd, h, mi, se, /*timeStep=*/1);
+    // sub-hourly timestamps to the nearest hour. NearestMetTime also
+    // hardcodes SetSec(0); re-apply seconds afterwards.
+    NFmiMetTime r(yy, mm, dd, h, mi, /*sec=*/0, /*timeStep=*/1);
+    r.SetSec(se);
+    return r;
   }
   catch (...)
   {

@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 10%{?dist}.fmi
+Release: 11%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,25 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-11.fmi
+- Animated WebP support: ImageSource now tries libwebpdemux first
+  on .webp inputs and, when the file carries more than one frame,
+  decodes every frame eagerly into a per-frame Rgb buffer. Frame
+  times are mtime + cumulative frame_duration_ms so cursor keys
+  step naturally through the animation and Space plays it the
+  same way it does for a multi-file batch. Single-frame WebPs
+  keep going through GDAL (which qdless was already using and
+  has support for any WebP feature we might want later, like ICC
+  profile metadata).
+- NFmiMetTime sub-minute precision fix: the seconds-bearing
+  constructor goes through NearestMetTime, which hardcodes
+  SetSec(0) at the end. Construct with sec=0 and re-apply the
+  actual seconds after — otherwise an animation at 2-second
+  frame intervals would collapse every frame to HH:MM:00. Same
+  fix applied to ImageSource's filename-time parser, mtime
+  parser, and the GeoTIFF filename-time parser, all of which
+  previously lost seconds silently.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-10.fmi
 - Status bar in shapefile mode now lists [O]utlines and [R]ainbow
   next to the existing overlay toggles, and drops [P]aram /

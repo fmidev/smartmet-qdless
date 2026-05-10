@@ -2,12 +2,15 @@
 
 #include <cpl_error.h>
 #include <gdal_priv.h>
+#include <webp/demux.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <regex>
 #include <stdexcept>
 
@@ -26,17 +29,38 @@ NFmiMetTime parseUtcStamp(const std::string& s)
     short h = static_cast<short>(std::stoi(s.substr(8, 2)));
     short mi = static_cast<short>(std::stoi(s.substr(10, 2)));
     short se = (s.size() >= 14) ? static_cast<short>(std::stoi(s.substr(12, 2))) : 0;
-    // 1-minute time step. NFmiMetTime defaults to 60-minute resolution
-    // and silently snaps incoming minutes to the nearest hour, which
-    // collapses a quarter-hourly radar batch (14:30, 14:45, 15:00, 15:15)
-    // into duplicate 15:00 timestamps. Sub-minute precision isn't needed
-    // for our filename timestamps.
-    return NFmiMetTime(yy, mm, dd, h, mi, se, /*timeStep=*/1);
+    // timeStep=1 keeps minute resolution (60-minute default snaps
+    // 14:30 → 15:00). NFmiMetTime also hardcodes SetSec(0) inside its
+    // NearestMetTime helper, so re-apply seconds post-construction.
+    NFmiMetTime r(yy, mm, dd, h, mi, /*sec=*/0, /*timeStep=*/1);
+    r.SetSec(se);
+    return r;
   }
   catch (...)
   {
     return NFmiMetTime();
   }
+}
+
+NFmiMetTime mtimeUtc(const std::string& filename)
+{
+  std::error_code ec;
+  auto ftime = std::filesystem::last_write_time(filename, ec);
+  if (ec) return NFmiMetTime();
+  const auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+      ftime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+  const auto t = std::chrono::system_clock::to_time_t(sctp);
+  std::tm utc{};
+  gmtime_r(&t, &utc);
+  NFmiMetTime r(static_cast<short>(utc.tm_year + 1900),
+                static_cast<short>(utc.tm_mon + 1),
+                static_cast<short>(utc.tm_mday),
+                static_cast<short>(utc.tm_hour),
+                static_cast<short>(utc.tm_min),
+                /*sec=*/0,
+                /*timeStep=*/1);
+  r.SetSec(static_cast<short>(utc.tm_sec));
+  return r;
 }
 
 NFmiMetTime parseTimeFromName(const std::string& filename)
@@ -51,25 +75,147 @@ NFmiMetTime parseTimeFromName(const std::string& filename)
   std::smatch m;
   if (std::regex_search(base, m, re))
     return parseUtcStamp(m[1]);
-  std::error_code ec;
-  auto ftime = std::filesystem::last_write_time(filename, ec);
-  if (ec) return NFmiMetTime();
-  const auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-      ftime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
-  const auto t = std::chrono::system_clock::to_time_t(sctp);
-  std::tm utc{};
-  gmtime_r(&t, &utc);
-  return NFmiMetTime(static_cast<short>(utc.tm_year + 1900),
-                     static_cast<short>(utc.tm_mon + 1),
-                     static_cast<short>(utc.tm_mday),
-                     static_cast<short>(utc.tm_hour),
-                     static_cast<short>(utc.tm_min),
-                     static_cast<short>(utc.tm_sec));
+  return mtimeUtc(filename);
+}
+
+// Add `addMs` milliseconds to `t`, returning a new NFmiMetTime. Used
+// to lay animated-WebP frames out on a timeline starting at the
+// file's mtime so the time-bar scrolls smoothly during playback.
+NFmiMetTime addMillis(const NFmiMetTime& t, int addMs)
+{
+  if (t.GetYear() == 0) return t;
+  // Compose to time_t in UTC, add the offset, decompose. NFmiMetTime
+  // doesn't expose a direct +duration helper that respects sub-minute
+  // precision so we do it through std::tm.
+  std::tm tm{};
+  tm.tm_year = t.GetYear() - 1900;
+  tm.tm_mon = t.GetMonth() - 1;
+  tm.tm_mday = t.GetDay();
+  tm.tm_hour = t.GetHour();
+  tm.tm_min = t.GetMin();
+  tm.tm_sec = t.GetSec();
+  // timegm interprets tm as UTC; portable on glibc.
+  std::time_t epoch = timegm(&tm);
+  epoch += addMs / 1000;
+  std::tm out{};
+  gmtime_r(&epoch, &out);
+  // NFmiMetTime's NearestMetTime hardcodes SetSec(0) at every
+  // construction, so frames 2s, 4s, 6s … apart all collapse to
+  // HH:MM:00 if we go through the seconds-bearing constructor.
+  // Instead, construct with se=0 and reapply seconds afterwards.
+  NFmiMetTime r(static_cast<short>(out.tm_year + 1900),
+                static_cast<short>(out.tm_mon + 1),
+                static_cast<short>(out.tm_mday),
+                static_cast<short>(out.tm_hour),
+                static_cast<short>(out.tm_min),
+                /*sec=*/0,
+                /*timeStep=*/1);
+  r.SetSec(static_cast<short>(out.tm_sec));
+  return r;
+}
+
+// Read an entire file into memory. Used by the WebP animated path
+// because libwebpdemux's API takes a buffer, not a path.
+std::vector<std::uint8_t> slurp(const std::string& path)
+{
+  std::ifstream in(path, std::ios::binary | std::ios::ate);
+  if (!in) return {};
+  const auto sz = static_cast<std::streamsize>(in.tellg());
+  in.seekg(0, std::ios::beg);
+  std::vector<std::uint8_t> buf(static_cast<std::size_t>(sz));
+  if (sz > 0 && !in.read(reinterpret_cast<char*>(buf.data()), sz)) return {};
+  return buf;
+}
+
+// Try the libwebpdemux animated-WebP path. Returns true iff `filename`
+// is a multi-frame WebP and decoding succeeded; on success populates
+// `frames`, `times`, `nx`, `ny` and writes "WebP (animated, N frames)"
+// to `format`. On false the caller falls back to GDAL.
+bool tryDecodeAnimatedWebP(const std::string& filename,
+                           std::vector<std::vector<Rgb>>& frames,
+                           std::vector<NFmiMetTime>& times,
+                           std::size_t& nx, std::size_t& ny,
+                           std::string& format)
+{
+  auto buf = slurp(filename);
+  if (buf.size() < 16) return false;
+  // Cheap gate: only feed real WebP bytes to the demuxer (it would
+  // accept and reject anything else, but the malloc + parse is wasted
+  // work on a non-WebP).
+  if (!(buf[0] == 'R' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == 'F' &&
+        buf[8] == 'W' && buf[9] == 'E' && buf[10] == 'B' && buf[11] == 'P'))
+    return false;
+
+  WebPData data{buf.data(), buf.size()};
+  WebPAnimDecoderOptions opts;
+  if (!WebPAnimDecoderOptionsInit(&opts)) return false;
+  opts.color_mode = MODE_RGBA;
+  WebPAnimDecoder* dec = WebPAnimDecoderNew(&data, &opts);
+  if (dec == nullptr) return false;
+
+  WebPAnimInfo info{};
+  if (!WebPAnimDecoderGetInfo(dec, &info))
+  {
+    WebPAnimDecoderDelete(dec);
+    return false;
+  }
+  // A single-frame WebP is also reported by WebPAnimDecoder, but we
+  // want the GDAL path for those (it's already shipped, well-tested,
+  // and exercises any extra features like ICC profile metadata that
+  // qdless might want to read in the future). Only take the demuxer
+  // path when there's more than one frame.
+  if (info.frame_count <= 1)
+  {
+    WebPAnimDecoderDelete(dec);
+    return false;
+  }
+
+  nx = info.canvas_width;
+  ny = info.canvas_height;
+  const std::size_t pixels = nx * ny;
+  const NFmiMetTime base = mtimeUtc(filename);
+  frames.reserve(info.frame_count);
+  times.reserve(info.frame_count);
+
+  while (WebPAnimDecoderHasMoreFrames(dec))
+  {
+    std::uint8_t* rgba = nullptr;
+    int timestampMs = 0;
+    if (!WebPAnimDecoderGetNext(dec, &rgba, &timestampMs)) break;
+    std::vector<Rgb> frame(pixels);
+    for (std::size_t i = 0; i < pixels; ++i)
+    {
+      Rgb px;
+      px.r = rgba[i * 4 + 0];
+      px.g = rgba[i * 4 + 1];
+      px.b = rgba[i * 4 + 2];
+      // Alpha < 128 → transparent (matches the static-image path).
+      if (rgba[i * 4 + 3] < 128) px.transparent = true;
+      frame[i] = px;
+    }
+    frames.push_back(std::move(frame));
+    times.push_back(addMillis(base, timestampMs));
+  }
+  WebPAnimDecoderDelete(dec);
+
+  format = "WebP (animated, " + std::to_string(frames.size()) + " frames)";
+  return true;
 }
 }  // namespace
 
 ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
 {
+  // Animated WebP: every frame is a separate timestep. We decode all
+  // frames eagerly because libwebpdemux is sequential — random access
+  // by time index would otherwise be O(N) per click. For the radar
+  // scales we target (at most a few hundred frames at a few MB each)
+  // memory cost is acceptable.
+  if (tryDecodeAnimatedWebP(filename, itsFrames, itsFrameTimes, itsNx, itsNy, itsFormat))
+  {
+    itsValidTime = itsFrameTimes.empty() ? mtimeUtc(filename) : itsFrameTimes.front();
+    return;
+  }
+
   GDALAllRegister();
   auto* ds = static_cast<GDALDataset*>(GDALOpen(filename.c_str(), GA_ReadOnly));
   if (!ds) throw std::runtime_error("GDAL failed to open: " + filename);
@@ -98,7 +244,10 @@ ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
   if (nBands < 1) throw std::runtime_error("no raster bands: " + filename);
 
   const std::size_t pixelCount = itsNx * itsNy;
-  itsPixels.resize(pixelCount);
+  // Static image: build a single frame into a local buffer, push it
+  // onto itsFrames at the end. Mirrors the animated-WebP path's
+  // structure so pixelAtUV / timeCount can stay agnostic.
+  std::vector<Rgb> pixels(pixelCount);
 
   auto readBand = [&](int idx, std::vector<std::uint8_t>& dst) {
     dst.resize(pixelCount);
@@ -137,7 +286,7 @@ ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
     std::vector<std::uint8_t> idx;
     readBand(1, idx);
     for (std::size_t i = 0; i < pixelCount; ++i)
-      itsPixels[i] = lut[idx[i]];
+      pixels[i] = lut[idx[i]];
   }
   else
   {
@@ -167,11 +316,13 @@ ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
         px.r = px.g = px.b = rband[i];
       }
       if (nBands >= 4 && aband[i] < 128) px.transparent = true;
-      itsPixels[i] = px;
+      pixels[i] = px;
     }
   }
 
   itsValidTime = parseTimeFromName(filename);
+  itsFrames.push_back(std::move(pixels));
+  itsFrameTimes.push_back(itsValidTime);
 }
 
 ImageSource::~ImageSource() = default;
@@ -187,10 +338,16 @@ std::string ImageSource::paramUnits(int /*paramId*/) const { return {}; }
 int ImageSource::currentParamId() const { return 1; }
 bool ImageSource::selectParamId(int paramId) { return paramId == 1; }
 
-std::size_t ImageSource::timeCount() const { return 1; }
-std::size_t ImageSource::currentTimeIndex() const { return 0; }
-void ImageSource::selectTimeIndex(std::size_t /*i*/) {}
-NFmiMetTime ImageSource::currentValidTime() const { return itsValidTime; }
+std::size_t ImageSource::timeCount() const { return itsFrames.size(); }
+std::size_t ImageSource::currentTimeIndex() const { return itsCurrentFrame; }
+void ImageSource::selectTimeIndex(std::size_t i)
+{
+  if (i < itsFrames.size()) itsCurrentFrame = i;
+}
+NFmiMetTime ImageSource::currentValidTime() const
+{
+  return itsCurrentFrame < itsFrameTimes.size() ? itsFrameTimes[itsCurrentFrame] : itsValidTime;
+}
 NFmiMetTime ImageSource::originTime() const { return itsValidTime; }
 
 std::size_t ImageSource::levelCount() const { return 1; }
@@ -230,7 +387,8 @@ void ImageSource::latLonToUV(double lat, double lon, double& u, double& v) const
 
 Rgb ImageSource::pixelAtUV(double u, double v) const
 {
-  if (itsPixels.empty() || itsNx == 0 || itsNy == 0)
+  if (itsFrames.empty() || itsCurrentFrame >= itsFrames.size() ||
+      itsNx == 0 || itsNy == 0)
     return Rgb{0, 0, 0, true};
   if (u < 0 || u >= 1 || v < 0 || v >= 1)
     return Rgb{0, 0, 0, true};
@@ -239,7 +397,7 @@ Rgb ImageSource::pixelAtUV(double u, double v) const
   // pre-rendered image the user expects pixel-faithful display.
   const auto col = static_cast<std::size_t>(u * static_cast<double>(itsNx));
   const auto row = static_cast<std::size_t>(v * static_cast<double>(itsNy));
-  return itsPixels[row * itsNx + col];
+  return itsFrames[itsCurrentFrame][row * itsNx + col];
 }
 
 std::vector<std::pair<std::string, std::string>> ImageSource::extraMetadata() const
