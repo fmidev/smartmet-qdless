@@ -224,4 +224,11 @@ std::string MultiFileSource::gridSignature() const
 {
   return refSource().gridSignature();
 }
+
+bool MultiFileSource::isRawImage() const { return refSource().isRawImage(); }
+
+Rgb MultiFileSource::pixelAtUV(double u, double v) const
+{
+  return currentSource().pixelAtUV(u, v);
+}
 }  // namespace Qdless

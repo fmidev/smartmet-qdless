@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 4%{?dist}.fmi
+Release: 5%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,15 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-5.fmi
+- Fix: multi-file image-mode rendered blank because MultiFileSource
+  did not forward isRawImage() / pixelAtUV() to its sub-sources.
+  The App's renderer therefore took the value/palette path on a
+  source that returns NaN from interpolatedValue(), painting every
+  cell as missing. Now the aggregator delegates isRawImage() to
+  the reference and pixelAtUV() to the currently-selected file so
+  the App's image-mode short-circuit fires and animates the batch.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-4.fmi
 - Filename time: match a 12-digit timestamp anywhere in the
   basename (was anchored to the start), so producers that put the
