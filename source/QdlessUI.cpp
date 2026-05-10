@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <locale.h>
+#include <set>
 #include <sstream>
 #include <string_view>
 
@@ -902,19 +903,35 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
     return fmt::format("{:g}", *v);
   };
 
-  std::vector<std::string> labels;
-  labels.reserve(bands.size());
-  int maxLabel = 0;
-  for (const auto& b : bands)
+  // Build the legend rows. Bands with explicit labels (shapefile
+  // rainbow palette) dedupe by label so adjacent sub-polygons of one
+  // feature, or unrelated features that share a NAME in the .dbf,
+  // collapse to a single legend row. Bands without explicit labels
+  // (ordinary numeric palettes) get the formatted lo..hi range and
+  // never dedupe.
+  struct Row
   {
-    // Prefer the band's explicit label when set (shapefile rainbow:
-    // feature NAME/NIMI). Fall back to the formatted lo..hi range
-    // for ordinary numeric palettes.
-    std::string s = b.label.empty()
-                        ? formatBound(b.lo) + " .. " + formatBound(b.hi)
-                        : b.label;
-    maxLabel = std::max(maxLabel, utf8Width(s));
-    labels.push_back(std::move(s));
+    std::size_t bandIdx;
+    std::string label;
+  };
+  std::vector<Row> rows;
+  std::set<std::string> seenLabels;
+  rows.reserve(bands.size());
+  int maxLabel = 0;
+  for (std::size_t i = 0; i < bands.size(); ++i)
+  {
+    const auto& b = bands[i];
+    if (!b.label.empty())
+    {
+      if (seenLabels.count(b.label) != 0U) continue;
+      seenLabels.insert(b.label);
+      rows.push_back({i, b.label});
+    }
+    else
+    {
+      rows.push_back({i, formatBound(b.lo) + " .. " + formatBound(b.hi)});
+    }
+    maxLabel = std::max(maxLabel, utf8Width(rows.back().label));
   }
 
   constexpr int kSwatchW = 4;
@@ -927,7 +944,7 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
   constexpr int kHeaderRows = 2;
   constexpr int kFooterRows = 1;
   int maxBodyRows = std::max(1, LINES - 4 - kHeaderRows - kFooterRows);
-  int n = std::min(static_cast<int>(bands.size()), maxBodyRows);
+  int n = std::min(static_cast<int>(rows.size()), maxBodyRows);
   int height = kHeaderRows + n + kFooterRows + 2;
   int top = std::max(0, (LINES - height) / 2);
   int left = std::max(0, (COLS - width) / 2);
@@ -953,16 +970,18 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
   pad(os, interiorW - 1 - utf8Width(paletteName));
   os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
 
-  // Bands, largest first.
+  // Rows, largest first. Each row points at a band index for the
+  // swatch colour and carries its own pre-rendered label.
   for (int i = 0; i < n; ++i)
   {
-    int bandIdx = static_cast<int>(bands.size()) - 1 - i;
+    const int rowIdx = static_cast<int>(rows.size()) - 1 - i;
+    const Row& r = rows[rowIdx];
     putAt(os, top + kHeaderRows + 1 + i, left);
     os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
-       << ' ' << renderer.bgEscape(bands[bandIdx].rgb);
+       << ' ' << renderer.bgEscape(bands[r.bandIdx].rgb);
     for (int sp = 0; sp < kSwatchW; ++sp) os << ' ';
-    os << kEscReset << kEscBgBlack << kEscFgWhite << ' ' << labels[bandIdx];
-    int consumed = 1 + kSwatchW + 1 + utf8Width(labels[bandIdx]);
+    os << kEscReset << kEscBgBlack << kEscFgWhite << ' ' << r.label;
+    int consumed = 1 + kSwatchW + 1 + utf8Width(r.label);
     pad(os, interiorW - consumed);
     os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
   }
@@ -970,7 +989,7 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
   // Footer.
   putAt(os, top + height - 2, left);
   std::string_view footer =
-      (n < static_cast<int>(bands.size())) ? "(more bands hidden)" : "any key to close";
+      (n < static_cast<int>(rows.size())) ? "(more bands hidden)" : "any key to close";
   os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
      << ' ' << footer;
   pad(os, interiorW - 1 - utf8Width(footer));

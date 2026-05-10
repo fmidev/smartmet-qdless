@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 14%{?dist}.fmi
+Release: 15%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,17 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-15.fmi
+- Shape rainbow palette now assigns one hue per *unique label*
+  rather than per burn id. A feature that fans out into many
+  sub-polygons (a MultiPolygon, or just several .dbf rows that
+  share a NAME) was getting one hue per polygon, so e.g.
+  "Öresund ja Bälten" appeared 7 times in the legend with 7
+  different colours. Bands sharing a label now share the rgb
+  drawn from a single golden-angle hue cycle, and popupLegend
+  dedupes legend rows by label so each unique area is listed
+  once.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-14.fmi
 - Attributes table column padding now counts UTF-8 codepoints
   rather than bytes. Finnish placenames (Ähtäri, Selkämeri) have

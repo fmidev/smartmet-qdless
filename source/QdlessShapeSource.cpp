@@ -530,19 +530,15 @@ Palette ShapeSource::rainbowPalette() const
     return {};
   };
 
-  p = Palette{};
-  p.setName("shape-rainbow");
+  // 3. Resolve a label (NAME/NIMI/…) for each used burn id. Multiple
+  //    burn ids can map to the same feature (a MultiPolygon's
+  //    children) or to different features that share a name in the
+  //    .dbf — both should render in the same hue and dedupe to a
+  //    single legend entry.
+  std::vector<std::string> labelFor(usedIds.size());
   for (std::size_t i = 0; i < usedIds.size(); ++i)
   {
     const int id = usedIds[i];
-    const float hue = std::fmod(0.05F + static_cast<float>(i) * kGolden, 1.0F);
-    const Rgb rgb = hsvToRgb(hue, 0.7F, 0.9F);
-    Palette::Band band;
-    band.lo = static_cast<float>(id) - 0.5F;
-    band.hi = static_cast<float>(id) + 0.5F;
-    band.rgb = rgb;
-    // Label: feature's NAME/NIMI if present, else "#N" with the
-    // 1-based burn id (matches what [A] shows).
     const int featureIdx = (id - 1) < static_cast<int>(itsBurnToFeature.size())
                                ? itsBurnToFeature[static_cast<std::size_t>(id - 1)]
                                : -1;
@@ -550,7 +546,36 @@ Palette ShapeSource::rainbowPalette() const
     if (featureIdx >= 0 && static_cast<std::size_t>(featureIdx) < itsAttributes.size())
       label = pickField(itsAttributes[static_cast<std::size_t>(featureIdx)]);
     if (label.empty()) label = "#" + std::to_string(id);
-    band.label = std::move(label);
+    labelFor[i] = std::move(label);
+  }
+
+  // 4. Assign one hue per UNIQUE label. Hues cycle by golden angle in
+  //    label-encounter order, so adjacent unique labels look maximally
+  //    different. Burn ids that share a label all reuse the same hue.
+  std::map<std::string, Rgb> hueByLabel;
+  std::size_t nextHueIdx = 0;
+  for (const auto& lab : labelFor)
+  {
+    if (hueByLabel.count(lab) != 0U) continue;
+    const float hue = std::fmod(0.05F + static_cast<float>(nextHueIdx) * kGolden, 1.0F);
+    hueByLabel[lab] = hsvToRgb(hue, 0.7F, 0.9F);
+    ++nextHueIdx;
+  }
+
+  // 5. Build one band per burn id (Palette::lookup needs them all,
+  //    one per integer value). Bands sharing a label share the rgb
+  //    from hueByLabel; popupLegend dedupes by label so the user
+  //    sees one row per unique area.
+  p = Palette{};
+  p.setName("shape-rainbow");
+  for (std::size_t i = 0; i < usedIds.size(); ++i)
+  {
+    const int id = usedIds[i];
+    Palette::Band band;
+    band.lo = static_cast<float>(id) - 0.5F;
+    band.hi = static_cast<float>(id) + 0.5F;
+    band.rgb = hueByLabel[labelFor[i]];
+    band.label = labelFor[i];
     p.bands().push_back(std::move(band));
   }
   return p;
