@@ -4,6 +4,9 @@
 #include "QdlessShapeSource.h"
 #include "QdlessUI.h"
 
+#include <gdal_priv.h>
+#include <ogrsf_frmts.h>
+
 #include <newbase/NFmiEnumConverter.h>
 #include <newbase/NFmiGlobals.h>
 #include <newbase/NFmiPoint.h>
@@ -495,11 +498,41 @@ void Viewport::pan(float duFrac, float dvFrac)
 
 App::App(Options opts) : itsOpts(std::move(opts))
 {
-  if (!itsOpts.filenames.empty() && itsOpts.filenames.size() > 1)
+  if (!itsOpts.pgConn.empty())
+  {
+    // PostGIS browser mode. Open the connection once and keep it
+    // alive for the App's lifetime; [T] re-pickers reuse the same
+    // dataset. The "PG:" prefix tells GDAL to dispatch to the
+    // PostgreSQL driver.
+    GDALAllRegister();
+    const std::string opener = "PG:" + itsOpts.pgConn;
+    auto* ds = static_cast<GDALDataset*>(GDALOpenEx(
+        opener.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
+    if (ds == nullptr)
+      throw std::runtime_error("PostGIS connection failed: " + itsOpts.pgConn);
+    itsPgDataset = ds;
+    itsPanels.resize(1);
+    if (!itsOpts.pgTable.empty())
+    {
+      openPgLayer(itsOpts.pgTable);
+    }
+    else
+    {
+      // No --table given: defer the picker until the UI is up — the
+      // popupSearch widget needs an active ncurses session.
+      itsSource = nullptr;
+    }
+  }
+  else if (!itsOpts.filenames.empty() && itsOpts.filenames.size() > 1)
     itsSource = std::make_unique<MultiFileSource>(itsOpts.filenames);
   else
     itsSource = DataSource::open(itsOpts.filename);
   itsPanels.resize(1);
+  if (itsSource != nullptr) initFromSource();
+}
+
+void App::initFromSource()
+{
   buildIndices();
 
   // Capture shapefile outlines into their own slot so [B] / [C] keep
@@ -636,7 +669,125 @@ App::App(Options opts) : itsOpts(std::move(opts))
   itsLastMessage.clear();
 }
 
-App::~App() = default;
+App::~App()
+{
+  if (itsPgDataset != nullptr)
+  {
+    GDALClose(static_cast<GDALDataset*>(itsPgDataset));
+    itsPgDataset = nullptr;
+  }
+}
+
+namespace
+{
+// Strip a "schema." prefix when only the bare table name was wanted,
+// or return the input unchanged. Used for matching layer names that
+// OGR's PostgreSQL driver reports as "schema.name".
+std::string stripSchema(const std::string& full)
+{
+  auto dot = full.find('.');
+  return (dot == std::string::npos) ? full : full.substr(dot + 1);
+}
+}  // namespace
+
+void App::openPgLayer(const std::string& schemaTable)
+{
+  auto* ds = static_cast<GDALDataset*>(itsPgDataset);
+  if (ds == nullptr) throw std::runtime_error("openPgLayer: no PG dataset");
+  // Try both the qualified ("schema.table") and bare ("table") name —
+  // OGR's PG driver normally reports layers as "schema.name", but
+  // GetLayerByName accepts either form.
+  OGRLayer* layer = ds->GetLayerByName(schemaTable.c_str());
+  if (layer == nullptr) layer = ds->GetLayerByName(stripSchema(schemaTable).c_str());
+  if (layer == nullptr)
+    throw std::runtime_error("PostGIS table not found: " + schemaTable);
+  itsSource = std::make_unique<ShapeSource>(layer, schemaTable);
+}
+
+bool App::openPgPicker(UI& ui)
+{
+  auto* ds = static_cast<GDALDataset*>(itsPgDataset);
+  if (ds == nullptr) return false;
+  // Build the layer list once. Filtering by --schema (if given) is a
+  // simple prefix match against the OGR-reported "schema.name".
+  struct Entry
+  {
+    std::string fullName;
+    std::string display;  // "schema.name (Polygon, 16 features)"
+  };
+  std::vector<Entry> entries;
+  const std::string prefix =
+      itsOpts.pgSchema.empty() ? std::string{} : itsOpts.pgSchema + ".";
+  for (int i = 0; i < ds->GetLayerCount(); ++i)
+  {
+    OGRLayer* layer = ds->GetLayer(i);
+    if (layer == nullptr) continue;
+    std::string name = layer->GetName();
+    if (!prefix.empty() && name.compare(0, prefix.size(), prefix) != 0) continue;
+    const char* gtype = OGRGeometryTypeToName(layer->GetGeomType());
+    // GetFeatureCount(false) skips the COUNT(*) round-trip; OGR
+    // returns -1 if the driver can't supply a fast estimate.
+    GIntBig n = layer->GetFeatureCount(/*force=*/0);
+    std::string display = name;
+    display += "  (";
+    display += (gtype ? gtype : "Geometry");
+    if (n >= 0)
+    {
+      display += ", ";
+      display += std::to_string(static_cast<long long>(n));
+      display += " features";
+    }
+    display += ")";
+    entries.push_back({std::move(name), std::move(display)});
+  }
+  if (entries.empty())
+  {
+    throw std::runtime_error(
+        std::string("PostGIS: no layers visible") +
+        (prefix.empty() ? "" : " in schema " + itsOpts.pgSchema));
+  }
+  // Auto-pick when only one match — the user's intent is unambiguous.
+  if (entries.size() == 1)
+  {
+    openPgLayer(entries.front().fullName);
+    return true;
+  }
+  // popupSearch over the entries; substring-filter on the display
+  // string. The matcher's lastIdx vector remembers which entry each
+  // visible row came from.
+  std::vector<int> lastIdx;
+  auto matcher = [&](const std::string& q) {
+    std::vector<std::string> hits;
+    lastIdx.clear();
+    std::string lq = q;
+    std::transform(lq.begin(), lq.end(), lq.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    for (std::size_t i = 0; i < entries.size(); ++i)
+    {
+      if (lq.empty())
+      {
+        hits.push_back(entries[i].display);
+        lastIdx.push_back(static_cast<int>(i));
+        continue;
+      }
+      std::string lower = entries[i].display;
+      std::transform(lower.begin(), lower.end(), lower.begin(),
+                     [](unsigned char c) { return std::tolower(c); });
+      if (lower.find(lq) != std::string::npos)
+      {
+        hits.push_back(entries[i].display);
+        lastIdx.push_back(static_cast<int>(i));
+      }
+    }
+    return hits;
+  };
+  const std::string title =
+      "PostGIS layers" + (prefix.empty() ? std::string{} : " in " + itsOpts.pgSchema);
+  const int sel = ui.popupSearch(title, matcher);
+  if (sel < 0 || sel >= static_cast<int>(lastIdx.size())) return false;
+  openPgLayer(entries[lastIdx[sel]].fullName);
+  return true;
+}
 
 float App::transform(float v) const
 {
@@ -2464,6 +2615,42 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       return true;
     }
 
+    case 'd':
+    case 'D':
+    {
+      // Re-open the PostGIS layer picker without quitting. Only
+      // available when launched with --pg; the persistent dataset
+      // means there's no libpq round-trip on each invocation.
+      if (itsPgDataset == nullptr)
+      {
+        itsLastMessage = "Layer picker is only available with --pg";
+        return true;
+      }
+      // Reset state that's specific to the previous layer, then
+      // re-pick. If the user cancels, we keep the current source.
+      auto saved = std::move(itsSource);
+      try
+      {
+        if (!openPgPicker(ui))
+        {
+          itsSource = std::move(saved);
+          return true;
+        }
+      }
+      catch (...)
+      {
+        itsSource = std::move(saved);
+        throw;
+      }
+      // Reset per-layer state so the new layer renders cleanly.
+      itsShapeOutlines.clear();
+      itsViewport.reset();
+      itsMarker.reset();
+      itsCrossActive = false;
+      initFromSource();
+      return true;
+    }
+
     case 'a':
     case 'A':
     {
@@ -3088,6 +3275,17 @@ int App::runOnce()
 int App::runInteractive()
 {
   UI ui;
+
+  // Deferred PostGIS layer pick: when launched with --pg but no
+  // --table, the constructor stopped after opening the connection
+  // (popups need the UI). Run the picker now; openPgLayer fills
+  // itsSource and we follow up with the same source-dependent init
+  // the file path runs in the ctor.
+  if (itsSource == nullptr && itsPgDataset != nullptr)
+  {
+    if (!openPgPicker(ui)) return 0;  // user cancelled the picker
+    initFromSource();
+  }
 
   bool quit = false;
   bool needRedraw = true;

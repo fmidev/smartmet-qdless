@@ -22,6 +22,14 @@ struct Options
   // change. The App constructor uses `filenames` if non-empty.
   std::string filename;
   std::vector<std::string> filenames;
+  // PostGIS browser mode. When `pgConn` is non-empty the App opens a
+  // PostgreSQL connection through OGR's "PG:" driver and presents a
+  // layer picker; `pgSchema` (optional) restricts the picker to one
+  // schema; `pgTable` (optional, "schema.table" form) skips the
+  // picker and opens that table directly.
+  std::string pgConn;
+  std::string pgSchema;
+  std::string pgTable;
   std::string paletteDir = "/usr/share/smartmet/qdless/palettes";
   std::string configFile = "/usr/share/smartmet/qdless/qdless.conf";
   std::string coastlineDir = "/usr/share/gshhg-gmt-nc4";
@@ -238,6 +246,26 @@ class App
   // this overlay.
   std::vector<Polyline> itsShapeOutlines;
   LineStyle itsShapeOutlineStyle = LineStyle::Braille;
+
+  // PostGIS browser mode. itsPgDataset stays open for the lifetime
+  // of the App so [T] (table picker) can re-pick layers from the
+  // same connection without paying the libpq round-trip again. The
+  // pointer is non-null whenever the App was launched with --pg.
+  // Stored as void* in the header to avoid pulling gdal_priv.h into
+  // every translation unit; reinterpret on use in QdlessApp.cpp.
+  void* itsPgDataset = nullptr;
+  // Open the PG dataset, run the layer picker, and replace itsSource
+  // with a ShapeSource over the picked layer. Called once at startup
+  // and re-invoked on [T]. Returns true on success.
+  bool openPgPicker(UI& ui);
+  // Build a ShapeSource over a named layer of itsPgDataset. Used by
+  // openPgPicker after selection and by --table direct-open.
+  void openPgLayer(const std::string& schemaTable);
+  // All post-itsSource init: parameter resolution, panel layout,
+  // palette / coastline load, etc. Pulled out of the ctor so the
+  // PostGIS deferred-pick path can run it after the user picks a
+  // layer at startup.
+  void initFromSource();
 
   // Transient status message shown on the timeline header for one redraw
   // (e.g. "Saved foo.png"). Cleared by the next non-message-producing key.

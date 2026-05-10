@@ -70,6 +70,17 @@ int main(int argc, char* argv[])
         ("dir",
          po::value<std::string>(&dirArg),
          "directory whose files (sorted by filename) form the time series") //
+        ("pg",
+         po::value<std::string>(&opts.pgConn),
+         "PostgreSQL/PostGIS connection string (libpq DSN), e.g. "
+         "\"host=foo dbname=bar user=baz\"") //
+        ("schema",
+         po::value<std::string>(&opts.pgSchema),
+         "PostGIS schema to filter the layer picker to") //
+        ("table",
+         po::value<std::string>(&opts.pgTable),
+         "PostGIS table (schema.name) — skip the layer picker and open "
+         "this table directly") //
         ("file", po::value<std::vector<std::string>>(&positional),
          "input file(s); pass multiple for a multi-time series");
 
@@ -95,10 +106,12 @@ int main(int argc, char* argv[])
     else if (positional.size() > 1) opts.filenames = std::move(positional);
 
     if (vm.count("help") != 0U ||
-        (opts.filename.empty() && opts.filenames.empty()))
+        (opts.filename.empty() && opts.filenames.empty() && opts.pgConn.empty()))
     {
       std::cout << "Usage: qdless [options] <file> [<file> ...]\n"
-                << "       qdless [options] --dir <directory>\n\n"
+                << "       qdless [options] --dir <directory>\n"
+                << "       qdless [options] --pg \"<dsn>\" "
+                   "[--schema <name>] [--table schema.name]\n\n"
                 << desc << '\n';
       return vm.count("help") != 0U ? 0 : 1;
     }

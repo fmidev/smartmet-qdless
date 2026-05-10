@@ -110,7 +110,24 @@ ShapeSource::ShapeSource(const std::string& filename, Options opts)
 
   if (ds->GetLayerCount() < 1)
     throw std::runtime_error("shapefile has no layers: " + filename);
-  OGRLayer* layer = ds->GetLayer(0);
+  init(ds->GetLayer(0));
+}
+
+ShapeSource::ShapeSource(OGRLayer* layer, const std::string& displayName)
+    : ShapeSource(layer, displayName, Options{})
+{
+}
+
+ShapeSource::ShapeSource(OGRLayer* layer, const std::string& displayName, Options opts)
+    : itsFilename(displayName), itsOpts(std::move(opts))
+{
+  GDALAllRegister();  // idempotent — guards against PG-only callers
+  if (layer == nullptr) throw std::runtime_error("ShapeSource: null layer");
+  init(layer);
+}
+
+void ShapeSource::init(OGRLayer* layer)
+{
   itsLayerName = layer->GetName();
 
   // Geometry type name for the metadata popup.

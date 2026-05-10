@@ -9,6 +9,7 @@
 #include <vector>
 
 class NFmiArea;
+class OGRLayer;
 
 namespace Qdless
 {
@@ -51,6 +52,14 @@ class ShapeSource : public DataSource
 
   explicit ShapeSource(const std::string& filename);
   ShapeSource(const std::string& filename, Options opts);
+  // Construct from an already-opened OGRLayer. The caller (App in
+  // PostGIS mode) owns the GDALDataset that hosts `layer` and must
+  // keep it alive for the duration of this constructor; afterwards
+  // ShapeSource has copied everything it needs and the layer can be
+  // discarded. `displayName` shows up as the source's "filename" in
+  // status messages and metadata (e.g. "public.itameri_alueet").
+  ShapeSource(OGRLayer* layer, const std::string& displayName);
+  ShapeSource(OGRLayer* layer, const std::string& displayName, Options opts);
   ~ShapeSource() override;
   ShapeSource(const ShapeSource&) = delete;
   ShapeSource& operator=(const ShapeSource&) = delete;
@@ -160,5 +169,10 @@ class ShapeSource : public DataSource
   double itsOriginY = 0;
   double itsPixelW = 0;
   double itsPixelH = 0;
+
+  // Heavy lifting (reproject features, rasterise, capture
+  // attributes/centroids/outlines) shared by both ctors. The caller
+  // owns the OGRDataset that hosts `layer`.
+  void init(OGRLayer* layer);
 };
 }  // namespace Qdless

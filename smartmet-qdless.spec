@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 15%{?dist}.fmi
+Release: 16%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,23 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-16.fmi
+- PostGIS browser: launch with `qdless --pg "<dsn>"` to open a
+  PostgreSQL connection through OGR's PostgreSQL driver and pick
+  a layer from a popup. `--schema <name>` filters the picker to
+  one schema; `--table schema.name` skips the picker and opens
+  that table directly. Auto-picks when only one layer matches.
+  The connection stays open for the App's lifetime and [D]
+  re-opens the picker without paying a libpq round-trip.
+- ShapeSource gains a (OGRLayer*, displayName, Options) ctor; the
+  filename ctor now delegates to a private init() helper that
+  both paths share, so PostGIS layers go through the exact same
+  rasterise / outline / attribute / palette pipeline as
+  shapefiles do.
+- App: post-itsSource init extracted into initFromSource() so the
+  deferred PostGIS pick path (--pg without --table) can run it
+  after the user picks a layer at startup.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-15.fmi
 - Shape rainbow palette now assigns one hue per *unique label*
   rather than per burn id. A feature that fans out into many
