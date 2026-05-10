@@ -93,6 +93,13 @@ class ShapeSource : public DataSource
   // `Options::rainbow`). Used by the App when no --palette override
   // was supplied.
   Palette recommendedPalette() const;
+  // Rainbow palette restricted to burn ids that actually appear in
+  // the rasterised grid; each band labelled by the feature's
+  // NAME/NIMI/first text field (fallback "#N"). Drives the [G]Legend
+  // popup so the user sees one swatch per visible polygon, not one
+  // per registered burn id (which would include all the
+  // sub-pixel-sized children of a MultiPolygon).
+  Palette rainbowPalette() const;
   // Number of original OGR features in the shapefile (for the
   // metadata popup). Distinct from burn-value count: a shapefile
   // with one MultiPolygon feature of N sub-polygons has 1 feature

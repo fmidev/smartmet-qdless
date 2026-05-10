@@ -83,7 +83,8 @@ class UI
   // Returns the 0-based index into the matcher's last result, or -1 on
   // cancel (Esc).
   int popupSearch(const std::string& title,
-                  std::function<std::vector<std::string>(const std::string&)> matcher);
+                  std::function<std::vector<std::string>(const std::string&)> matcher,
+                  const std::string& header = {});
 
   // Min/mean/max series across the visible viewport, one float per time
   // step, used as a translucent overlay on popupTimeseries when 's' is

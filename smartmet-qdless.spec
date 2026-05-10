@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 12%{?dist}.fmi
+Release: 13%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,27 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-13.fmi
+- Shape legend ([G]) now lists one swatch per visible polygon
+  instead of one per registered burn id; sub-pixel children of a
+  MultiPolygon (which never paint a cell) are filtered out.
+- Each swatch is labelled by the feature's NAME / NIMI / first
+  text field (case-insensitive, falls back to "#N"). The numeric
+  range "14.5 .. 15.5" that the generic numeric formatter
+  produced for integer feature IDs is replaced by that label.
+- Palette::Band gains an optional `label` field; popupLegend uses
+  it when set, falling back to the formatted lo..hi range for
+  ordinary numeric palettes.
+- Attributes table ([A]) now opens with a column-aligned layout
+  and a bold header row showing the .dbf field names. Per-column
+  widths are derived from header + value lengths, capped at 24
+  chars so a runaway free-text field doesn't push the layout
+  off-screen.
+- popupSearch grows an optional `header` parameter for the column
+  titles and shows "(no matches for "X")" in the body when the
+  current query filters everything away — previously the body
+  just blanked, which looked like the popup itself disappeared.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-12.fmi
 - Fix: rainbow palette sized by featureCount() instead of
   burnIdCount(), so a shapefile whose features fan out into more

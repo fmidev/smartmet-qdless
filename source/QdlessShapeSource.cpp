@@ -445,9 +445,115 @@ std::string ShapeSource::gridSignature() const
 
 Palette ShapeSource::recommendedPalette() const
 {
-  if (itsOpts.rainbow || !itsOpts.colorByField.empty())
-    return Palette::rainbowCycle(std::max(1, itsBurnIdCount));
+  if (itsOpts.rainbow || !itsOpts.colorByField.empty()) return rainbowPalette();
   return Palette::flatFill(itsOpts.fillColor);
+}
+
+Palette ShapeSource::rainbowPalette() const
+{
+  // 1. Find the burn ids that ended up with at least one cell in the
+  //    rasterised grid. Sub-pixel polygons (often the trailing
+  //    children of a MultiPolygon) won't appear and shouldn't be in
+  //    the legend.
+  std::vector<bool> seen(static_cast<std::size_t>(itsBurnIdCount + 1), false);
+  for (auto v : itsGrid)
+    if (v != 0 && v <= itsBurnIdCount) seen[v] = true;
+
+  std::vector<int> usedIds;
+  usedIds.reserve(static_cast<std::size_t>(itsBurnIdCount));
+  for (int i = 1; i <= itsBurnIdCount; ++i)
+    if (seen[static_cast<std::size_t>(i)]) usedIds.push_back(i);
+
+  // 2. Build a band per used id with the same golden-angle hue cycle
+  //    rainbowCycle uses, plus a label from the feature's
+  //    NAME/NIMI/first text field. The hue index is the position
+  //    within usedIds, not the raw burn id, so adjacent visible
+  //    polygons get adjacent (= maximally distinct) hues even when
+  //    several invisible burn ids fall between them.
+  Palette p;
+  // Hand-roll because we need labels + non-contiguous integer values.
+  // Replicates Palette::rainbowCycle's HSV → RGB conversion.
+  auto hsvToRgb = [](float hueTurns, float s, float v) -> Rgb {
+    const float h = hueTurns - std::floor(hueTurns);
+    const int i = static_cast<int>(h * 6.0F);
+    const float f = h * 6.0F - i;
+    const float p1 = v * (1 - s);
+    const float q = v * (1 - f * s);
+    const float t = v * (1 - (1 - f) * s);
+    float r = 0;
+    float g = 0;
+    float b = 0;
+    switch (i % 6)
+    {
+      case 0: r = v; g = t; b = p1; break;
+      case 1: r = q; g = v; b = p1; break;
+      case 2: r = p1; g = v; b = t; break;
+      case 3: r = p1; g = q; b = v; break;
+      case 4: r = t; g = p1; b = v; break;
+      default: r = v; g = p1; b = q; break;
+    }
+    return Rgb{static_cast<std::uint8_t>(r * 255),
+               static_cast<std::uint8_t>(g * 255),
+               static_cast<std::uint8_t>(b * 255)};
+  };
+  constexpr float kGolden = 0.61803398875F;
+
+  // Field-name preference for the label: NIMI / NAME (case-insensitive),
+  // then any other text-looking field. Computed once.
+  auto pickField = [&](const std::vector<std::pair<std::string, std::string>>& attrs) -> std::string {
+    auto eqIcase = [](const std::string& a, const char* b) {
+      if (a.size() != std::strlen(b)) return false;
+      for (std::size_t i = 0; i < a.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i])))
+          return false;
+      return true;
+    };
+    for (const char* want : {"nimi", "name", "label", "title"})
+      for (const auto& [k, v] : attrs)
+        if (eqIcase(k, want) && !v.empty()) return v;
+    // Fallback: first non-numeric, non-empty value (avoids returning
+    // the area in km² as a "name").
+    for (const auto& [k, v] : attrs)
+    {
+      if (v.empty()) continue;
+      bool numeric = true;
+      for (char c : v)
+        if (!(std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == ',' ||
+              c == '-' || c == ' '))
+        {
+          numeric = false;
+          break;
+        }
+      if (!numeric) return v;
+    }
+    return {};
+  };
+
+  p = Palette{};
+  p.setName("shape-rainbow");
+  for (std::size_t i = 0; i < usedIds.size(); ++i)
+  {
+    const int id = usedIds[i];
+    const float hue = std::fmod(0.05F + static_cast<float>(i) * kGolden, 1.0F);
+    const Rgb rgb = hsvToRgb(hue, 0.7F, 0.9F);
+    Palette::Band band;
+    band.lo = static_cast<float>(id) - 0.5F;
+    band.hi = static_cast<float>(id) + 0.5F;
+    band.rgb = rgb;
+    // Label: feature's NAME/NIMI if present, else "#N" with the
+    // 1-based burn id (matches what [A] shows).
+    const int featureIdx = (id - 1) < static_cast<int>(itsBurnToFeature.size())
+                               ? itsBurnToFeature[static_cast<std::size_t>(id - 1)]
+                               : -1;
+    std::string label;
+    if (featureIdx >= 0 && static_cast<std::size_t>(featureIdx) < itsAttributes.size())
+      label = pickField(itsAttributes[static_cast<std::size_t>(featureIdx)]);
+    if (label.empty()) label = "#" + std::to_string(id);
+    band.label = std::move(label);
+    p.bands().push_back(std::move(band));
+  }
+  return p;
 }
 
 const std::vector<std::pair<std::string, std::string>>& ShapeSource::featureAttributes(

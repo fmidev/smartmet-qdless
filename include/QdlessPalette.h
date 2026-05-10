@@ -26,6 +26,10 @@ class Palette
     std::optional<float> lo;
     std::optional<float> hi;
     Rgb rgb{};
+    // Optional human-readable label rendered by popupLegend in place
+    // of the formatted "lo .. hi" range. Used by ShapeSource to label
+    // each rainbow band by the feature's NAME/NIMI (or "#N").
+    std::string label;
   };
 
   static Palette loadFromFile(const std::string& path);
@@ -42,7 +46,12 @@ class Palette
   Rgb lookup(float value) const;
   bool empty() const { return itsBands.empty(); }
   const std::string& name() const { return itsName; }
+  void setName(std::string name) { itsName = std::move(name); }
   const std::vector<Band>& bands() const { return itsBands; }
+  // Mutable bands accessor; used by ShapeSource to assemble a
+  // labelled rainbow palette without hand-rolling the band list
+  // through reflection.
+  std::vector<Band>& bands() { return itsBands; }
   // "Missing" / "below palette range" cells render as the terminal's
   // default background (looks like normal terminal text area).
   static Rgb missingColor() { return {0, 0, 0, true}; }

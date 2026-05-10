@@ -670,15 +670,14 @@ void App::loadPalette()
   {
     panel.valueScale = 1.0F;
     panel.valueOffset = 0.0F;
-    // Mode 0 = flat (per the source's own recommendation, which honours
-    // any --color flag). Mode 1 = rainbow over the actual burn-id range.
-    // Cycled by [R] at runtime; itsShapePaletteMode is the persistent
-    // bit. Future modes (e.g. attribute-derived) plug in here. Size by
-    // burnIdCount() rather than featureCount() — a single MultiPolygon
-    // feature can contribute many burn ids and a too-short palette
-    // leaves the higher-id polygons transparent.
+    // Mode 0 = flat fill (the source's recommendation honours any
+    // --color flag). Mode 1 = rainbowPalette() — one band per burn
+    // id that actually appears in the rasterised grid (so the [G]
+    // legend doesn't list invisible sub-pixel polygons), each band
+    // labelled by the feature's NAME / NIMI / first text field.
+    // Cycled by [R].
     if (itsShapePaletteMode == 1)
-      panel.palette = Palette::rainbowCycle(std::max(1, shp->burnIdCount()));
+      panel.palette = shp->rainbowPalette();
     else
       panel.palette = shp->recommendedPalette();
     return;
@@ -2481,20 +2480,52 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         return true;
       }
       const int n = shp->featureCount();
-      // Pre-render all rows once: matcher is called repeatedly during
-      // typing, so building rows on every keystroke would be wasteful.
+      // Format the table as fixed-width columns: one column per .dbf
+      // field plus a leading "#NN" feature index. Compute the per-
+      // column widths from header + value lengths, then pad each row
+      // to those widths so the values line up vertically and the
+      // header (drawn by popupSearch above the body) labels them
+      // exactly.
+      const auto& fields = shp->fieldNames();
+      const std::size_t nfields = fields.size();
+      // Index column is just wide enough for "#" + the largest id.
+      int idxColW = static_cast<int>(std::to_string(n).size()) + 1;
+      idxColW = std::max(idxColW, 3);
+      std::vector<int> colW(nfields, 0);
+      for (std::size_t k = 0; k < nfields; ++k)
+        colW[k] = static_cast<int>(fields[k].size());
+      for (int i = 0; i < n; ++i)
+      {
+        const auto& attrs = shp->featureAttributes(i);
+        for (std::size_t k = 0; k < nfields && k < attrs.size(); ++k)
+          colW[k] = std::max(colW[k], static_cast<int>(attrs[k].second.size()));
+      }
+      // Cap any one column at 24 chars so a runaway free-text field
+      // doesn't push everything off-screen. Rows wider than the
+      // popup's interior already get clipped by the existing layout.
+      for (auto& w : colW) w = std::min(w, 24);
+      auto padRight = [](const std::string& s, int w) {
+        if (static_cast<int>(s.size()) >= w) return s.substr(0, w);
+        return s + std::string(w - s.size(), ' ');
+      };
+      // Header row: " #  | FIELD1 | FIELD2 | …"
+      std::string header = padRight("#", idxColW);
+      for (std::size_t k = 0; k < nfields; ++k)
+      {
+        header += " | ";
+        header += padRight(fields[k], colW[k]);
+      }
+      // Data rows.
       std::vector<std::string> rows;
       rows.reserve(static_cast<std::size_t>(n));
       for (int i = 0; i < n; ++i)
       {
-        std::string row = "#" + std::to_string(i + 1) + "  ";
+        std::string row = padRight("#" + std::to_string(i + 1), idxColW);
         const auto& attrs = shp->featureAttributes(i);
-        bool first = true;
-        for (const auto& [k, v] : attrs)
+        for (std::size_t k = 0; k < nfields; ++k)
         {
-          if (!first) row += " | ";
-          row += k + "=" + v;
-          first = false;
+          row += " | ";
+          row += padRight(k < attrs.size() ? attrs[k].second : std::string{}, colW[k]);
         }
         rows.push_back(std::move(row));
       }
@@ -2528,7 +2559,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         }
         return hits;
       };
-      const int matchSel = ui.popupSearch("Attributes (search to filter)", matcher);
+      const int matchSel = ui.popupSearch("Attributes (search to filter)", matcher, header);
       if (matchSel >= 0 && matchSel < static_cast<int>(lastMatchIdx.size()))
       {
         const int featureIdx = lastMatchIdx[matchSel];

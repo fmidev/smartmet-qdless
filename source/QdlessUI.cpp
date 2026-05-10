@@ -383,7 +383,8 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
 }
 
 int UI::popupSearch(const std::string& title,
-                    std::function<std::vector<std::string>(const std::string&)> matcher)
+                    std::function<std::vector<std::string>(const std::string&)> matcher,
+                    const std::string& header)
 {
   std::string query;
   int sel = 0;
@@ -406,6 +407,7 @@ int UI::popupSearch(const std::string& title,
     // Sizing.
     int maxLabel = 0;
     for (const auto& s : matches) maxLabel = std::max(maxLabel, utf8Width(s));
+    if (!header.empty()) maxLabel = std::max(maxLabel, utf8Width(header));
     int width = std::max(maxLabel + 8, std::max(40, utf8Width(title) + 8));
     width = std::min(width, COLS - 4);
     width = std::max(width, stickyWidth);
@@ -413,9 +415,10 @@ int UI::popupSearch(const std::string& title,
     const int interiorW = width - 2;
 
     constexpr int kFooterRows = 1;
-    const int maxRows = std::max(1, LINES - 8 - kFooterRows);
+    const int headerRows = header.empty() ? 0 : 1;
+    const int maxRows = std::max(1, LINES - 8 - kFooterRows - headerRows);
     const int innerH = std::min(static_cast<int>(matches.size()), maxRows);
-    int height = innerH + 4 + kFooterRows;  // top + query + sep + body + footer + bottom
+    int height = innerH + 4 + kFooterRows + headerRows;
     height = std::max(height, stickyHeight);
     stickyHeight = height;
     const int top = std::max(0, (LINES - height) / 2);
@@ -445,14 +448,32 @@ int UI::popupSearch(const std::string& title,
     for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
     os << "\xe2\x94\xa4" << kEscReset;
 
+    // Optional header row (column titles, drawn bold cyan above the
+    // body). Indented by 4 columns to line up with the [N] hotkey
+    // prefix that body rows reserve, so column edges visually align.
+    if (headerRows > 0)
+    {
+      putAt(os, top + 3, left);
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
+         << kEscFgCyan << kEscBold << "     " << header;
+      pad(os, interiorW - 5 - utf8Width(header));
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+    }
+
     // Body region: every row between separator and footer must be drawn
     // every frame, otherwise rows from a wider previous match list stay
     // on screen when the result set shrinks (especially when the user
     // deletes the entire query and there are no matches).
-    const int bodyRows = height - 4 - kFooterRows;  // 1 top + query + sep + footer + bottom
+    const int bodyRows = height - 4 - kFooterRows - headerRows;
+    // When the query filters everything away, leaving the body
+    // blank looks like the popup itself disappeared — show a hint
+    // on the first body row so the user knows their typed query is
+    // still active.
+    const bool noMatchHint = matches.empty() && !query.empty();
+    const std::string noMatchText = "(no matches for \"" + query + "\")";
     for (int i = 0; i < bodyRows; ++i)
     {
-      putAt(os, top + 3 + i, left);
+      putAt(os, top + 3 + headerRows + i, left);
       os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82";
       if (i < static_cast<int>(matches.size()))
       {
@@ -486,6 +507,11 @@ int UI::popupSearch(const std::string& title,
         os << matches[i];
         consumed += utf8Width(matches[i]);
         pad(os, interiorW - consumed);
+      }
+      else if (noMatchHint && i == 0)
+      {
+        os << kEscBgBlack << kEscFgWhite << ' ' << noMatchText;
+        pad(os, interiorW - 1 - utf8Width(noMatchText));
       }
       else
       {
@@ -878,7 +904,12 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
   int maxLabel = 0;
   for (const auto& b : bands)
   {
-    std::string s = formatBound(b.lo) + " .. " + formatBound(b.hi);
+    // Prefer the band's explicit label when set (shapefile rainbow:
+    // feature NAME/NIMI). Fall back to the formatted lo..hi range
+    // for ordinary numeric palettes.
+    std::string s = b.label.empty()
+                        ? formatBound(b.lo) + " .. " + formatBound(b.hi)
+                        : b.label;
     maxLabel = std::max(maxLabel, utf8Width(s));
     labels.push_back(std::move(s));
   }
