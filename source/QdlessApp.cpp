@@ -1,6 +1,7 @@
 #include "QdlessApp.h"
 
 #include "QdlessMultiFileSource.h"
+#include "QdlessShapeSource.h"
 #include "QdlessUI.h"
 
 #include <newbase/NFmiEnumConverter.h>
@@ -646,6 +647,17 @@ void App::buildIndices()
 void App::loadPalette()
 {
   Panel& panel = activePanel();
+  // Shapefile shortcut: the source recommends a flat-fill or rainbow
+  // palette directly. The qdless.conf parameter→palette table doesn't
+  // apply (the "parameter" is a feature ID, not a meteorological
+  // quantity) and the unit-guess machinery would just no-op.
+  if (auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()); shp != nullptr)
+  {
+    panel.valueScale = 1.0F;
+    panel.valueOffset = 0.0F;
+    panel.palette = shp->recommendedPalette();
+    return;
+  }
   const int id = itsSource->currentParamId();
   const std::string shortName = itsSource->paramShortName(id);
   const std::string longName = itsSource->paramLongName(id);
@@ -766,11 +778,27 @@ void App::loadCoastlines()
   }
   if (itsBorderStyle != LineStyle::None)
   {
-    auto path = Coastline::pickFile(itsOpts.coastlineDir, "border", span);
-    if (!path.empty() && path != itsBorderPath)
+    // For a ShapeSource the borders come from the shapefile itself —
+    // its polygon and polyline boundaries replace the GSHHS political
+    // borders so the user sees outlines on top of the rasterised
+    // fill. Sentinel "shape:" path keeps us from re-loading from
+    // GSHHS each redraw; we set it once and never change it.
+    if (auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()))
     {
-      itsBorders = Coastline::read(path);
-      itsBorderPath = path;
+      if (itsBorderPath != "shape:")
+      {
+        itsBorders = shp->outlines();
+        itsBorderPath = "shape:";
+      }
+    }
+    else
+    {
+      auto path = Coastline::pickFile(itsOpts.coastlineDir, "border", span);
+      if (!path.empty() && path != itsBorderPath)
+      {
+        itsBorders = Coastline::read(path);
+        itsBorderPath = path;
+      }
     }
   }
 }

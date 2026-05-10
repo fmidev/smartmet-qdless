@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 6%{?dist}.fmi
+Release: 7%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,31 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-7.fmi
+- Shapefile support: new ShapeSource backend reads ESRI shapefiles
+  through OGR, reprojects features to WGS84, and rasterises them
+  once at construction (default 2000-pixel max dimension; uint16
+  raster of feature IDs). The renderer's existing palette + overlay
+  paths handle the rest:
+    * interpolatedValue(lat, lon) returns the feature id under that
+      cell, or 0 outside any polygon.
+    * Default palette is a flat fill (mid grey above 0.5,
+      transparent below) so the shape reads as a single solid
+      colour without bias toward any feature. Palette::rainbowCycle
+      is also available for distinguishing adjacent features (one
+      hue per id, golden-angle rotation).
+    * Polygon and polyline boundaries are extracted as Polylines
+      and slotted into the GSHHS-borders overlay path, so the [B]
+      Braille → Thick → None cycling toggles their style the same
+      way it does for political borders.
+  GSHHS coastline ('c'), graticule ('n'), cities ('i'), place
+  search ('/'), and metadata popup ('M') keep working because the
+  shapefile carries a real .prj (no image-mode gating). Time-series
+  probe is still meaningful (feature id under cursor) so it is left
+  enabled.
+- Detection by ESRI shapefile magic (file code 9994 big-endian at
+  offset 0). Routed automatically through DataSource::open.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-6.fmi
 - Image mode: clicking the map no longer opens the time-series
   probe. The chart plots a scalar value over time, and RGB triplets

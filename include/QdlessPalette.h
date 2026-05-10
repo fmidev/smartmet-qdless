@@ -30,6 +30,14 @@ class Palette
 
   static Palette loadFromFile(const std::string& path);
   static Palette builtinRamp(float dataMin, float dataMax);
+  // Flat-fill palette: any value ≥ 0.5 paints `color`, anything below
+  // is transparent. Used by the shapefile backend so non-feature cells
+  // leave the terminal background showing.
+  static Palette flatFill(Rgb color, std::string name = "shape-flat");
+  // Cycling rainbow palette: integer indices 1..N each get a distinct
+  // hue (golden-ratio cycling so adjacent indices look different); 0
+  // is transparent. Used by ShapeSource with --color-by feature.
+  static Palette rainbowCycle(int n, std::string name = "shape-rainbow");
 
   Rgb lookup(float value) const;
   bool empty() const { return itsBands.empty(); }

@@ -5,6 +5,7 @@
 #include "QdlessImageSource.h"
 #include "QdlessOdimSource.h"
 #include "QdlessQueryDataSource.h"
+#include "QdlessShapeSource.h"
 
 #include <cstdio>
 #include <fstream>
@@ -22,6 +23,7 @@ enum class FileKind
   kHdf5,
   kGeoTiff,
   kImage,
+  kShapefile,
   kUnknown,
 };
 
@@ -66,6 +68,11 @@ FileKind detectKind(const std::string& filename)
   if (n >= 12 && hdr[0] == 'R' && hdr[1] == 'I' && hdr[2] == 'F' && hdr[3] == 'F' &&
       hdr[8] == 'W' && hdr[9] == 'E' && hdr[10] == 'B' && hdr[11] == 'P')
     return FileKind::kImage;
+  // ESRI shapefile: file code 9994 stored big-endian at offset 0.
+  // Only the .shp file has this header; .shx / .dbf / .prj have
+  // different magic and would not be passed as the qdless input.
+  if (n >= 4 && hdr[0] == 0x00 && hdr[1] == 0x00 && hdr[2] == 0x27 && hdr[3] == 0x0A)
+    return FileKind::kShapefile;
   // Fall through: assume newbase QueryData.
   return FileKind::kQueryData;
 }
@@ -89,6 +96,8 @@ std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
       return std::make_unique<GeoTiffSource>(filename);
     case FileKind::kImage:
       return std::make_unique<ImageSource>(filename);
+    case FileKind::kShapefile:
+      return std::make_unique<ShapeSource>(filename);
     case FileKind::kUnknown:
       break;
   }

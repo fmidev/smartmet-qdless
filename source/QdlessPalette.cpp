@@ -91,6 +91,62 @@ Palette Palette::builtinRamp(float dataMin, float dataMax)
   return p;
 }
 
+Palette Palette::flatFill(Rgb color, std::string name)
+{
+  // Single band [0.5, +∞). Anything below 0.5 falls through to the
+  // missing-value path in lookup() and renders transparent. Used by
+  // ShapeSource where interpolatedValue returns 0 outside polygons
+  // and 1..N (a feature ID) inside.
+  Palette p;
+  p.itsName = std::move(name);
+  p.itsBands.push_back(Band{0.5F, std::nullopt, color});
+  return p;
+}
+
+Palette Palette::rainbowCycle(int n, std::string name)
+{
+  // One band per feature id (1..n inclusive), each at a hue rotated
+  // by the golden-angle so adjacent ids look maximally different.
+  // Saturation/value are fixed; transparent below 0.5 like flatFill.
+  Palette p;
+  p.itsName = std::move(name);
+  if (n <= 0) return p;
+  p.itsBands.reserve(static_cast<std::size_t>(n));
+  // HSV → RGB (S=0.7, V=0.9). Hue in turns ∈ [0,1).
+  auto hsvToRgb = [](float hueTurns, float s, float v) -> Rgb {
+    const float h = hueTurns - std::floor(hueTurns);
+    const int i = static_cast<int>(h * 6.0F);
+    const float f = h * 6.0F - i;
+    const float p1 = v * (1 - s);
+    const float q = v * (1 - f * s);
+    const float t = v * (1 - (1 - f) * s);
+    float r = 0;
+    float g = 0;
+    float b = 0;
+    switch (i % 6)
+    {
+      case 0: r = v; g = t; b = p1; break;
+      case 1: r = q; g = v; b = p1; break;
+      case 2: r = p1; g = v; b = t; break;
+      case 3: r = p1; g = q; b = v; break;
+      case 4: r = t; g = p1; b = v; break;
+      default: r = v; g = p1; b = q; break;
+    }
+    return Rgb{static_cast<std::uint8_t>(r * 255),
+               static_cast<std::uint8_t>(g * 255),
+               static_cast<std::uint8_t>(b * 255)};
+  };
+  constexpr float kGolden = 0.61803398875F;
+  for (int i = 0; i < n; ++i)
+  {
+    const float hue = std::fmod(0.05F + static_cast<float>(i) * kGolden, 1.0F);
+    const float lo = static_cast<float>(i) + 0.5F;
+    const float hi = static_cast<float>(i) + 1.5F;
+    p.itsBands.push_back(Band{lo, hi, hsvToRgb(hue, 0.7F, 0.9F)});
+  }
+  return p;
+}
+
 Rgb Palette::lookup(float value) const
 {
   // Treat sentinel/garbage values as missing. Catches kFloatMissing (32700),
