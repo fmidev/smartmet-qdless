@@ -105,6 +105,18 @@ UI::UI()
   itsPopupAttr = COLOR_PAIR(kPairPopup);
 
   recomputeLayout();
+
+  // Commit a clean blank screen to ncurses' internal buffer and to
+  // the terminal NOW. Without this, the very first popup we draw
+  // (e.g. the PostGIS layer picker on `qdless --pg ...`) runs
+  // before any doupdate() has happened — and the implicit refresh
+  // inside the popup's wgetch then commits ncurses' default empty
+  // state on top of our raw-ANSI popup, so the popup appears not
+  // to display until the user presses a key (which prompts the
+  // popup's loop to re-render after that refresh).
+  clear();
+  wnoutrefresh(stdscr);
+  doupdate();
 }
 
 UI::~UI()

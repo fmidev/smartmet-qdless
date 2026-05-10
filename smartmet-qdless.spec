@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 18%{?dist}.fmi
+Release: 19%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,18 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-19.fmi
+- Fix: PostGIS layer picker (and any popup opened before the App
+  draws the map for the first time) now appears immediately. UI
+  ctor commits a clean blank screen to ncurses + the terminal at
+  the end of init via clear() / wnoutrefresh(stdscr) / doupdate().
+  Without this, the first popup ran before any ncurses doupdate()
+  had happened, and the implicit refresh inside the popup's wgetch
+  then committed ncurses' default empty state on top of the
+  popup's raw-ANSI render — so the popup looked like it didn't
+  appear until the user pressed a key, which prompted the popup
+  loop to re-render after the refresh.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-18.fmi
 - popupSearch (attribute table, layer picker, place search) now
   scrolls when the selection moves past the visible window. Added
