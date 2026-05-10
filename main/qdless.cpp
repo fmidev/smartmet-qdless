@@ -9,11 +9,15 @@
 
 #include <boost/program_options.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <string>
+#include <system_error>
+#include <vector>
 
 namespace po = boost::program_options;
 
@@ -23,6 +27,8 @@ int main(int argc, char* argv[])
   {
     Qdless::Options opts;
     std::string paramArg;
+    std::string dirArg;
+    std::vector<std::string> positional;
     po::options_description desc("qdless options");
     desc.add_options()                                                                 //
         ("help,h", "show this help message")                                           //
@@ -61,18 +67,39 @@ int main(int argc, char* argv[])
          po::value<double>(&opts.minIslandAreaKm2)->default_value(opts.minIslandAreaKm2),
          "minimum island area in km² (continents always shown; 0 disables)") //
         ("dump", po::bool_switch(&opts.dumpAndExit), "render one frame to stdout and exit") //
-        ("file", po::value<std::string>(&opts.filename), "querydata file");
+        ("dir",
+         po::value<std::string>(&dirArg),
+         "directory whose files (sorted by filename) form the time series") //
+        ("file", po::value<std::vector<std::string>>(&positional),
+         "input file(s); pass multiple for a multi-time series");
 
     po::positional_options_description pos;
-    pos.add("file", 1);
+    pos.add("file", -1);
 
     po::variables_map vm;
     po::store(po::command_line_parser(argc, argv).options(desc).positional(pos).run(), vm);
     po::notify(vm);
 
-    if (vm.count("help") != 0U || opts.filename.empty())
+    // Resolve inputs: positionals + --dir contents. Multiple files build a
+    // MultiFileSource; one file goes through the single-file fast path.
+    if (!dirArg.empty())
     {
-      std::cout << "Usage: qdless [options] <querydata-file>\n\n" << desc << '\n';
+      std::error_code ec;
+      for (const auto& entry : std::filesystem::directory_iterator(dirArg, ec))
+      {
+        if (entry.is_regular_file()) positional.push_back(entry.path().string());
+      }
+      std::sort(positional.begin(), positional.end());
+    }
+    if (positional.size() == 1) opts.filename = positional.front();
+    else if (positional.size() > 1) opts.filenames = std::move(positional);
+
+    if (vm.count("help") != 0U ||
+        (opts.filename.empty() && opts.filenames.empty()))
+    {
+      std::cout << "Usage: qdless [options] <file> [<file> ...]\n"
+                << "       qdless [options] --dir <directory>\n\n"
+                << desc << '\n';
       return vm.count("help") != 0U ? 0 : 1;
     }
 

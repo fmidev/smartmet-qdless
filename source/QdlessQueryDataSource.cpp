@@ -217,4 +217,13 @@ std::vector<std::pair<std::string, std::string>> QueryDataSource::extraMetadata(
   }
   return rows;
 }
+
+std::string QueryDataSource::gridSignature() const
+{
+  const auto* area = itsInfo->Area();
+  if (area == nullptr) return DataSource::gridSignature();
+  return std::string("qd:") + area->ProjStr() + "|" +
+         std::to_string(itsInfo->GridXNumber()) + "x" +
+         std::to_string(itsInfo->GridYNumber());
+}
 }  // namespace Qdless

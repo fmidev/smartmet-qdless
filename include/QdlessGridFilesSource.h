@@ -64,6 +64,7 @@ class GridFilesSource : public DataSource
   void latLonToUV(double lat, double lon, double& u, double& v) const override;
 
   std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
+  std::string gridSignature() const override;
 
   // One-time initialisation of grid-files' parameter mapping. Safe to
   // call multiple times; only the first call has effect. Searches several

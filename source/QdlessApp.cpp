@@ -1,5 +1,6 @@
 #include "QdlessApp.h"
 
+#include "QdlessMultiFileSource.h"
 #include "QdlessUI.h"
 
 #include <newbase/NFmiEnumConverter.h>
@@ -493,7 +494,10 @@ void Viewport::pan(float duFrac, float dvFrac)
 
 App::App(Options opts) : itsOpts(std::move(opts))
 {
-  itsSource = DataSource::open(itsOpts.filename);
+  if (!itsOpts.filenames.empty() && itsOpts.filenames.size() > 1)
+    itsSource = std::make_unique<MultiFileSource>(itsOpts.filenames);
+  else
+    itsSource = DataSource::open(itsOpts.filename);
   itsPanels.resize(1);
   buildIndices();
 

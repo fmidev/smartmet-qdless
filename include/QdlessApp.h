@@ -16,7 +16,12 @@ namespace Qdless
 {
 struct Options
 {
+  // Single-file convenience. Either `filename` or `filenames` (multi) is
+  // populated by the CLI parser; main fills `filename` from `filenames[0]`
+  // when there's exactly one input so single-file callers don't need to
+  // change. The App constructor uses `filenames` if non-empty.
   std::string filename;
+  std::vector<std::string> filenames;
   std::string paletteDir = "/usr/share/smartmet/qdless/palettes";
   std::string configFile = "/usr/share/smartmet/qdless/qdless.conf";
   std::string coastlineDir = "/usr/share/gshhg-gmt-nc4";

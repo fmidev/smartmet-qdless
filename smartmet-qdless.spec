@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.5.9
-Release: 15%{?dist}.fmi
+Version: 26.5.10
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,38 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-1.fmi
+- ODIM HDF5 support: new OdimSource backend for 2D composites
+  (object=IMAGE/COMP/CVOL). Reuses qdtools' Hdf5File reader and
+  the h5toqd quantity → newbase parameter mapping. Applies
+  gain*raw + offset on read, and maps both `nodata` and `undetect`
+  to NaN so out-of-palette cells render transparent — radar dBZ
+  can be legitimately negative, so painting clear-air as zero
+  would mislead. Polar volumes (PVOL) are rejected up front.
+- GeoTIFF support: new GeoTiffSource via GDAL directly. grid-files'
+  built-in GeoTIFF reader only handles FMI's private GeometryId
+  tag and does not parse the standard georef tags (33550, 33922,
+  34735), so third-party GeoTIFFs went through it as Unknown
+  projection. The new path reads ModelTiepoint + ModelPixelScale
+  + WKT through GDAL and builds an NFmiArea from CreateFromBBox.
+  When the file carries an FMI-style GDAL_METADATA TIFF tag
+  (42112) — radar GeoTIFFs do — `Observation time`, `Quantity`,
+  `Gain`, `Offset`, `Nodata`, `Undetect` are read from there in
+  preference to filename parsing. Falls back to a leading
+  YYYYMMDDhhmm in the basename, then to mtime.
+- Multi-file mode: new MultiFileSource aggregator. Pass several
+  files (`qdless f1 f2 …`) or `--dir <path>` to walk a directory.
+  The most-recently-modified file is the canonical projection; any
+  file whose grid signature does not match is skipped with a
+  stderr warning naming both paths. Each backend exposes a
+  `gridSignature()` (projection + dimensions + extent) for the
+  comparison; default is bbox-based.
+- Detection: HDF5 magic (0x89 H D F) now disambiguates ODIM vs
+  NetCDF4 via a cheap probe of /what/object presence; TIFF magic
+  (II*\\0 / MM\\0*) routes to the new GeoTIFF path. PROJ stderr
+  noise from EPSG:3067 out-of-domain perimeter sampling is
+  silenced via CPLPushErrorHandler around the affected calls.
+
 * Sat May  9 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.9-15.fmi
 - Time-series probe popup: in-popup time animation. Space toggles
   play/pause, Up/Down adjust the per-frame delay (same scaling and

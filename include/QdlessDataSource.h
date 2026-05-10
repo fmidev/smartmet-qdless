@@ -79,5 +79,14 @@ class DataSource
   // over `boundingBox()` so unprojected backends work without overrides.
   virtual void uvToLatLon(double u, double v, double& lat, double& lon) const;
   virtual void latLonToUV(double lat, double lon, double& u, double& v) const;
+
+  // Stable string identifying the grid (projection + dimensions + extent).
+  // Used by MultiFileSource to verify all members of a multi-file batch
+  // share one grid. Default is a bounding-box-derived string; backends
+  // SHOULD override with a stronger fingerprint (projection WKT/proj4 +
+  // pixel dimensions + origin) so two unrelated grids that happen to span
+  // the same lat/lon bbox don't compare equal. Equality is exact-string;
+  // backends should format with stable precision.
+  virtual std::string gridSignature() const;
 };
 }  // namespace Qdless

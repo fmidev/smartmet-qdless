@@ -561,6 +561,25 @@ std::vector<std::pair<std::string, std::string>> GridFilesSource::extraMetadata(
   return rows;
 }
 
+std::string GridFilesSource::gridSignature() const
+{
+  if (itsFile == nullptr || itsFile->getNumberOfMessages() == 0)
+    return DataSource::gridSignature();
+  auto* msg = itsFile->getMessageByIndex(0);
+  if (msg == nullptr) return DataSource::gridSignature();
+  std::string proj;
+  try
+  {
+    proj = msg->getWKT();
+  }
+  catch (const std::exception&)
+  {
+  }
+  if (proj.empty()) proj = gridProjectionName(msg->getGridProjection());
+  ensureGridGeometry();
+  return std::string("grid:") + proj + "|" + std::to_string(itsNx) + "x" + std::to_string(itsNy);
+}
+
 LatLonBox GridFilesSource::boundingBox() const
 {
   LatLonBox b;
