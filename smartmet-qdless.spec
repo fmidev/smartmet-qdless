@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 5%{?dist}.fmi
+Release: 6%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,13 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-6.fmi
+- Image mode: clicking the map no longer opens the time-series
+  probe. The chart plots a scalar value over time, and RGB triplets
+  have no scalar interpretation — the popup was just an empty NaN
+  graph. The keyboard / status-bar entries to the probe were
+  already gated; this catches the mouse path too.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-5.fmi
 - Fix: multi-file image-mode rendered blank because MultiFileSource
   did not forward isRawImage() / pixelAtUV() to its sub-sources.

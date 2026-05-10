@@ -2181,6 +2181,13 @@ bool App::cellToLatLon(const UI& ui, int cellX, int cellY, double& lat, double& 
 
 void App::openProbe(int cellX, int cellY, UI& ui)
 {
+  // The probe is a time-series chart of the scalar value at the clicked
+  // (lat, lon) over every available timestep. RGB triplets from a raw
+  // image have no scalar interpretation — opening the probe on an image
+  // would produce an empty chart with NaN points everywhere — so the
+  // click is silently a no-op. (The status-bar item and keyboard-driven
+  // entry points to the probe are also gated out in image mode.)
+  if (itsSource->isRawImage()) return;
   double lat = 0;
   double lon = 0;
   if (!cellToLatLon(ui, cellX, cellY, lat, lon)) return;
