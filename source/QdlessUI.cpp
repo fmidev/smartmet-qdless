@@ -590,6 +590,7 @@ void UI::popupHelp()
       {"s in probe",                "Toggle viewport min/mean/max overlay"},
       {"",                          ""},
       {"g",                         "Legend"},
+      {"r",                         "Cycle palette (shapefiles: flat \xe2\x86\x92 rainbow)"},
       {"c",                         "Coastlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off"},
       {"b",                         "Borders: braille \xe2\x86\x92 thick \xe2\x86\x92 off"},
       {"t",                         "Cell style: sextants \xe2\x86\x92 triangles \xe2\x86\x92 squares (font fallback)"},

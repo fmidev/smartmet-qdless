@@ -128,6 +128,10 @@ class App
                                float& dataMax) const;
   void overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight,
                         const std::vector<Polyline>& polylines, Rgb color) const;
+  // Colour to draw the borders overlay in. Mid grey for GSHHS political
+  // borders; black for shapefile outlines so they're visible against
+  // the flat fill (which is itself a mid grey).
+  Rgb borderColor() const;
 
   // Interactive helpers:
   void selectParam(int newIndex);
@@ -221,6 +225,12 @@ class App
   // Top-N cap for the cities overlay; PageUp / PageDown step through fixed
   // levels (5, 10, 25, 50, 100, 250, 500). Default = a comfortable mid value.
   int itsCityOverlayN = 25;
+
+  // Shapefile palette mode, cycled by [R]. 0 = flat (mid grey, default),
+  // 1 = rainbow per feature ID. Only used when the source is a
+  // ShapeSource; for any other backend the [R] key is a no-op and this
+  // member is ignored.
+  int itsShapePaletteMode = 0;
 
   // Transient status message shown on the timeline header for one redraw
   // (e.g. "Saved foo.png"). Cleared by the next non-message-producing key.

@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.10
-Release: 7%{?dist}.fmi
+Release: 8%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,21 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-8.fmi
+- Shapefile outlines drawn in green (RGB 0,220,0) instead of the
+  GSHHS-borders grey-90. Grey on the default mid-grey flat fill
+  was nearly invisible (only 30 levels of contrast). Green is
+  also distinct from coastlines (black) and political borders
+  (grey-90), so the viewer can tell at a glance which lines come
+  from which layer.
+- New [R] keyboard shortcut: cycle the palette. For shapefiles
+  this toggles between flat fill (one solid colour for every
+  feature) and rainbow per feature ID (golden-angle hue rotation
+  so adjacent feature IDs look maximally different) — useful for
+  validating that polygon partitioning is correct independent of
+  the outline visibility. The shortcut is a no-op with a status
+  hint for non-shapefile sources; the help popup ('?') lists it.
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-7.fmi
 - Shapefile support: new ShapeSource backend reads ESRI shapefiles
   through OGR, reprojects features to WGS84, and rasterises them

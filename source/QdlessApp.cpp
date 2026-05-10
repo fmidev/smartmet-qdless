@@ -644,6 +644,18 @@ void App::buildIndices()
   itsParamIds = itsSource->paramIds();
 }
 
+Rgb App::borderColor() const
+{
+  // Shapefile outlines get their own colour: green is distinct from
+  // GSHHS coastlines (black) and political borders (grey-90), so the
+  // viewer can tell at a glance which lines come from which layer.
+  // The bright saturated value reads on both the default flat-grey
+  // fill and the rainbow palette without clashing.
+  if (dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr)
+    return Rgb{0, 220, 0};
+  return Rgb{90, 90, 90};
+}
+
 void App::loadPalette()
 {
   Panel& panel = activePanel();
@@ -655,7 +667,14 @@ void App::loadPalette()
   {
     panel.valueScale = 1.0F;
     panel.valueOffset = 0.0F;
-    panel.palette = shp->recommendedPalette();
+    // Mode 0 = flat (per the source's own recommendation, which honours
+    // any --color flag). Mode 1 = rainbow over the actual feature count.
+    // Cycled by [R] at runtime; itsShapePaletteMode is the persistent
+    // bit. Future modes (e.g. attribute-derived) plug in here.
+    if (itsShapePaletteMode == 1)
+      panel.palette = Palette::rainbowCycle(std::max(1, shp->featureCount()));
+    else
+      panel.palette = shp->recommendedPalette();
     return;
   }
   const int id = itsSource->currentParamId();
@@ -2423,6 +2442,26 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       ui.popupHelp();
       return true;
 
+    case 'r':
+    case 'R':
+    {
+      // Palette cycle. Currently only meaningful for shapefile sources
+      // (flat fill ↔ rainbow per feature); a no-op with a status hint
+      // for other backends so the user gets feedback either way.
+      if (dynamic_cast<const ShapeSource*>(itsSource.get()) != nullptr)
+      {
+        itsShapePaletteMode = (itsShapePaletteMode + 1) % 2;
+        loadPalette();
+        itsLastMessage =
+            itsShapePaletteMode == 1 ? "Palette: rainbow" : "Palette: flat";
+      }
+      else
+      {
+        itsLastMessage = "Palette cycle is only available for shapefiles";
+      }
+      return true;
+    }
+
     case 'M':
       ui.popupMetadata("File metadata", buildMetadataRows());
       return true;
@@ -2785,7 +2824,7 @@ void App::drawMap(UI& ui)
     if (itsCoastlineStyle == LineStyle::Thick)
       overlayPolylines(pixels, subW, subH, itsCoastlines, Rgb{0, 0, 0});
     if (itsBorderStyle == LineStyle::Thick)
-      overlayPolylines(pixels, subW, subH, itsBorders, Rgb{90, 90, 90});
+      overlayPolylines(pixels, subW, subH, itsBorders, borderColor());
     overlayCities(pixels, subW, subH);
     overlayMarker(pixels, subW, subH);
 
@@ -2796,7 +2835,7 @@ void App::drawMap(UI& ui)
     if (itsCoastlineStyle == LineStyle::Braille)
       appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subW, r.row, r.col);
     if (itsBorderStyle == LineStyle::Braille)
-      appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subW, r.row, r.col);
+      appendPolylineBraille(os, itsBorders, borderColor(), pixels, subW, r.row, r.col);
 
     if (itsShowWindArrows)
       os << buildWindArrows(r.width, r.height, r.row, r.col);
@@ -2874,7 +2913,7 @@ int App::runOnce()
   if (itsCoastlineStyle == LineStyle::Thick)
     overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
   if (itsBorderStyle == LineStyle::Thick)
-    overlayPolylines(pixels, subWidth, subHeight, itsBorders, Rgb{90, 90, 90});
+    overlayPolylines(pixels, subWidth, subHeight, itsBorders, borderColor());
   overlayCities(pixels, subWidth, subHeight);
   overlayMarker(pixels, subWidth, subHeight);
 
@@ -2896,7 +2935,7 @@ int App::runOnce()
   if (itsCoastlineStyle == LineStyle::Braille)
     appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subWidth, 1, 0);
   if (itsBorderStyle == LineStyle::Braille)
-    appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subWidth, 1, 0);
+    appendPolylineBraille(os, itsBorders, borderColor(), pixels, subWidth, 1, 0);
   os << buildCityLabels(cellW, cellH, 1, 0);
   std::cout << os.str() << "\x1b[" << ts.rows << ";1H" << '\n';
   return 0;
