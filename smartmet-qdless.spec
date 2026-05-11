@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.11
-Release: 1%{?dist}.fmi
+Release: 2%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -108,6 +108,16 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Mon May 11 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.11-2.fmi
+- `n` now cycles the graticule the same way `c` / `b` cycle coastlines
+  and borders: Braille → Thick → Off. Braille is the new default — the
+  meridian/parallel lines render as a thin dotted overlay on top of the
+  rendered cells rather than half-cell-wide block characters punched
+  into the data buffer. Lat/lon line tracing (round-trip filter,
+  antimeridian guard, niceStep cadence) is shared between the two
+  modes via App::traceGraticuleSegments. Status bar reflects the
+  current mode on each press.
+
 * Mon May 11 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.11-1.fmi
 - Fix: graticule overlay no longer draws spurious lines hugging the
   viewport edges on projected sources (e.g. rotated lat/lon). Such

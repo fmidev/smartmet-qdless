@@ -6,6 +6,7 @@
 #include "QdlessPalette.h"
 #include "QdlessRenderer.h"
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -218,12 +219,13 @@ class App
   int itsAnimationDelayMs = 250;
 
   // Overlay toggles.
-  bool itsShowGraticule = false;
   bool itsShowWindArrows = false;
   bool itsShowCities = false;
-  // Coastline + political-border render styles. Initialised from
-  // Options::noCoastline / noBorders (None when set, Braille otherwise) and
-  // cycled with `c` / `b` (Braille → Thick → None → Braille).
+  // Graticule + coastline + political-border render styles. Cycled with
+  // `n` / `c` / `b` (Braille → Thick → None → Braille). Coastline / border
+  // are also initialised from Options::noCoastline / noBorders (None when
+  // set, Braille otherwise).
+  LineStyle itsGraticuleStyle = LineStyle::Braille;
   LineStyle itsCoastlineStyle = LineStyle::Braille;
   LineStyle itsBorderStyle = LineStyle::Braille;
   // Cell rendering style; cycled with `t`. Sextant (2×3 sub-pixels) is the
@@ -288,6 +290,16 @@ class App
 
   // Overlays.
   void overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
+  // Braille variant: emits positioned braille glyphs to `os` on top of the
+  // already-rendered cells. Mirrors appendPolylineBraille; uses pixels[] only
+  // to sample the per-cell background colour for each emitted glyph.
+  void appendGraticuleBraille(std::ostringstream& os, const std::vector<Rgb>& pixels,
+                              int subWidth, int originRow, int originCol) const;
+  // Walk meridians + parallels at the resolution `bW × bH`, returning the
+  // list of valid segments (round-trip filtered, antimeridian-guarded). Each
+  // entry is {x0, y0, x1, y1} in sub-cell coords. Shared between the Thick
+  // and Braille graticule renderers.
+  std::vector<std::array<int, 4>> traceGraticuleSegments(int bW, int bH) const;
   void overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   void overlayCities(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   // Append a braille-glyph overlay of a polyline set, written AFTER the

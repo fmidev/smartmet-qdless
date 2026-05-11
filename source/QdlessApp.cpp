@@ -555,7 +555,7 @@ void App::initFromSource()
   {
     itsCoastlineStyle = LineStyle::None;
     itsBorderStyle = LineStyle::None;
-    itsShowGraticule = false;
+    itsGraticuleStyle = LineStyle::None;
     itsShowWindArrows = false;
     itsShowCities = false;
   }
@@ -1566,11 +1566,12 @@ std::string App::exportPng(std::string& err) const
   }
 }
 
-void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
+std::vector<std::array<int, 4>> App::traceGraticuleSegments(int bW, int bH) const
 {
+  std::vector<std::array<int, 4>> out;
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0) return;
+  if (spanU <= 0 || spanV <= 0 || bW <= 0 || bH <= 0) return out;
 
   // Estimate the visible lat/lon extent by sampling along the viewport
   // border. With projected sources the extent is generally not rectilinear
@@ -1598,12 +1599,10 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
     observe(itsViewport.uMin, itsViewport.vMin + t * spanV);  // left
     observe(itsViewport.uMax, itsViewport.vMin + t * spanV);  // right
   }
-  if (maxLat <= minLat || maxLon <= minLon) return;
+  if (maxLat <= minLat || maxLon <= minLon) return out;
 
   const double lonStep = niceStep(maxLon - minLon, 6);
   const double latStep = niceStep(maxLat - minLat, 6);
-
-  const Rgb gridColor{120, 120, 120};
 
   // Projected sources (e.g. rotated lat/lon) cover a geographic bbox larger
   // than the actual data region — meridian/parallel samples near the bbox
@@ -1625,9 +1624,55 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
     if (std::abs(lat - latBack) > 0.5 || dlon > 0.5) return std::nullopt;
     const double u01 = (u - itsViewport.uMin) / spanU;
     const double v01 = (v - itsViewport.vMin) / spanV;
-    return std::pair<int, int>{static_cast<int>(u01 * subWidth),
-                               static_cast<int>(v01 * subHeight)};
+    return std::pair<int, int>{static_cast<int>(u01 * bW),
+                               static_cast<int>(v01 * bH)};
   };
+
+  // Emit segment only when both endpoints are valid AND the jump is small
+  // enough to be a real adjacent pair (catches antimeridian wraps that the
+  // round-trip can't see).
+  auto emit = [&](const std::optional<std::pair<int, int>>& a,
+                  const std::optional<std::pair<int, int>>& b) {
+    if (!a || !b) return;
+    if (std::abs(b->first - a->first) >= bW / 2) return;
+    if (std::abs(b->second - a->second) >= bH / 2) return;
+    out.push_back({a->first, a->second, b->first, b->second});
+  };
+
+  constexpr int kSamplesPerLine = 60;
+
+  // Meridians (constant lon). Snap start to nearest multiple of step.
+  const double startLon = std::ceil(minLon / lonStep) * lonStep;
+  for (double lon = startLon; lon <= maxLon + lonStep * 0.5; lon += lonStep)
+  {
+    auto prev = toSub(minLat, lon);
+    for (int s = 1; s <= kSamplesPerLine; ++s)
+    {
+      double lat = minLat + (maxLat - minLat) * s / kSamplesPerLine;
+      auto cur = toSub(lat, lon);
+      emit(prev, cur);
+      prev = cur;
+    }
+  }
+  // Parallels (constant lat).
+  const double startLat = std::ceil(minLat / latStep) * latStep;
+  for (double lat = startLat; lat <= maxLat + latStep * 0.5; lat += latStep)
+  {
+    auto prev = toSub(lat, minLon);
+    for (int s = 1; s <= kSamplesPerLine; ++s)
+    {
+      double lon = minLon + (maxLon - minLon) * s / kSamplesPerLine;
+      auto cur = toSub(lat, lon);
+      emit(prev, cur);
+      prev = cur;
+    }
+  }
+  return out;
+}
+
+void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
+{
+  const Rgb gridColor{120, 120, 120};
 
   auto plot = [&](int x, int y) {
     if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
@@ -1650,44 +1695,83 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
     }
   };
 
-  // Draw segment only when both endpoints are valid AND the jump is small
-  // enough to be a real adjacent pair (catches antimeridian wraps that the
-  // round-trip can't see).
-  auto drawSegment = [&](const std::optional<std::pair<int, int>>& a,
-                         const std::optional<std::pair<int, int>>& b) {
-    if (!a || !b) return;
-    if (std::abs(b->first - a->first) >= subWidth / 2) return;
-    if (std::abs(b->second - a->second) >= subHeight / 2) return;
-    drawLine(a->first, a->second, b->first, b->second);
+  for (const auto& s : traceGraticuleSegments(subWidth, subHeight))
+    drawLine(s[0], s[1], s[2], s[3]);
+}
+
+void App::appendGraticuleBraille(std::ostringstream& os, const std::vector<Rgb>& pixels,
+                                 int subWidth, int originRow, int originCol) const
+{
+  if (subWidth <= 0) return;
+  const int subRows = subRowsForStyle(itsCornerStyle);
+  const int cellW = subWidth / 2;
+  const int subHeight = static_cast<int>(pixels.size()) / std::max(1, subWidth);
+  const int cellH = subHeight / subRows;
+  if (cellW <= 0 || cellH <= 0) return;
+
+  // Higher-resolution sub-cell grid for the line: 2 cols × 4 rows per cell.
+  const int bW = cellW * 2;
+  const int bH = cellH * 4;
+  std::vector<unsigned char> mask(static_cast<std::size_t>(bW) * bH, 0);
+
+  auto plot = [&](int x, int y) {
+    if (x >= 0 && x < bW && y >= 0 && y < bH)
+      mask[static_cast<std::size_t>(y) * bW + x] = 1;
   };
 
-  constexpr int kSamplesPerLine = 60;
-
-  // Meridians (constant lon). Snap start to nearest multiple of step.
-  const double startLon = std::ceil(minLon / lonStep) * lonStep;
-  for (double lon = startLon; lon <= maxLon + lonStep * 0.5; lon += lonStep)
-  {
-    auto prev = toSub(minLat, lon);
-    for (int s = 1; s <= kSamplesPerLine; ++s)
+  auto drawLine = [&](int x0, int y0, int x1, int y1) {
+    int dx = std::abs(x1 - x0);
+    int dy = -std::abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    while (true)
     {
-      double lat = minLat + (maxLat - minLat) * s / kSamplesPerLine;
-      auto cur = toSub(lat, lon);
-      drawSegment(prev, cur);
-      prev = cur;
+      plot(x0, y0);
+      if (x0 == x1 && y0 == y1) break;
+      int e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  };
+
+  for (const auto& s : traceGraticuleSegments(bW, bH))
+    drawLine(s[0], s[1], s[2], s[3]);
+
+  const Rgb gridColor{120, 120, 120};
+  std::string out;
+  out.reserve(static_cast<std::size_t>(cellW) * 16);
+  for (int cy = 0; cy < cellH; ++cy)
+  {
+    for (int cx = 0; cx < cellW; ++cx)
+    {
+      unsigned cellMask = 0;
+      for (int sy = 0; sy < 4; ++sy)
+      {
+        for (int sx = 0; sx < 2; ++sx)
+        {
+          const int bx = cx * 2 + sx;
+          const int by = cy * 4 + sy;
+          if (mask[static_cast<std::size_t>(by) * bW + bx] != 0U)
+            cellMask |= 1U << brailleBit(sx, sy);
+        }
+      }
+      if (cellMask == 0U) continue;
+      const Rgb bg = pixels[static_cast<std::size_t>(cy * subRows) * subWidth + (cx * 2)];
+      out += "\x1b[";
+      out += std::to_string(originRow + cy + 1);
+      out += ';';
+      out += std::to_string(originCol + cx + 1);
+      out += 'H';
+      out += itsRenderer.bgEscape(bg);
+      out += itsRenderer.fgEscape(gridColor);
+      out += brailleGlyph(cellMask);
     }
   }
-  // Parallels (constant lat).
-  const double startLat = std::ceil(minLat / latStep) * latStep;
-  for (double lat = startLat; lat <= maxLat + latStep * 0.5; lat += latStep)
+  if (!out.empty())
   {
-    auto prev = toSub(lat, minLon);
-    for (int s = 1; s <= kSamplesPerLine; ++s)
-    {
-      double lon = minLon + (maxLon - minLon) * s / kSamplesPerLine;
-      auto cur = toSub(lat, lon);
-      drawSegment(prev, cur);
-      prev = cur;
-    }
+    out += "\x1b[0m";
+    os << out;
   }
 }
 
@@ -2966,7 +3050,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
     case 'n':
     case 'N':
-      itsShowGraticule = !itsShowGraticule;
+      itsGraticuleStyle = nextLineStyle(itsGraticuleStyle);
+      itsLastMessage = std::string("Graticule: ") + lineStyleLabel(itsGraticuleStyle);
       return true;
 
     case 'w':
@@ -3273,9 +3358,9 @@ void App::drawMap(UI& ui)
     float dMin = 0;
     float dMax = 0;
     auto pixels = sampleSlice(subW, subH, dMin, dMax);
-    if (itsShowGraticule) overlayGraticule(pixels, subW, subH);
     // Thick mode rasterises into the data buffer before the renderer so the
     // line shows as a half-cell quadrant block.
+    if (itsGraticuleStyle == LineStyle::Thick) overlayGraticule(pixels, subW, subH);
     if (itsCoastlineStyle == LineStyle::Thick)
       overlayPolylines(pixels, subW, subH, itsCoastlines, Rgb{0, 0, 0});
     if (itsBorderStyle == LineStyle::Thick)
@@ -3289,6 +3374,8 @@ void App::drawMap(UI& ui)
 
     // Braille mode draws on top of the rendered quadrant blocks so the
     // line is just a few dots wide; data colour shows through behind it.
+    if (itsGraticuleStyle == LineStyle::Braille)
+      appendGraticuleBraille(os, pixels, subW, r.row, r.col);
     if (itsCoastlineStyle == LineStyle::Braille)
       appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subW, r.row, r.col);
     if (itsBorderStyle == LineStyle::Braille)

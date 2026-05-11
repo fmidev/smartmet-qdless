@@ -729,7 +729,7 @@ void UI::popupHelp(HelpContext ctx)
   add("t", "Cell style: sextants \xe2\x86\x92 triangles \xe2\x86\x92 squares (font fallback)");
   if (!noProj)
   {
-    add("n", "Toggle lat/lon graticule");
+    add("n", "Graticule: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
     if (!ctx.isShape) add("w", "Toggle wind arrows");
     add("i", "Toggle city overlay");
     add("PgUp PgDn", "Cities: sparser / denser");
