@@ -1605,13 +1605,28 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
 
   const Rgb gridColor{120, 120, 120};
 
-  auto toSub = [&](double lat, double lon) -> std::pair<int, int> {
+  // Projected sources (e.g. rotated lat/lon) cover a geographic bbox larger
+  // than the actual data region — meridian/parallel samples near the bbox
+  // edges fall outside the grid. For those points latLonToUV silently falls
+  // back to bbox interpolation, producing a (u, v) that doesn't correspond
+  // to where this lat/lon is on the projection and drawing spurious line
+  // segments that hug the viewport edges. A round-trip distinguishes the
+  // two cases: in-grid points hit the same projection in both directions
+  // and round-trip to floating-point precision; fallback points diverge.
+  auto toSub = [&](double lat, double lon) -> std::optional<std::pair<int, int>> {
     double u = 0;
     double v = 0;
     itsSource->latLonToUV(lat, lon, u, v);
+    double latBack = 0;
+    double lonBack = 0;
+    itsSource->uvToLatLon(u, v, latBack, lonBack);
+    double dlon = std::fmod(std::abs(lon - lonBack), 360.0);
+    if (dlon > 180.0) dlon = 360.0 - dlon;
+    if (std::abs(lat - latBack) > 0.5 || dlon > 0.5) return std::nullopt;
     const double u01 = (u - itsViewport.uMin) / spanU;
     const double v01 = (v - itsViewport.vMin) / spanV;
-    return {static_cast<int>(u01 * subWidth), static_cast<int>(v01 * subHeight)};
+    return std::pair<int, int>{static_cast<int>(u01 * subWidth),
+                               static_cast<int>(v01 * subHeight)};
   };
 
   auto plot = [&](int x, int y) {
@@ -1635,6 +1650,17 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
     }
   };
 
+  // Draw segment only when both endpoints are valid AND the jump is small
+  // enough to be a real adjacent pair (catches antimeridian wraps that the
+  // round-trip can't see).
+  auto drawSegment = [&](const std::optional<std::pair<int, int>>& a,
+                         const std::optional<std::pair<int, int>>& b) {
+    if (!a || !b) return;
+    if (std::abs(b->first - a->first) >= subWidth / 2) return;
+    if (std::abs(b->second - a->second) >= subHeight / 2) return;
+    drawLine(a->first, a->second, b->first, b->second);
+  };
+
   constexpr int kSamplesPerLine = 60;
 
   // Meridians (constant lon). Snap start to nearest multiple of step.
@@ -1646,9 +1672,7 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
     {
       double lat = minLat + (maxLat - minLat) * s / kSamplesPerLine;
       auto cur = toSub(lat, lon);
-      if (std::abs(cur.first - prev.first) < subWidth &&
-          std::abs(cur.second - prev.second) < subHeight)
-        drawLine(prev.first, prev.second, cur.first, cur.second);
+      drawSegment(prev, cur);
       prev = cur;
     }
   }
@@ -1661,9 +1685,7 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
     {
       double lon = minLon + (maxLon - minLon) * s / kSamplesPerLine;
       auto cur = toSub(lat, lon);
-      if (std::abs(cur.first - prev.first) < subWidth &&
-          std::abs(cur.second - prev.second) < subHeight)
-        drawLine(prev.first, prev.second, cur.first, cur.second);
+      drawSegment(prev, cur);
       prev = cur;
     }
   }

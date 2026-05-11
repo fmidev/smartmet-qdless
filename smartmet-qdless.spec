@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.5.10
-Release: 23%{?dist}.fmi
+Version: 26.5.11
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -108,6 +108,19 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Mon May 11 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.11-1.fmi
+- Fix: graticule overlay no longer draws spurious lines hugging the
+  viewport edges on projected sources (e.g. rotated lat/lon). Such
+  projections cover a geographic bbox larger than the actual data
+  region, and meridian/parallel samples near the bbox edges fall
+  outside the grid; NFmiArea::LatLonToWorldXY then silently falls
+  back to bbox interpolation, returning a (u, v) that doesn't
+  correspond to the projection of the sampled lat/lon. The graticule
+  drawer now round-trips each sample through uvToLatLon and skips
+  any point whose round-trip diverges by more than 0.5 degrees, and
+  refuses to draw segments whose endpoint jump exceeds half the
+  viewport (catches antimeridian wraps the round-trip can't see).
+
 * Sun May 10 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.10-23.fmi
 - Drop the smartmet-library-imagine dependency. PNG export now
   goes through GDAL's PNG driver (CreateCopy from an in-memory
