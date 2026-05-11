@@ -924,7 +924,7 @@ void App::loadPalette()
   panel.palette = Palette::builtinRamp(lo, hi);
 }
 
-void App::loadCoastlines()
+void App::loadCoastlines(int subPixelsW, int subPixelsH)
 {
   // Estimate the visible lat/lon extent for picking GSHHS resolution by
   // sampling the four viewport corners through the projection. Works for
@@ -944,11 +944,30 @@ void App::loadCoastlines()
       minLon = std::min(minLon, lon);
       maxLon = std::max(maxLon, lon);
     }
-  const auto span = static_cast<float>(std::max(maxLon - minLon, maxLat - minLat));
+
+  // Startup path passes 0 because the UI hasn't laid out yet; fall back
+  // to the raw terminal size. Use Braille's sub-pixel multipliers (2×
+  // horizontal, 4× vertical), which is the finest grid the coastline
+  // can actually be drawn at — picking against the finer grid ensures
+  // the chosen file resolves smoothly even when Braille is active.
+  if (subPixelsW <= 0 || subPixelsH <= 0)
+  {
+    const auto ts = terminalSize();
+    subPixelsW = std::max(1, ts.cols) * 2;
+    subPixelsH = std::max(1, ts.rows) * 4;
+  }
+  const float lonSpan = static_cast<float>(maxLon - minLon);
+  const float latSpan = static_cast<float>(maxLat - minLat);
+  const float dppLon = lonSpan / static_cast<float>(std::max(1, subPixelsW));
+  const float dppLat = latSpan / static_cast<float>(std::max(1, subPixelsH));
+  // Take the finer (smaller) axis so the polyline reads smooth in both
+  // directions; clamp to a tiny positive to keep degenerate viewports
+  // out of the densest branch.
+  const float degPerPix = std::max(1e-6F, std::min(dppLon, dppLat));
 
   if (itsCoastlineStyle != LineStyle::None)
   {
-    auto path = Coastline::pickFile(itsOpts.coastlineDir, "GSHHS", span);
+    auto path = Coastline::pickFile(itsOpts.coastlineDir, "GSHHS", degPerPix);
     if (!path.empty() && path != itsCoastlinePath)
     {
       itsCoastlines = Coastline::read(path, itsOpts.minLakeAreaKm2, itsOpts.minLakeRoundness,
@@ -958,7 +977,7 @@ void App::loadCoastlines()
   }
   if (itsBorderStyle != LineStyle::None)
   {
-    auto path = Coastline::pickFile(itsOpts.coastlineDir, "border", span);
+    auto path = Coastline::pickFile(itsOpts.coastlineDir, "border", degPerPix);
     if (!path.empty() && path != itsBorderPath)
     {
       itsBorders = Coastline::read(path);
@@ -3329,9 +3348,12 @@ void App::drawMap(UI& ui)
   const auto& l = ui.layout();
   if (l.map.height < 2 || l.map.width < 2) return;
 
-  // Re-pick coastline resolution for the current viewport. Cheap when the
-  // selected file is unchanged; reads ~100ms at h-resolution worst case.
-  loadCoastlines();
+  // Re-pick coastline resolution for the current viewport / map size.
+  // Cheap when the selected file is unchanged; reads ~100ms at
+  // h-resolution worst case. Sub-pixel dims use Braille's 2×4 grid —
+  // the finest path the coastline can be drawn at — so the choice holds
+  // up regardless of which line style is active.
+  loadCoastlines(l.map.width * 2, l.map.height * 4);
 
   const auto rects = currentPanelRects(l.map.row, l.map.col, l.map.height, l.map.width);
 

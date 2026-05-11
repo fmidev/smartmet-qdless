@@ -201,17 +201,23 @@ std::vector<Polyline> Coastline::read(const std::string& filename, double minLak
 
 std::string Coastline::pickFile(const std::string& dir,
                                 const std::string& kind,
-                                float span)
+                                float degreesPerPix)
 {
-  // Pick the densest resolution still appropriate for the viewport span.
-  // c (crude) ≈ 25 km, l (low) ≈ 5 km, i (intermediate) ≈ 1 km, h (high) ≈ 200 m.
-  const char* res = "c";
-  if (span < 3.0F)
-    res = "h";
-  else if (span < 15.0F)
-    res = "i";
-  else if (span < 60.0F)
+  // Approx GSHHS vertex spacings (deg of arc at the equator):
+  //   c (crude)        ≈ 0.25°  (~25 km)
+  //   l (low)          ≈ 0.05°  (~5 km)
+  //   i (intermediate) ≈ 0.01°  (~1 km)
+  //   h (high)         ≈ 0.002° (~200 m)
+  // Pick the coarsest file whose vertex spacing is still ≤ pixel size,
+  // so each vertex lands in its own pixel — anything coarser draws as
+  // straight chords the user can see; anything denser is wasted detail.
+  const char* res = "h";
+  if (degreesPerPix >= 0.25F)
+    res = "c";
+  else if (degreesPerPix >= 0.05F)
     res = "l";
+  else if (degreesPerPix >= 0.01F)
+    res = "i";
 
   std::filesystem::path candidate = std::filesystem::path(dir) /
                                     ("binned_" + kind + "_" + res + ".nc");

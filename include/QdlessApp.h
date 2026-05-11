@@ -131,7 +131,11 @@ class App
  private:
   void buildIndices();
   void loadPalette();
-  void loadCoastlines();
+  // subPixelsW / subPixelsH are the sub-pixel dimensions the coastline
+  // will be rendered into (cellW*2, cellH*4 for Braille — the finest
+  // path). Pass 0 to derive them from the current terminal size — used
+  // by the startup path before the UI has been laid out.
+  void loadCoastlines(int subPixelsW = 0, int subPixelsH = 0);
 
   std::vector<Rgb> sampleSlice(int subWidth, int subHeight, float& dataMin,
                                float& dataMax) const;

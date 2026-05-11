@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.11
-Release: 2%{?dist}.fmi
+Release: 3%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -108,6 +108,17 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Mon May 11 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.11-3.fmi
+- GSHHS resolution now scales with screen resolution, not just data
+  resolution. Coastline::pickFile takes degrees-per-pixel and selects
+  the coarsest GSHHS whose vertex spacing still resolves a distinct
+  pixel; loadCoastlines feeds it the Braille sub-pixel grid
+  (cellW*2 × cellH*4, the finest path) and the finer viewport axis so
+  the polyline reads smooth in both directions. Fixes coastlines
+  rendering polygonally on wide terminals at moderate spans, e.g. a
+  ~13° Nordic view on a 280-sub-pixel-wide terminal now picks `i`
+  (1 km) instead of `l` (5 km).
+
 * Mon May 11 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.11-2.fmi
 - `n` now cycles the graticule the same way `c` / `b` cycle coastlines
   and borders: Braille → Thick → Off. Braille is the new default — the

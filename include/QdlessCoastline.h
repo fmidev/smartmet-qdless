@@ -37,10 +37,19 @@ class Coastline
                                     double minIslandAreaKm2 = 0.0);
 
   // Pick the best-matching resolution file from a directory.
-  //   dir   – e.g. "/usr/share/gshhg-gmt-nc4"
-  //   kind  – "GSHHS", "border" or "river"
-  //   span  – max(lonSpan, latSpan) in degrees
+  //   dir            – e.g. "/usr/share/gshhg-gmt-nc4"
+  //   kind           – "GSHHS", "border" or "river"
+  //   degreesPerPix  – on-screen degrees per sub-pixel for the visible
+  //                    viewport (use the finer axis when they differ so
+  //                    the polyline reads smooth in both directions).
+  //
+  // Picks the coarsest GSHHS resolution whose vertex spacing still resolves
+  // to a distinct pixel at this zoom — anything coarser looks polygonal,
+  // anything denser wastes memory on vertices the terminal can't draw.
+  // Approx vertex spacings: c≈0.25°, l≈0.05°, i≈0.01°, h≈0.002°.
+  //
   // Returns "" if no suitable file is found.
-  static std::string pickFile(const std::string& dir, const std::string& kind, float span);
+  static std::string pickFile(const std::string& dir, const std::string& kind,
+                              float degreesPerPix);
 };
 }  // namespace Qdless
