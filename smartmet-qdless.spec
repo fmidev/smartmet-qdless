@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.5.11
-Release: 3%{?dist}.fmi
+Version: 26.5.14
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -108,6 +108,18 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Thu May 14 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.14-1.fmi
+- PNG-tree browser: --dir on a directory with subdirs (and no image
+  files directly at the root) opens a leaf picker at startup instead of
+  requiring the full leaf path on the command line. Searchable flat
+  list by default; Tab toggles a column navigator. [D] reopens the
+  picker; status bar shows [D]Browse in tree mode.
+- Cross-section: hovering the mouse over the chart now highlights the
+  corresponding (lat, lon) on the map with a yellow dot. The
+  great-circle line and its two endpoints are drawn on the map while
+  the cross-section is active, and the popup docks to the half of the
+  screen opposite the line's midpoint so the line and dot stay visible.
+
 * Mon May 11 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.11-3.fmi
 - GSHHS resolution now scales with screen resolution, not just data
   resolution. Coastline::pickFile takes degrees-per-pixel and selects
