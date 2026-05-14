@@ -95,6 +95,28 @@ class DataSource
   // those entries a string tag instead of a meaningless numeric value.
   virtual std::string levelLabel(std::size_t i) const;
 
+  // Cross-section axis hints. Default sources put one row per level on
+  // the Y-axis (suits pressure/hybrid data). Sources that know how to
+  // sample at arbitrary heights (PVOL polar volumes) override
+  // hasNativeHeight() to true so the cross-section becomes a true RHI:
+  // Y-axis is km, sampled via interpolatedValueAtHeight() per pixel.
+  virtual bool hasNativeHeight() const { return false; }
+
+  // Y-axis span for the height-mode cross-section, in kilometres above
+  // the source's reference (radar antenna for PVOL). Only consulted
+  // when hasNativeHeight() is true. Default covers troposphere.
+  virtual std::pair<double, double> heightRangeKm() const { return {0.0, 12.0}; }
+
+  // Sample the active (param, time) slice at a 3D point. Default falls
+  // back to interpolatedValue() ignoring the height. PVOL inverts the
+  // 4/3-Earth beam-height formula to find which sweep covers (lat,lon,h)
+  // and reads the corresponding (ray, bin).
+  virtual float interpolatedValueAtHeight(double lat, double lon,
+                                          double /*heightKm*/) const
+  {
+    return interpolatedValue(lat, lon);
+  }
+
   // Sample the currently-selected (param, time, level) slice at a given
   // lat/lon. Returns kFloatMissing or non-finite for missing / out-of-grid.
   virtual float interpolatedValue(double lat, double lon) const = 0;

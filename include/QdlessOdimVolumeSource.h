@@ -56,6 +56,10 @@ class OdimVolumeSource : public DataSource
   float levelValueAt(std::size_t i) const override;
   std::string levelLabel(std::size_t i) const override;
   bool levelsAscendWithValue() const override { return true; }
+  bool hasNativeHeight() const override { return true; }
+  std::pair<double, double> heightRangeKm() const override;
+  float interpolatedValueAtHeight(double lat, double lon,
+                                  double heightKm) const override;
 
   float interpolatedValue(double lat, double lon) const override;
   LatLonBox boundingBox() const override;

@@ -1434,44 +1434,7 @@ void App::drawCrossSection(UI& ui)
   const double lat2 = itsCrossLat2;
   const double lon2 = itsCrossLon2;
 
-  const int nLevels = static_cast<int>(itsSource->levelCount());
-  if (nLevels < 2) return;
-
-  // Collect level values + sort indices so the popup shows high altitude /
-  // low pressure on top.
-  std::vector<float> levelValues(nLevels);
-  std::vector<std::string> levelLabels_(nLevels);
-  const std::size_t savedLevel = itsSource->currentLevelIndex();
-  for (int i = 0; i < nLevels; ++i)
-  {
-    levelValues[i] = itsSource->levelValueAt(i);
-    levelLabels_[i] = itsSource->levelLabel(static_cast<std::size_t>(i));
-  }
-  std::vector<int> levelOrder(nLevels);
-  std::iota(levelOrder.begin(), levelOrder.end(), 0);
-  // Pressure-style (default): smaller value = higher altitude; show
-  // smallest at top. Height-style (elangle, height-in-m): larger value =
-  // higher altitude; show largest at top so ground sits at the bottom.
-  const bool ascend = itsSource->levelsAscendWithValue();
-  std::sort(levelOrder.begin(), levelOrder.end(),
-            [&](int a, int b) {
-              return ascend ? levelValues[a] > levelValues[b]
-                            : levelValues[a] < levelValues[b];
-            });
-
-  // Layout: chartW columns x nLevels rows.
-  const int desiredW = std::min(80, COLS - 16);
-  const int chartW = std::max(20, desiredW);
-  const int chartH = nLevels;
-  const int subRows = subRowsForStyle(itsCornerStyle);
-  const int subW = chartW * 2;
-  const int subH = chartH * subRows;
-
-  // Compute label width for level labels.
-  int labelW = 0;
-  for (const auto& s : levelLabels_)
-    labelW = std::max(labelW, static_cast<int>(s.size()));
-  labelW = std::max(labelW, 4);
+  const bool heightMode = itsSource->hasNativeHeight();
 
   // Haversine distance for the X-axis scale.
   auto haversineKm = [](double la1, double lo1, double la2, double lo2) {
@@ -1485,24 +1448,122 @@ void App::drawCrossSection(UI& ui)
   };
   const double totalKm = haversineKm(lat1, lon1, lat2, lon2);
 
-  // Sample.
-  std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH);
-  for (int li = 0; li < nLevels; ++li)
+  // Per-row labels. In level mode the rows correspond to source levels
+  // (sorted into draw order); in height mode they're heights in km
+  // spanning the source's heightRangeKm().
+  std::vector<std::string> rowLabels;
+  std::vector<int> levelOrder;  // populated only in level mode
+
+  double heightLoKm = 0;
+  double heightHiKm = 0;
+  int chartH = 0;
+
+  std::size_t savedLevel = itsSource->currentLevelIndex();
+
+  if (heightMode)
   {
-    const int srcLevel = levelOrder[li];  // model index
-    itsSource->selectLevelIndex(static_cast<unsigned long>(srcLevel));
-    for (int sx = 0; sx < subW; ++sx)
+    auto range = itsSource->heightRangeKm();
+    heightLoKm = range.first;
+    heightHiKm = range.second;
+    // One chart row per 1 km when the span is small, else cap at 16 so
+    // the popup still fits a standard 24-row terminal.
+    const double span = heightHiKm - heightLoKm;
+    chartH = std::clamp(static_cast<int>(std::round(span)), 6, 16);
+    rowLabels.reserve(chartH);
+    for (int cy = 0; cy < chartH; ++cy)
     {
-      const double frac = (static_cast<double>(sx) + 0.5) / subW;
-      const double lat = lat1 + frac * (lat2 - lat1);
-      const double lon = lon1 + frac * (lon2 - lon1);
-      const float val = transform(itsSource->interpolatedValue(lat, lon));
-      const Rgb c = activePanel().palette.lookup(val);
-      for (int sr = 0; sr < subRows; ++sr)
-        pixels[static_cast<std::size_t>(li * subRows + sr) * subW + sx] = c;
+      // Row cy spans [heightHiKm − cy·step, heightHiKm − (cy+1)·step].
+      // Label with the row's top edge — gives clean "12, 11, …, 1, 0".
+      const double top_km = heightHiKm - (heightHiKm - heightLoKm) *
+                                              static_cast<double>(cy) /
+                                              static_cast<double>(chartH);
+      rowLabels.push_back(fmt::format("{:g} km", top_km));
     }
   }
-  itsSource->selectLevelIndex(savedLevel);
+  else
+  {
+    const int nLevels = static_cast<int>(itsSource->levelCount());
+    if (nLevels < 2) return;
+    chartH = nLevels;
+    std::vector<float> levelValues(nLevels);
+    rowLabels.assign(nLevels, std::string{});
+    for (int i = 0; i < nLevels; ++i)
+    {
+      levelValues[i] = itsSource->levelValueAt(i);
+      rowLabels[i] = itsSource->levelLabel(static_cast<std::size_t>(i));
+    }
+    levelOrder.resize(nLevels);
+    std::iota(levelOrder.begin(), levelOrder.end(), 0);
+    // Pressure-style: smaller value = higher altitude (smallest at top).
+    // Height-style on non-RHI sources: largest at top so ground sits low.
+    const bool ascend = itsSource->levelsAscendWithValue();
+    std::sort(levelOrder.begin(), levelOrder.end(),
+              [&](int a, int b) {
+                return ascend ? levelValues[a] > levelValues[b]
+                              : levelValues[a] < levelValues[b];
+              });
+    // Reorder labels to match draw order.
+    std::vector<std::string> tmp(nLevels);
+    for (int i = 0; i < nLevels; ++i) tmp[i] = rowLabels[levelOrder[i]];
+    rowLabels = std::move(tmp);
+  }
+
+  // Layout.
+  const int desiredW = std::min(80, COLS - 16);
+  const int chartW = std::max(20, desiredW);
+  const int subRows = subRowsForStyle(itsCornerStyle);
+  const int subW = chartW * 2;
+  const int subH = chartH * subRows;
+
+  // Compute label width for row labels.
+  int labelW = 0;
+  for (const auto& s : rowLabels)
+    labelW = std::max(labelW, static_cast<int>(s.size()));
+  labelW = std::max(labelW, 4);
+
+  // Sample.
+  std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH);
+  if (heightMode)
+  {
+    // Per-pixel sampling: each pixel (sy, sx) has its own (h, lat, lon).
+    // The top sub-row maps to heightHiKm, the bottom to heightLoKm.
+    for (int sy = 0; sy < subH; ++sy)
+    {
+      const double v = static_cast<double>(sy) + 0.5;
+      const double h_km =
+          heightHiKm - (heightHiKm - heightLoKm) * v / static_cast<double>(subH);
+      for (int sx = 0; sx < subW; ++sx)
+      {
+        const double frac = (static_cast<double>(sx) + 0.5) / subW;
+        const double lat = lat1 + frac * (lat2 - lat1);
+        const double lon = lon1 + frac * (lon2 - lon1);
+        const float val = transform(itsSource->interpolatedValueAtHeight(lat, lon, h_km));
+        pixels[static_cast<std::size_t>(sy) * subW + sx] =
+            activePanel().palette.lookup(val);
+      }
+    }
+  }
+  else
+  {
+    // One sweep per chart row, sampled at the line position only.
+    const int nLevels = chartH;
+    for (int li = 0; li < nLevels; ++li)
+    {
+      const int srcLevel = levelOrder[li];
+      itsSource->selectLevelIndex(static_cast<unsigned long>(srcLevel));
+      for (int sx = 0; sx < subW; ++sx)
+      {
+        const double frac = (static_cast<double>(sx) + 0.5) / subW;
+        const double lat = lat1 + frac * (lat2 - lat1);
+        const double lon = lon1 + frac * (lon2 - lon1);
+        const float val = transform(itsSource->interpolatedValue(lat, lon));
+        const Rgb c = activePanel().palette.lookup(val);
+        for (int sr = 0; sr < subRows; ++sr)
+          pixels[static_cast<std::size_t>(li * subRows + sr) * subW + sx] = c;
+      }
+    }
+    itsSource->selectLevelIndex(savedLevel);
+  }
 
   // Build raw-ANSI popup.
   // Width: border + label + " ┤ " + chart + border = 2 + labelW + 3 + chartW
@@ -1570,7 +1631,7 @@ void App::drawCrossSection(UI& ui)
     pos(1 + cy);
     os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m ";
     // Label.
-    os << fmt::format("{:>{}}", levelLabels_[levelOrder[cy]], labelW) << " \xe2\x94\xa4";
+    os << fmt::format("{:>{}}", rowLabels[cy], labelW) << " \xe2\x94\xa4";
 
     // Render this row's chart cells using a tiny Renderer call.
     // Build the slice: subRows sub-rows of pixels for this level.

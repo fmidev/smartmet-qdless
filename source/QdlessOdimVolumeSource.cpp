@@ -287,6 +287,60 @@ float OdimVolumeSource::sampleSweep(const Sweep& s, double x, double y) const
   return static_cast<float>(s.gain * dv + s.offset);
 }
 
+std::pair<double, double> OdimVolumeSource::heightRangeKm() const
+{
+  // Heights radar beams can plausibly reach within the file's range. Cap
+  // at 15 km — high enough for any tropopause-piercing storm, low enough
+  // that the chart Y-axis labels stay readable at 1 km/row.
+  if (itsSweeps.empty()) return {0.0, 15.0};
+  const double R_e = 4.0 / 3.0 * 6371000.0;
+  const double r = itsMaxRange;
+  const double a = itsSweeps.back().elangle * M_PI / 180.0;
+  const double h_m = r * std::sin(a) + r * r / (2.0 * R_e);
+  const double h_km = std::min(15.0, std::ceil(h_m / 1000.0));
+  return {0.0, std::max(2.0, h_km)};
+}
+
+float OdimVolumeSource::interpolatedValueAtHeight(double lat, double lon,
+                                                  double heightKm) const
+{
+  if (!itsArea || itsSweeps.empty())
+    return std::numeric_limits<float>::quiet_NaN();
+
+  const NFmiPoint world = itsArea->LatLonToWorldXY(NFmiPoint(lon, lat));
+  const double x = world.X();
+  const double y = world.Y();
+  const double rGround = std::hypot(x, y);
+  if (rGround <= 0) return std::numeric_limits<float>::quiet_NaN();
+
+  // Invert Doviak & Zrnić beam-height: h = R sin α + R²/(2 R_eff), with
+  // R ≈ r_ground (low-α approximation). Solve for sin α.
+  const double R_e = 4.0 / 3.0 * 6371000.0;
+  const double h_m = heightKm * 1000.0;
+  const double sinAlpha = (h_m - rGround * rGround / (2.0 * R_e)) / rGround;
+  if (sinAlpha < -0.05 || sinAlpha > 1.0)
+    return std::numeric_limits<float>::quiet_NaN();
+  const double alphaDeg = std::asin(std::clamp(sinAlpha, -1.0, 1.0)) * 180.0 / M_PI;
+
+  // Snap to the closest sweep. With 10 sweeps spanning 0.5°–23.8° the
+  // gap between adjacent elangles is 1.5°–4°; snapping makes the
+  // boundaries between sweeps visible as gentle steps in the RHI, which
+  // is faithful to what the radar actually measured (no fake smoothness
+  // between unobserved heights).
+  std::size_t best = 0;
+  double bestDelta = std::abs(itsSweeps[0].elangle - alphaDeg);
+  for (std::size_t i = 1; i < itsSweeps.size(); ++i)
+  {
+    const double d = std::abs(itsSweeps[i].elangle - alphaDeg);
+    if (d < bestDelta)
+    {
+      bestDelta = d;
+      best = i;
+    }
+  }
+  return sampleSweep(itsSweeps[best], x, y);
+}
+
 float OdimVolumeSource::interpolatedValue(double lat, double lon) const
 {
   if (!itsArea) return std::numeric_limits<float>::quiet_NaN();
