@@ -46,15 +46,18 @@ class UI
 
   void drawTimeline(const std::string& label, int idx, int total);
   // Status-bar layout shifts based on the source kind:
-  //   imageMode  — naked image (PNG/WebP/...): drop param/level/
-  //                legend/projection-dependent overlays/probe.
-  //   shapeMode  — shapefile / PostGIS layer: keep the full bar and
-  //                add [O]utlines + [R]ainbow + [A]ttrs.
-  //   pgMode     — PostGIS connection: also offer [D]Tables to
-  //                re-open the layer picker.
+  //   imageMode   — naked image (PNG/WebP/...): drop param/level/
+  //                 legend/projection-dependent overlays/probe.
+  //   shapeMode   — shapefile / PostGIS layer: keep the full bar and
+  //                 add [O]utlines + [R]ainbow + [A]ttrs.
+  //   pgMode      — PostGIS connection: also offer [D]Tables to
+  //                 re-open the layer picker.
+  //   browseMode  — --dir tree mode: offer [D]Browse to re-open the
+  //                 PNG-tree picker. Coexists with imageMode (the
+  //                 picked leaf loads as a multi-file image source).
   // imageMode wins when both image and shape flags are set.
   void drawStatusBar(bool imageMode = false, bool shapeMode = false,
-                     bool pgMode = false);
+                     bool pgMode = false, bool browseMode = false);
 
 
   // Re-blank ncurses windows (after popup close). Caller redraws map.
@@ -62,8 +65,10 @@ class UI
 
   // Centred popup menu. Returns 0-based index, or -1 if Esc cancelled.
   // Items beyond hotkey-able count are reachable via arrow keys + Enter.
+  // When `allowTab` is true, pressing Tab returns kPopupSearchTab so the
+  // caller can switch to a sibling view (matches popupSearch).
   int popupMenu(const std::string& title, const std::vector<std::string>& items,
-                int currentIndex);
+                int currentIndex, bool allowTab = false);
 
   // Centred legend popup showing palette colour swatches and value ranges.
   // The two title strings appear on two stacked rows so the popup can stay
@@ -109,10 +114,13 @@ class UI
   // Live-filter search popup. The matcher is invoked on every keystroke
   // with the current query string and must return formatted display rows.
   // Returns the 0-based index into the matcher's last result, or -1 on
-  // cancel (Esc).
+  // cancel (Esc). When `allowTab` is true, pressing Tab closes the popup
+  // and returns kPopupSearchTab so the caller can switch to a sibling
+  // view (e.g. a column-navigator picker that shares the same dataset).
+  static constexpr int kPopupSearchTab = -2;
   int popupSearch(const std::string& title,
                   std::function<std::vector<std::string>(const std::string&)> matcher,
-                  const std::string& header = {});
+                  const std::string& header = {}, bool allowTab = false);
 
   // Min/mean/max series across the visible viewport, one float per time
   // step, used as a translucent overlay on popupTimeseries when 's' is

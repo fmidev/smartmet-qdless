@@ -31,6 +31,13 @@ struct Options
   std::string pgConn;
   std::string pgSchema;
   std::string pgTable;
+  // PNG-tree browser mode. When `browseRoot` is non-empty the App walks
+  // the directory tree at startup, lists every leaf directory that
+  // directly contains *.png files, and presents a picker. Set by
+  // `--dir <root>` when the argument does not contain image files
+  // directly (so the existing flat --dir behaviour is preserved when
+  // the user points at a single animation directory).
+  std::string browseRoot;
   std::string paletteDir = "/usr/share/smartmet/qdless/palettes";
   std::string configFile = "/usr/share/smartmet/qdless/qdless.conf";
   std::string coastlineDir = "/usr/share/gshhg-gmt-nc4";
@@ -279,6 +286,26 @@ class App
   // Build a ShapeSource over a named layer of itsPgDataset. Used by
   // openPgPicker after selection and by --table direct-open.
   void openPgLayer(const std::string& schemaTable);
+
+  // PNG-tree browser. Each entry is one leaf directory found under
+  // itsOpts.browseRoot (a directory that directly contains at least
+  // one *.png). Populated lazily on the first openBrowsePicker call.
+  struct BrowseLeaf
+  {
+    std::string fullPath;
+    std::string relPath;  // path relative to itsOpts.browseRoot
+  };
+  std::vector<BrowseLeaf> itsBrowseLeaves;
+  bool itsBrowseLeavesScanned = false;
+  // Rescan the tree and refill itsBrowseLeaves. Called on every picker
+  // open so newly-arrived directories are picked up.
+  void scanBrowseTree();
+  // Open the (search + column-nav) leaf picker. Returns true if a leaf
+  // was picked (and the corresponding MultiFileSource is now active).
+  bool openBrowsePicker(UI& ui);
+  // Replace itsSource with a MultiFileSource over the given leaf
+  // directory's sorted *.png files, then run initFromSource.
+  void openBrowseLeaf(const std::string& dir);
   // All post-itsSource init: parameter resolution, panel layout,
   // palette / coastline load, etc. Pulled out of the ctor so the
   // PostGIS deferred-pick path can run it after the user picks a

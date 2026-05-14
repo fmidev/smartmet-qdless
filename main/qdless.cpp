@@ -10,12 +10,14 @@
 #include <boost/program_options.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -93,25 +95,68 @@ int main(int argc, char* argv[])
 
     // Resolve inputs: positionals + --dir contents. Multiple files build a
     // MultiFileSource; one file goes through the single-file fast path.
+    // --dir auto-detects tree mode: when the argument has subdirectories
+    // but no image files directly in it, treat it as the root of a PNG
+    // tree and hand it to App for the picker. Otherwise use today's flat
+    // behaviour. Image-extension heuristic ignores stray dotfiles like
+    // .DS_Store / .placeholder.
     if (!dirArg.empty())
     {
+      static const std::array<std::string_view, 4> kImgExts = {".png", ".webp", ".jpg",
+                                                               ".jpeg"};
+      auto isImageExt = [&](const std::filesystem::path& p) {
+        if (!p.has_extension()) return false;
+        std::string ext = p.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        for (auto e : kImgExts)
+          if (ext == e) return true;
+        return false;
+      };
       std::error_code ec;
+      bool anyImageFile = false;
+      bool anySubdir = false;
+      std::vector<std::string> rootFiles;
       for (const auto& entry : std::filesystem::directory_iterator(dirArg, ec))
       {
-        if (entry.is_regular_file()) positional.push_back(entry.path().string());
+        if (entry.is_regular_file())
+        {
+          rootFiles.push_back(entry.path().string());
+          if (isImageExt(entry.path())) anyImageFile = true;
+        }
+        else if (entry.is_directory())
+        {
+          anySubdir = true;
+        }
       }
-      std::sort(positional.begin(), positional.end());
+      if (!anyImageFile && anySubdir)
+      {
+        // Tree mode — defer the file list to the App's picker.
+        opts.browseRoot = dirArg;
+      }
+      else
+      {
+        // Flat mode: today's behaviour. Include every regular file so
+        // non-image batches (a directory of .sqd files, etc.) still
+        // work.
+        for (auto& f : rootFiles) positional.push_back(std::move(f));
+        std::sort(positional.begin(), positional.end());
+      }
     }
     if (positional.size() == 1) opts.filename = positional.front();
     else if (positional.size() > 1) opts.filenames = std::move(positional);
 
     if (vm.count("help") != 0U ||
-        (opts.filename.empty() && opts.filenames.empty() && opts.pgConn.empty()))
+        (opts.filename.empty() && opts.filenames.empty() && opts.pgConn.empty() &&
+         opts.browseRoot.empty()))
     {
       std::cout << "Usage: qdless [options] <file> [<file> ...]\n"
                 << "       qdless [options] --dir <directory>\n"
                 << "       qdless [options] --pg \"<dsn>\" "
                    "[--schema <name>] [--table schema.name]\n\n"
+                << "  --dir argument is treated as a flat animation directory\n"
+                << "  when it contains files directly, otherwise as the root\n"
+                << "  of a PNG tree to browse.\n\n"
                 << desc << '\n';
       return vm.count("help") != 0U ? 0 : 1;
     }

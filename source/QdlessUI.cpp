@@ -205,7 +205,7 @@ void UI::drawTimeline(const std::string& label, int idx, int total)
   wnoutrefresh(itsTimeWin);
 }
 
-void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode)
+void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseMode)
 {
   werase(itsStatusWin);
   // Layout: [Q]uit  [P]aram  [L]evel  Time ←→  Zoom +/-  Pan hjkl  [0]Reset  [?]Help
@@ -245,6 +245,7 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode)
     put("[/]Search", 1);
     if (!shapeMode) put("[X]Section", 1);
   }
+  if (browseMode) put("[D]Browse", 1);
   put("[?]Help", 1);
   // [Space]Play makes no sense for a single-frame source. Shape mode
   // and image mode have a static time axis; gate the entry there.
@@ -255,7 +256,7 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode)
 }
 
 int UI::popupMenu(const std::string& title, const std::vector<std::string>& items,
-                  int currentIndex)
+                  int currentIndex, bool allowTab)
 {
   if (items.empty()) return -1;
   wtimeout(itsStatusWin, -1);  // see comment in popupSearch
@@ -363,6 +364,11 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
       result = -1;
       break;
     }
+    if (allowTab && ch == '\t')
+    {
+      result = kPopupSearchTab;
+      break;
+    }
     if (ch == '\n' || ch == KEY_ENTER)
     {
       result = sel;
@@ -407,7 +413,7 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
 
 int UI::popupSearch(const std::string& title,
                     std::function<std::vector<std::string>(const std::string&)> matcher,
-                    const std::string& header)
+                    const std::string& header, bool allowTab)
 {
   // Force blocking input. The App's animation loop leaves the
   // window in non-blocking 250ms mode, which would have popupSearch
@@ -565,7 +571,10 @@ int UI::popupSearch(const std::string& title,
 
     // Footer.
     putAt(os, top + height - 2, left);
-    std::string_view footer = "\xe2\x86\x91\xe2\x86\x93 select  Enter pick  Esc cancel";
+    std::string_view footer =
+        allowTab
+            ? "\xe2\x86\x91\xe2\x86\x93 select  Enter pick  Tab browse  Esc cancel"
+            : "\xe2\x86\x91\xe2\x86\x93 select  Enter pick  Esc cancel";
     os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack
        << kEscFgWhite << ' ' << footer;
     pad(os, interiorW - 1 - utf8Width(footer));
@@ -586,6 +595,11 @@ int UI::popupSearch(const std::string& title,
     {
       touch();
       return -1;
+    }
+    if (allowTab && ch == '\t')
+    {
+      touch();
+      return kPopupSearchTab;
     }
     if (ch == '\n' || ch == KEY_ENTER)
     {

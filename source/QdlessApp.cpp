@@ -521,6 +521,12 @@ App::App(Options opts) : itsOpts(std::move(opts))
       itsSource = nullptr;
     }
   }
+  else if (!itsOpts.browseRoot.empty())
+  {
+    // PNG-tree browse mode: defer source creation until the UI is up
+    // so the picker can run (same shape as the deferred PG path).
+    itsSource = nullptr;
+  }
   else if (!itsOpts.filenames.empty() && itsOpts.filenames.size() > 1)
     itsSource = std::make_unique<MultiFileSource>(itsOpts.filenames);
   else
@@ -792,6 +798,248 @@ bool App::openPgPicker(UI& ui)
   if (sel < 0 || sel >= static_cast<int>(lastIdx.size())) return false;
   openPgLayer(entries[lastIdx[sel]].fullName);
   return true;
+}
+
+namespace
+{
+bool isPngFile(const std::filesystem::path& p)
+{
+  if (!p.has_extension()) return false;
+  std::string ext = p.extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return ext == ".png";
+}
+
+// True if the directory contains at least one *.png as a regular file.
+bool hasPngDirectChild(const std::filesystem::path& dir)
+{
+  std::error_code ec;
+  for (auto it = std::filesystem::directory_iterator(dir, ec);
+       it != std::filesystem::directory_iterator(); it.increment(ec))
+  {
+    if (ec) return false;
+    if (it->is_regular_file(ec) && isPngFile(it->path())) return true;
+  }
+  return false;
+}
+
+// Collect *.png files in `dir`, sorted by filename so the animation
+// plays in timestamp order (production filenames embed a sortable
+// timestamp prefix).
+std::vector<std::string> collectSortedPngs(const std::filesystem::path& dir)
+{
+  std::vector<std::string> out;
+  std::error_code ec;
+  for (auto it = std::filesystem::directory_iterator(dir, ec);
+       it != std::filesystem::directory_iterator(); it.increment(ec))
+  {
+    if (ec) break;
+    if (it->is_regular_file(ec) && isPngFile(it->path()))
+      out.push_back(it->path().string());
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+}  // namespace
+
+void App::scanBrowseTree()
+{
+  itsBrowseLeaves.clear();
+  itsBrowseLeavesScanned = true;
+  if (itsOpts.browseRoot.empty()) return;
+  const std::filesystem::path root(itsOpts.browseRoot);
+  std::error_code ec;
+  if (!std::filesystem::is_directory(root, ec)) return;
+
+  // Pre-order walk. A directory that directly contains PNGs is a leaf
+  // and we don't descend further into it — production trees put images
+  // in the terminal-most directory only.
+  std::vector<std::filesystem::path> stack{root};
+  while (!stack.empty())
+  {
+    auto cur = stack.back();
+    stack.pop_back();
+    if (hasPngDirectChild(cur))
+    {
+      BrowseLeaf leaf;
+      leaf.fullPath = cur.string();
+      leaf.relPath = std::filesystem::relative(cur, root, ec).string();
+      if (leaf.relPath.empty() || leaf.relPath == ".") leaf.relPath = root.filename().string();
+      itsBrowseLeaves.push_back(std::move(leaf));
+      continue;
+    }
+    std::vector<std::filesystem::path> kids;
+    for (auto it = std::filesystem::directory_iterator(cur, ec);
+         it != std::filesystem::directory_iterator(); it.increment(ec))
+    {
+      if (ec) break;
+      if (it->is_directory(ec)) kids.push_back(it->path());
+    }
+    // Sort descending so that pop_back gives ascending traversal — keeps
+    // the picker's default ordering predictable when the user opens it
+    // before typing a query.
+    std::sort(kids.rbegin(), kids.rend());
+    for (auto& k : kids) stack.push_back(std::move(k));
+  }
+  // Final sort by display path for stable listing.
+  std::sort(itsBrowseLeaves.begin(), itsBrowseLeaves.end(),
+            [](const BrowseLeaf& a, const BrowseLeaf& b) { return a.relPath < b.relPath; });
+}
+
+void App::openBrowseLeaf(const std::string& dir)
+{
+  auto files = collectSortedPngs(dir);
+  if (files.empty())
+    throw std::runtime_error("No PNG files in " + dir);
+  itsSource = std::make_unique<MultiFileSource>(files);
+}
+
+bool App::openBrowsePicker(UI& ui)
+{
+  scanBrowseTree();
+  if (itsBrowseLeaves.empty())
+  {
+    itsLastMessage = "No PNG-containing directories under " + itsOpts.browseRoot;
+    return false;
+  }
+
+  // Two modes for the same dataset, toggled by Tab:
+  //   - search: flat fuzzy filter over relative leaf paths
+  //   - browse: a column navigator that walks subdirs one level at a time
+  // Both end by calling openBrowseLeaf and returning true.
+  enum class Mode { Search, Browse };
+  Mode mode = Mode::Search;
+
+  // Column navigator state: the path being inspected, expressed relative
+  // to itsOpts.browseRoot ("" = root itself). Persists across Tab
+  // round-trips so the user doesn't lose their position when switching
+  // modes.
+  std::filesystem::path here;
+
+  while (true)
+  {
+    if (mode == Mode::Search)
+    {
+      std::vector<int> lastIdx;
+      auto matcher = [&](const std::string& q) {
+        std::vector<std::string> hits;
+        lastIdx.clear();
+        std::string lq = q;
+        std::transform(lq.begin(), lq.end(), lq.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        for (std::size_t i = 0; i < itsBrowseLeaves.size(); ++i)
+        {
+          const auto& path = itsBrowseLeaves[i].relPath;
+          if (lq.empty())
+          {
+            hits.push_back(path);
+            lastIdx.push_back(static_cast<int>(i));
+            continue;
+          }
+          std::string lower = path;
+          std::transform(lower.begin(), lower.end(), lower.begin(),
+                         [](unsigned char c) { return std::tolower(c); });
+          if (lower.find(lq) != std::string::npos)
+          {
+            hits.push_back(path);
+            lastIdx.push_back(static_cast<int>(i));
+          }
+        }
+        return hits;
+      };
+      const std::string title = "PNG animations in " + itsOpts.browseRoot;
+      const int sel = ui.popupSearch(title, matcher, /*header=*/{}, /*allowTab=*/true);
+      if (sel == UI::kPopupSearchTab)
+      {
+        mode = Mode::Browse;
+        continue;
+      }
+      if (sel < 0 || sel >= static_cast<int>(lastIdx.size())) return false;
+      openBrowseLeaf(itsBrowseLeaves[lastIdx[sel]].fullPath);
+      return true;
+    }
+
+    // Browse mode. Show subdirs of `here` plus, if `here` is itself a
+    // leaf, a "Load PNGs here" entry at the top. Special items:
+    //   index 0: ".." when `here` is non-empty
+    //   index 1 (or 0): "[Load PNGs here]" when current dir is a leaf
+    const std::filesystem::path absHere =
+        here.empty() ? std::filesystem::path(itsOpts.browseRoot)
+                     : std::filesystem::path(itsOpts.browseRoot) / here;
+    std::vector<std::filesystem::path> subdirs;
+    bool isLeaf = hasPngDirectChild(absHere);
+    if (!isLeaf)
+    {
+      std::error_code ec2;
+      for (auto it = std::filesystem::directory_iterator(absHere, ec2);
+           it != std::filesystem::directory_iterator(); it.increment(ec2))
+      {
+        if (ec2) break;
+        if (it->is_directory(ec2)) subdirs.push_back(it->path());
+      }
+      std::sort(subdirs.begin(), subdirs.end());
+    }
+
+    std::vector<std::string> items;
+    enum class Kind { Up, Load, Subdir };
+    std::vector<Kind> kinds;
+    if (!here.empty())
+    {
+      items.emplace_back("..");
+      kinds.push_back(Kind::Up);
+    }
+    if (isLeaf)
+    {
+      items.emplace_back("[Load PNGs in this directory]");
+      kinds.push_back(Kind::Load);
+    }
+    for (const auto& s : subdirs)
+    {
+      items.push_back(s.filename().string() + "/");
+      kinds.push_back(Kind::Subdir);
+    }
+    if (items.empty())
+    {
+      // Defensive: empty directory that's neither leaf nor has subdirs.
+      // Auto-step up and try again.
+      if (here.empty()) return false;
+      here = here.parent_path();
+      continue;
+    }
+    const std::string title =
+        "Browse: " + (here.empty() ? itsOpts.browseRoot
+                                   : itsOpts.browseRoot + "/" + here.string()) +
+        "  (Tab: search)";
+    const int sel = ui.popupMenu(title, items, 0, /*allowTab=*/true);
+    if (sel == UI::kPopupSearchTab)
+    {
+      mode = Mode::Search;
+      continue;
+    }
+    if (sel < 0) return false;
+    switch (kinds[sel])
+    {
+      case Kind::Up:
+        here = here.parent_path();
+        break;
+      case Kind::Load:
+        openBrowseLeaf(absHere.string());
+        return true;
+      case Kind::Subdir:
+      {
+        // Recover the picked subdir from the items[] string (strip
+        // trailing '/'). Index into subdirs would be cleaner — compute
+        // it back through the items[] layout offsets.
+        int subIdx = sel;
+        if (!here.empty()) --subIdx;  // skip ".."
+        if (isLeaf) --subIdx;          // skip "[Load PNGs here]"
+        if (subIdx >= 0 && subIdx < static_cast<int>(subdirs.size()))
+          here = std::filesystem::relative(subdirs[subIdx], itsOpts.browseRoot);
+        break;
+      }
+    }
+  }
 }
 
 float App::transform(float v) const
@@ -2393,7 +2641,7 @@ void App::renderTimeline(UI& ui)
   const bool pgMode = (itsPgDataset != nullptr);
   ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
                   static_cast<int>(itsSource->timeCount()));
-  ui.drawStatusBar(itsSource->isImage(), isShape, pgMode);
+  ui.drawStatusBar(itsSource->isImage(), isShape, pgMode, !itsOpts.browseRoot.empty());
   doupdate();
 }
 
@@ -2981,20 +3229,26 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'd':
     case 'D':
     {
-      // Re-open the PostGIS layer picker without quitting. Only
-      // available when launched with --pg; the persistent dataset
-      // means there's no libpq round-trip on each invocation.
-      if (itsPgDataset == nullptr)
+      // Re-open the data-source picker without quitting. Available in
+      // two modes:
+      //   --pg  : PostGIS layer picker (persistent dataset, no libpq
+      //           round-trip on each invocation).
+      //   --dir : PNG-tree leaf picker (rescans the tree so newly
+      //           arrived directories appear).
+      const bool inPgMode = (itsPgDataset != nullptr);
+      const bool inBrowseMode = !itsOpts.browseRoot.empty();
+      if (!inPgMode && !inBrowseMode)
       {
-        itsLastMessage = "Layer picker is only available with --pg";
+        itsLastMessage = "Picker is only available with --pg or --dir tree";
         return true;
       }
-      // Reset state that's specific to the previous layer, then
+      // Reset state that's specific to the previous layer/leaf, then
       // re-pick. If the user cancels, we keep the current source.
       auto saved = std::move(itsSource);
       try
       {
-        if (!openPgPicker(ui))
+        const bool ok = inPgMode ? openPgPicker(ui) : openBrowsePicker(ui);
+        if (!ok)
         {
           itsSource = std::move(saved);
           return true;
@@ -3005,7 +3259,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         itsSource = std::move(saved);
         throw;
       }
-      // Reset per-layer state so the new layer renders cleanly.
+      // Reset per-source state so the new selection renders cleanly.
       itsShapeOutlines.clear();
       itsViewport.reset();
       itsMarker.reset();
@@ -3627,6 +3881,13 @@ void App::drawMap(UI& ui)
 
 int App::runOnce()
 {
+  if (itsSource == nullptr)
+  {
+    std::cerr << "qdless: --dump cannot be used with deferred-source modes "
+                 "(--pg without --table, or --dir on a tree root). Pass a "
+                 "concrete file or leaf directory.\n";
+    return 1;
+  }
   TerminalSize ts = terminalSize();
   int cellW = ts.cols;
   int cellH = std::max(1, ts.rows - 1);
@@ -3683,6 +3944,14 @@ int App::runInteractive()
   if (itsSource == nullptr && itsPgDataset != nullptr)
   {
     if (!openPgPicker(ui)) return 0;  // user cancelled the picker
+    initFromSource();
+  }
+  // Deferred PNG-tree pick: same shape as the PG path. --dir on a tree
+  // root left itsSource null in the ctor; open the picker now and run
+  // initFromSource on the picked leaf.
+  if (itsSource == nullptr && !itsOpts.browseRoot.empty())
+  {
+    if (!openBrowsePicker(ui)) return 0;
     initFromSource();
   }
 
