@@ -217,6 +217,18 @@ class App
   double itsCrossLon1 = 0;
   double itsCrossLat2 = 0;
   double itsCrossLon2 = 0;
+  // Chart-area rectangle of the current cross-section popup (cell coords).
+  // Cached at drawCrossSection so mouse-motion events can test whether
+  // the cursor is over the chart and translate column → distance along
+  // the great-circle. Width is 0 when there is no popup on screen.
+  int itsCrossChartRow = 0;
+  int itsCrossChartCol = 0;
+  int itsCrossChartW = 0;
+  int itsCrossChartH = 0;
+  // Lat/lon currently highlighted by the mouse over the cross-section
+  // chart. Drawn as a dot on the map. Cleared when the mouse leaves
+  // the chart or the popup closes.
+  std::optional<std::pair<double, double>> itsCrossHoverLatLon;
 
   // Animation state.
   bool itsAnimating = false;
@@ -306,6 +318,10 @@ class App
   std::vector<std::array<int, 4>> traceGraticuleSegments(int bW, int bH) const;
   void overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   void overlayCities(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
+  // Draw the active cross-section great-circle line, its endpoints, and
+  // the mouse-tracked hover dot into the data pixel buffer. No-op when
+  // itsCrossActive is false.
+  void overlayCrossSection(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   // Append a braille-glyph overlay of a polyline set, written AFTER the
   // renderer's quadrant blocks. Each polyline is rasterised into a 2x4
   // sub-cell mask (4x finer Y than the data raster); cells with any dots

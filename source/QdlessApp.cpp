@@ -1250,8 +1250,40 @@ void App::drawCrossSection(UI& ui)
   const int width = std::min(COLS - 4, labelW + chartW + 6);
   // Height: border + title + chart + axis + endpoints + footer + border
   const int height = chartH + 6;
-  const int top = std::max(0, (LINES - height) / 2);
-  const int left = std::max(0, (COLS - width) / 2);
+  // Dock the popup to the half of the map that has less of the cross-section
+  // line in it, so the on-map line + endpoint markers stay visible. The
+  // mouse-tracked dot ([[track-cross-hover-dot]]) lives on the line, so this
+  // matters: a centred popup would cover most of the line.
+  const auto& l = ui.layout();
+  double midLat = (lat1 + lat2) / 2;
+  double midLon = (lon1 + lon2) / 2;
+  double u01 = 0;
+  double v01 = 0;
+  {
+    double uMid = 0;
+    double vMid = 0;
+    itsSource->latLonToUV(midLat, midLon, uMid, vMid);
+    const float spanU = itsViewport.uMax - itsViewport.uMin;
+    const float spanV = itsViewport.vMax - itsViewport.vMin;
+    u01 = (spanU > 0) ? (uMid - itsViewport.uMin) / spanU : 0.5;
+    v01 = (spanV > 0) ? (vMid - itsViewport.vMin) / spanV : 0.5;
+  }
+  // Line lives in the bottom half of the map → put the popup at the top of
+  // the screen. Otherwise dock to bottom (just above the timeline).
+  const int top = (v01 > 0.5)
+                      ? std::max(0, l.map.row)
+                      : std::max(0, l.map.row + l.map.height - height);
+  // Horizontal: shift away from the line's horizontal centre when possible
+  // so a roughly N–S line isn't covered. Falls back to centred when the map
+  // is too narrow to offer a useful side.
+  int left = std::max(0, (COLS - width) / 2);
+  if (width + 4 < COLS)
+  {
+    if (u01 < 0.5)
+      left = std::max(0, COLS - width - 2);
+    else
+      left = 2;
+  }
   const int interiorW = width - 2;
 
   NFmiEnumConverter conv;
@@ -1339,7 +1371,14 @@ void App::drawCrossSection(UI& ui)
   const std::string s = os.str();
   std::fwrite(s.data(), 1, s.size(), stdout);
   std::fflush(stdout);
-  (void)ui;  // popup is non-modal; main loop handles input
+
+  // Cache chart-area rectangle in cell coords so the mouse-motion handler
+  // can map (ev.x, ev.y) → fraction along the great-circle. The chart
+  // begins one row below the top border, after the label column + " ┤ ".
+  itsCrossChartRow = top + 1;
+  itsCrossChartCol = left + labelW + 4;
+  itsCrossChartW = chartW;
+  itsCrossChartH = chartH;
 }
 
 bool App::ensureCityIndex() const
@@ -2178,6 +2217,95 @@ void App::overlayCities(std::vector<Rgb>& pixels, int subWidth, int subHeight) c
   }
 }
 
+void App::overlayCrossSection(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
+{
+  if (!itsCrossActive || subWidth <= 0 || subHeight <= 0) return;
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  if (spanU <= 0 || spanV <= 0) return;
+
+  auto toSub = [&](double lat, double lon) -> std::pair<int, int> {
+    double u = 0;
+    double v = 0;
+    itsSource->latLonToUV(lat, lon, u, v);
+    const double u01 = (u - itsViewport.uMin) / spanU;
+    const double v01 = (v - itsViewport.vMin) / spanV;
+    return {static_cast<int>(u01 * subWidth), static_cast<int>(v01 * subHeight)};
+  };
+
+  auto plot = [&](int x, int y, Rgb c) {
+    if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
+      pixels[static_cast<std::size_t>(y) * subWidth + x] = c;
+  };
+
+  auto drawSeg = [&](int x0, int y0, int x1, int y1, Rgb halo, Rgb line) {
+    int dx = std::abs(x1 - x0);
+    int dy = -std::abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    while (true)
+    {
+      for (int hy = -1; hy <= 1; ++hy)
+        for (int hx = -1; hx <= 1; ++hx)
+          if (hx != 0 || hy != 0) plot(x0 + hx, y0 + hy, halo);
+      plot(x0, y0, line);
+      if (x0 == x1 && y0 == y1) break;
+      int e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  };
+
+  // Sample the great-circle in lat/lon-linear steps to match how the
+  // chart itself samples the section (QdlessApp.cpp:1238). Step count is
+  // generous enough that even a fully diagonal viewport gets continuous
+  // pixels.
+  const Rgb halo{255, 255, 255};
+  const Rgb line{255, 40, 40};
+  const int steps = std::max(subWidth, subHeight) * 2;
+  auto prev = toSub(itsCrossLat1, itsCrossLon1);
+  for (int i = 1; i <= steps; ++i)
+  {
+    const double frac = static_cast<double>(i) / steps;
+    const double lat = itsCrossLat1 + frac * (itsCrossLat2 - itsCrossLat1);
+    const double lon = itsCrossLon1 + frac * (itsCrossLon2 - itsCrossLon1);
+    auto cur = toSub(lat, lon);
+    // Antimeridian / projection wrap guard: skip absurd jumps.
+    if (std::abs(cur.first - prev.first) < subWidth &&
+        std::abs(cur.second - prev.second) < subHeight)
+      drawSeg(prev.first, prev.second, cur.first, cur.second, halo, line);
+    prev = cur;
+  }
+
+  // Endpoint markers: small filled discs with a halo, visible against
+  // any palette and any line colour.
+  auto drawEndpoint = [&](double lat, double lon, Rgb c) {
+    const auto p = toSub(lat, lon);
+    for (int dy = -3; dy <= 3; ++dy)
+      for (int dx = -3; dx <= 3; ++dx)
+        if (dx * dx + dy * dy <= 9) plot(p.first + dx, p.second + dy, halo);
+    for (int dy = -2; dy <= 2; ++dy)
+      for (int dx = -2; dx <= 2; ++dx)
+        if (dx * dx + dy * dy <= 4) plot(p.first + dx, p.second + dy, c);
+  };
+  drawEndpoint(itsCrossLat1, itsCrossLon1, Rgb{40, 40, 255});
+  drawEndpoint(itsCrossLat2, itsCrossLon2, Rgb{40, 40, 255});
+
+  // Mouse-tracked hover dot: bigger and brighter so it stands out from
+  // the endpoint markers.
+  if (itsCrossHoverLatLon.has_value())
+  {
+    const auto p = toSub(itsCrossHoverLatLon->first, itsCrossHoverLatLon->second);
+    for (int dy = -4; dy <= 4; ++dy)
+      for (int dx = -4; dx <= 4; ++dx)
+        if (dx * dx + dy * dy <= 16) plot(p.first + dx, p.second + dy, halo);
+    for (int dy = -3; dy <= 3; ++dy)
+      for (int dx = -3; dx <= 3; ++dx)
+        if (dx * dx + dy * dy <= 9) plot(p.first + dx, p.second + dy, Rgb{255, 220, 40});
+  }
+}
+
 std::string App::buildCityLabels(int cellW, int cellH, int originRow, int originCol)
 {
   if (!itsShowCities || cellW <= 0 || cellH <= 0) return {};
@@ -2882,6 +3010,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       itsViewport.reset();
       itsMarker.reset();
       itsCrossActive = false;
+      itsCrossChartW = 0;
+      itsCrossHoverLatLon.reset();
       initFromSource();
       return true;
     }
@@ -3136,6 +3266,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       else if (itsCrossActive)
       {
         itsCrossActive = false;
+        itsCrossChartW = 0;
+        itsCrossHoverLatLon.reset();
         itsLastMessage = "Cross-section closed";
       }
       else
@@ -3224,6 +3356,31 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       const bool inMap =
           ev.x >= l.map.col && ev.x < l.map.col + l.map.width && ev.y >= l.map.row &&
           ev.y < l.map.row + l.map.height;
+
+      // Cross-section hover: when the mouse is over the chart area, project
+      // the column → fraction → (lat, lon) along the great-circle and store
+      // it as the hover dot. The dot is rendered by overlayCrossSection on
+      // the next drawMap call. Leaving the chart clears the dot.
+      if (itsCrossActive && itsCrossChartW > 0)
+      {
+        const bool inChart =
+            ev.x >= itsCrossChartCol && ev.x < itsCrossChartCol + itsCrossChartW &&
+            ev.y >= itsCrossChartRow && ev.y < itsCrossChartRow + itsCrossChartH;
+        std::optional<std::pair<double, double>> next;
+        if (inChart)
+        {
+          const double frac = (static_cast<double>(ev.x - itsCrossChartCol) + 0.5) /
+                              itsCrossChartW;
+          const double lat = itsCrossLat1 + frac * (itsCrossLat2 - itsCrossLat1);
+          const double lon = itsCrossLon1 + frac * (itsCrossLon2 - itsCrossLon1);
+          next = std::make_pair(lat, lon);
+        }
+        if (next != itsCrossHoverLatLon)
+        {
+          itsCrossHoverLatLon = next;
+          return true;  // redraw to update the on-map dot
+        }
+      }
 
       // Any left-button click on a panel makes that panel active. Wheel /
       // motion events leave the focus alone.
@@ -3390,6 +3547,7 @@ void App::drawMap(UI& ui)
     if (itsShapeOutlineStyle == LineStyle::Thick)
       overlayPolylines(pixels, subW, subH, itsShapeOutlines, borderColor());
     overlayCities(pixels, subW, subH);
+    overlayCrossSection(pixels, subW, subH);
     overlayMarker(pixels, subW, subH);
 
     itsRenderer.render(os, pixels, subW, subH, r.row, r.col);
