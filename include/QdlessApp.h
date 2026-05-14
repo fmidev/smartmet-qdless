@@ -242,6 +242,22 @@ class App
   // sources without hasNativeHeight().
   bool itsCrossHeightAxis = true;
 
+  // 3D mode (radar volume): rotate-and-zoom view onto the polar data as
+  // a point cloud above a coastline-and-graticule ground plane. Toggled
+  // with [3]. Camera orbits the radar at (yaw, pitch); zoom scales the
+  // viewport. Falls back to 2D rendering for non-PVOL sources.
+  bool itsMode3D = false;
+  double itsCamYaw = 0.0;          // radians; 0 = looking north from south
+  double itsCamPitch = 0.6;        // radians; 0 = horizontal, π/2 = top-down
+  double itsCamZoom = 1.0;         // 1.0 = data extent fits the viewport
+  float itsThreshold3D = 5.0F;     // drop bins below this dBZ (clear-air)
+  double itsVexagger3D = 8.0;      // vertical exaggeration. Radar volumes
+                                    // are ~30:1 wide:tall in real geometry;
+                                    // at true scale the storm flattens to a
+                                    // disc. Default 8× makes the storm body
+                                    // visibly tall without distorting echo
+                                    // *positions* (only their heights stretch).
+
   // Animation state.
   bool itsAnimating = false;
   int itsAnimationDelayMs = 250;
@@ -367,6 +383,10 @@ class App
                              int originRow, int originCol) const;
   std::string buildWindArrows(int cellW, int cellH, int originRow, int originCol);
   std::string buildCityLabels(int cellW, int cellH, int originRow, int originCol);
+  // 3D volume renderer. Active only when itsMode3D and the source is a
+  // PVOL. Writes a complete frame (radar points + ground-plane coastlines
+  // + status overlay) to stdout, replacing the usual 2D map.
+  void draw3D(UI& ui);
   // True if the active source carries both WindUMS and WindVMS — used to
   // gate the [W]ind status-bar toggle and the wind-arrow overlay.
   bool hasWindComponents() const;

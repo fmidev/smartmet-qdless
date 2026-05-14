@@ -72,6 +72,28 @@ class OdimVolumeSource : public DataSource
   // True if the file is an ODIM HDF5 with /what/object == "PVOL".
   static bool isVolume(const std::string& filename);
 
+  // Public read-only view of one sweep's geometry + raster. Returned by
+  // sweepAt(); used by the 3D viewer in App so it can iterate the polar
+  // data without coupling to the internal Sweep type.
+  struct SweepInfo
+  {
+    double elangle;        // degrees from horizontal
+    std::size_t nrays;     // azimuth bins (rays are stored sorted, ray 0 at az 0°)
+    std::size_t nbins;     // range bins along each ray
+    double rscale;         // metres per bin
+    double rstart;         // metres to first bin
+    double gain;           // physical = gain * raw + offset
+    double offset;
+    double nodata;
+    double undetect;
+    const float* raw;      // size = nrays * nbins; row-major (ray-major)
+  };
+
+  std::size_t sweepCount() const;
+  SweepInfo sweepAt(std::size_t i) const;
+  std::pair<double, double> radarLatLon() const { return {itsRadarLat, itsRadarLon}; }
+  double maxRangeMeters() const { return itsMaxRange; }
+
  private:
   struct Sweep
   {

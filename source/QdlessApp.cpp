@@ -1,6 +1,7 @@
 #include "QdlessApp.h"
 
 #include "QdlessMultiFileSource.h"
+#include "QdlessOdimVolumeSource.h"
 #include "QdlessShapeSource.h"
 #include "QdlessUI.h"
 
@@ -3245,6 +3246,62 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         return true;
     }
   }
+  // 3D mode remaps the navigation keys: hjkl orbit + tilt, +/- zoom, 0
+  // reset, [/] threshold. Everything else falls through to the normal
+  // handlers below so quit, parameter / level menu, etc. still work.
+  if (itsMode3D)
+  {
+    constexpr double kYawStep = 0.1;       // ≈ 5.7°
+    constexpr double kPitchStep = 0.08;
+    constexpr double kZoomStep = 0.8;
+    switch (key)
+    {
+      case 'h': case KEY_LEFT:
+        itsCamYaw -= kYawStep;
+        return true;
+      case 'l': case KEY_RIGHT:
+        itsCamYaw += kYawStep;
+        return true;
+      case 'k': case KEY_UP:
+        itsCamPitch = std::clamp(itsCamPitch + kPitchStep, 0.0, M_PI_2);
+        return true;
+      case 'j': case KEY_DOWN:
+        itsCamPitch = std::clamp(itsCamPitch - kPitchStep, 0.0, M_PI_2);
+        return true;
+      case '+': case '=':
+        itsCamZoom /= kZoomStep;
+        return true;
+      case '-': case '_':
+        itsCamZoom *= kZoomStep;
+        return true;
+      case '0':
+        itsCamYaw = 0;
+        itsCamPitch = 0.6;
+        itsCamZoom = 1.0;
+        return true;
+      case ',': case '<':
+        itsThreshold3D -= 5;
+        itsLastMessage = fmt::format("3D threshold: {:.0f} dBZ", itsThreshold3D);
+        return true;
+      case '.': case '>':
+        itsThreshold3D += 5;
+        itsLastMessage = fmt::format("3D threshold: {:.0f} dBZ", itsThreshold3D);
+        return true;
+      case KEY_PPAGE:  // PgUp — taller storms
+        itsVexagger3D = std::min(50.0, itsVexagger3D * 1.4);
+        itsLastMessage = fmt::format("3D vertical exaggeration: {:.1f}×", itsVexagger3D);
+        return true;
+      case KEY_NPAGE:  // PgDn — flatter storms
+        itsVexagger3D = std::max(1.0, itsVexagger3D / 1.4);
+        itsLastMessage = fmt::format("3D vertical exaggeration: {:.1f}×", itsVexagger3D);
+        return true;
+      case '3':
+        // Fall through to the normal toggle handler below.
+        break;
+      default:
+        break;
+    }
+  }
   switch (key)
   {
     case 'q':
@@ -3735,9 +3792,24 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
     case '1':
     case '2':
-    case '3':
     case '4':
       setActivePanel(key - '1');
+      return true;
+
+    case '3':
+      // Toggle 3D point-cloud view. Only meaningful for PVOL sources;
+      // the renderer auto-reverts to 2D for everything else.
+      if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr)
+      {
+        itsMode3D = !itsMode3D;
+        itsLastMessage = itsMode3D
+                             ? "3D: h/l yaw, j/k pitch, +/- zoom, 0 reset, ,/. threshold"
+                             : "3D mode off";
+      }
+      else
+      {
+        itsLastMessage = "3D mode: PVOL polar volume sources only";
+      }
       return true;
 
     case ' ':  // Space: toggle animation
@@ -3945,6 +4017,18 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
 void App::drawMap(UI& ui)
 {
+  if (itsMode3D)
+  {
+    if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr)
+    {
+      draw3D(ui);
+      return;
+    }
+    // Drop back to 2D if the source isn't a PVOL — keeps the toggle
+    // safe even when the user pages through a multi-file batch.
+    itsMode3D = false;
+  }
+
   const auto& l = ui.layout();
   if (l.map.height < 2 || l.map.width < 2) return;
 
@@ -4064,6 +4148,246 @@ void App::drawMap(UI& ui)
   }
 
   std::string s = os.str();
+  std::fwrite(s.data(), 1, s.size(), stdout);
+  std::fflush(stdout);
+}
+
+// ---------------------------------------------------------------------------
+// 3D point-cloud renderer for ODIM PVOL sources.
+// ---------------------------------------------------------------------------
+//
+// Camera state: orbit-around-radar with (yaw, pitch, zoom).
+//   yaw=0, pitch=0  → camera south of radar, looking north horizontally.
+//   pitch=π/2       → camera directly above, looking straight down.
+//
+// Basis vectors (derived once per frame, used by every projection):
+//   right   = ( cos ψ,           sin ψ,           0     )
+//   up      = (-sin ψ · sin φ,   cos ψ · sin φ,   cos φ )
+//   forward = (-sin ψ · cos φ,   cos ψ · cos φ,  -sin φ )
+//
+// Project world P to sub-pixel:
+//   sx     = dot(P, right)    sy = dot(P, up)
+//   depth  = dot(P, forward)  (smaller = closer to camera)
+//   col    = subW/2 + xscale · sx
+//   row    = subH/2 - yscale · sy        (terminal rows grow downward)
+//
+// The yscale carries the cell-aspect correction so a unit-circle in the
+// world plane comes out as a circle (not an oval) on the terminal —
+// terminal cells are ≈ 1:2 wide:tall, so a sub-pixel row covers more
+// physical height than a sub-pixel column.
+void App::draw3D(UI& ui)
+{
+  const auto* pvol = dynamic_cast<const OdimVolumeSource*>(itsSource.get());
+  if (!pvol)
+  {
+    itsMode3D = false;
+    return;
+  }
+
+  const auto& l = ui.layout();
+  if (l.map.height < 4 || l.map.width < 4) return;
+
+  // Single-panel only in 3D mode; ignores split layouts on purpose since
+  // the same volume would just appear twice.
+  const int cellW = l.map.width;
+  const int cellH = l.map.height;
+  const int subRows = subRowsForStyle(itsCornerStyle);
+  const int subW = cellW * 2;
+  const int subH = cellH * subRows;
+
+  // Cell aspect: a terminal monospace cell is ~1:2 (width:height), and we
+  // pack `subRows` sub-pixel rows into each cell-row. So one sub-pixel
+  // row covers (cellH/subRows) physical pixels while one sub-pixel column
+  // covers (cellW/2). Ratio (column-px / row-px) = subRows / 4 (assuming
+  // 1:2 cell aspect). Scale screen_y by this so the picture stays round.
+  const double aspect = static_cast<double>(subRows) / 4.0;
+
+  // Camera basis.
+  const double cy = std::cos(itsCamYaw);
+  const double sy_ = std::sin(itsCamYaw);
+  const double cp = std::cos(itsCamPitch);
+  const double sp = std::sin(itsCamPitch);
+  const double rightX = cy,  rightY = sy_, rightZ = 0;
+  const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
+  const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
+
+  // Fit the radar's horizontal extent in the viewport at zoom=1.
+  const double extent = pvol->maxRangeMeters();  // metres
+  const double xscale = (subW / 2.0) / extent * itsCamZoom;
+  const double yscale = xscale / aspect;
+  const double depthScale = xscale;  // depth uses world metres; only the
+                                      // ordering matters for the z-buffer
+
+  // Buffers. INT_MAX z = unpainted.
+  std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH, Rgb{0, 0, 0, true});
+  std::vector<float> zbuf(static_cast<std::size_t>(subW) * subH,
+                          std::numeric_limits<float>::infinity());
+
+  auto project = [&](double wx, double wy, double wz,
+                     double& col, double& row, float& depth) {
+    const double sx = rightX * wx + rightY * wy + rightZ * wz;
+    const double sy = upX * wx + upY * wy + upZ * wz;
+    const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
+    col = subW / 2.0 + xscale * sx;
+    row = subH / 2.0 - yscale * sy;
+    depth = static_cast<float>(dp * depthScale);
+  };
+
+  auto plot = [&](int c, int r, float depth, Rgb color) {
+    if (c < 0 || c >= subW || r < 0 || r >= subH) return;
+    const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
+    if (depth < zbuf[idx])
+    {
+      zbuf[idx] = depth;
+      pixels[idx] = color;
+    }
+  };
+
+  // DDA line in sub-pixel space with per-pixel z-buffer test. Used for
+  // map polylines projected onto the ground plane.
+  auto drawLine = [&](double wx0, double wy0, double wz0,
+                      double wx1, double wy1, double wz1, Rgb color) {
+    double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
+    float d0 = 0, d1 = 0;
+    project(wx0, wy0, wz0, c0, r0, d0);
+    project(wx1, wy1, wz1, c1, r1, d1);
+    const double dc = c1 - c0;
+    const double dr = r1 - r0;
+    const double dd = static_cast<double>(d1) - static_cast<double>(d0);
+    const int steps = static_cast<int>(std::ceil(std::max(std::abs(dc), std::abs(dr))));
+    if (steps <= 0)
+    {
+      plot(static_cast<int>(std::round(c0)), static_cast<int>(std::round(r0)), d0, color);
+      return;
+    }
+    for (int i = 0; i <= steps; ++i)
+    {
+      const double t = static_cast<double>(i) / steps;
+      const int c = static_cast<int>(std::round(c0 + t * dc));
+      const int r = static_cast<int>(std::round(r0 + t * dr));
+      const float d = static_cast<float>(d0 + t * dd);
+      plot(c, r, d, color);
+    }
+  };
+
+  // Flat-Earth (lat,lon) → (east,north) in metres, anchored at the radar.
+  // Good to a few percent inside 250 km — adequate for the prototype.
+  const auto [radarLat, radarLon] = pvol->radarLatLon();
+  const double R_e = 6371000.0;
+  const double cosLat0 = std::cos(radarLat * M_PI / 180.0);
+  auto latLonToXY = [&](double lat, double lon, double& x, double& y) {
+    x = (lon - radarLon) * (M_PI / 180.0) * R_e * cosLat0;
+    y = (lat - radarLat) * (M_PI / 180.0) * R_e;
+  };
+
+  // Ground plane: coastlines first (low z so radar points above occlude).
+  // Re-use whatever coastlines were loaded for the previous 2D view.
+  // Z = -1 (one metre below ground) so radar bins at h=0 still paint over.
+  auto drawPolylines = [&](const std::vector<Polyline>& polys, Rgb color) {
+    for (const auto& p : polys)
+    {
+      if (p.lats.size() < 2) continue;
+      double x0 = 0, y0 = 0;
+      latLonToXY(p.lats[0], p.lons[0], x0, y0);
+      for (std::size_t i = 1; i < p.lats.size(); ++i)
+      {
+        double x1 = 0, y1 = 0;
+        latLonToXY(p.lats[i], p.lons[i], x1, y1);
+        drawLine(x0, y0, -1, x1, y1, -1, color);
+        x0 = x1;
+        y0 = y1;
+      }
+    }
+  };
+  drawPolylines(itsCoastlines, Rgb{200, 200, 200});
+  drawPolylines(itsBorders, Rgb{120, 120, 120});
+
+  // Range rings at 50, 100, 150, 200 km — visual anchor for distance.
+  {
+    constexpr int kSegs = 96;
+    const Rgb ringColor{60, 100, 60};
+    for (double r_km : {50.0, 100.0, 150.0, 200.0})
+    {
+      const double r_m = r_km * 1000.0;
+      if (r_m > extent) continue;
+      double prevX = r_m, prevY = 0;
+      for (int i = 1; i <= kSegs; ++i)
+      {
+        const double a = 2.0 * M_PI * i / kSegs;
+        const double x = r_m * std::cos(a);
+        const double y = r_m * std::sin(a);
+        drawLine(prevX, prevY, -1, x, y, -1, ringColor);
+        prevX = x;
+        prevY = y;
+      }
+    }
+  }
+
+  // Radar points. Iterate all bins; cheap raw threshold first to skip the
+  // ~95 % clear-air cells before doing the gain/offset multiply and the
+  // projection.
+  const double R_eff = 4.0 / 3.0 * 6371000.0;
+  const std::size_t nSweeps = pvol->sweepCount();
+  for (std::size_t si = 0; si < nSweeps; ++si)
+  {
+    const auto s = pvol->sweepAt(si);
+    if (!s.raw) continue;
+    const double elRad = s.elangle * M_PI / 180.0;
+    const double cosE = std::cos(elRad);
+    const double sinE = std::sin(elRad);
+    // Threshold in raw units. Solves itsThreshold3D = gain * raw + offset.
+    const float rawThreshold = static_cast<float>((itsThreshold3D - s.offset) / s.gain);
+    for (std::size_t ray = 0; ray < s.nrays; ++ray)
+    {
+      // Azimuth from north, clockwise. Same convention as sampleSweep.
+      const double az = (ray + 0.5) * 2.0 * M_PI / s.nrays;
+      const double sinAz = std::sin(az);
+      const double cosAz = std::cos(az);
+      const float* row = s.raw + ray * s.nbins;
+      for (std::size_t bin = 0; bin < s.nbins; ++bin)
+      {
+        const float raw = row[bin];
+        if (raw == static_cast<float>(s.nodata) || raw == static_cast<float>(s.undetect))
+          continue;
+        if (raw < rawThreshold) continue;
+        const float value = static_cast<float>(s.gain * raw + s.offset);
+
+        const double R = s.rstart + (bin + 0.5) * s.rscale;
+        // Bin's 3D position: ground projection R·cos(α) along the ray,
+        // height R·sin(α) plus 4/3-Earth curvature lift.
+        const double rg = R * cosE;
+        const double wx = rg * sinAz;     // east
+        const double wy = rg * cosAz;     // north
+        // Vertical exaggeration: storms are ~30:1 wide:tall in true
+        // geometry; this stretches Z so the volume's depth structure
+        // is legible without changing horizontal positions.
+        const double wz = (R * sinE + R * R / (2.0 * R_eff)) * itsVexagger3D;
+
+        double col = 0, rowSx = 0;
+        float depth = 0;
+        project(wx, wy, wz, col, rowSx, depth);
+        plot(static_cast<int>(col), static_cast<int>(rowSx), depth,
+             activePanel().palette.lookup(transform(value)));
+      }
+    }
+  }
+
+  // Render to stdout.
+  std::ostringstream os;
+  itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
+
+  // Camera HUD bottom-right.
+  const std::string hud = fmt::format(
+      " 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}dBZ ",
+      itsCamYaw * 180.0 / M_PI, itsCamPitch * 180.0 / M_PI,
+      itsCamZoom, itsVexagger3D, itsThreshold3D);
+  const int hudRow = l.map.row + l.map.height - 1;
+  const int hudCol = std::max(l.map.col, l.map.col + l.map.width -
+                                              static_cast<int>(hud.size()) - 1);
+  os << "\x1b[" << (hudRow + 1) << ';' << (hudCol + 1) << "H"
+     << "\x1b[48;5;235m\x1b[38;5;15m" << hud << "\x1b[0m";
+
+  const std::string s = os.str();
   std::fwrite(s.data(), 1, s.size(), stdout);
   std::fflush(stdout);
 }

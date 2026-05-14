@@ -287,6 +287,15 @@ float OdimVolumeSource::sampleSweep(const Sweep& s, double x, double y) const
   return static_cast<float>(s.gain * dv + s.offset);
 }
 
+std::size_t OdimVolumeSource::sweepCount() const { return itsSweeps.size(); }
+
+OdimVolumeSource::SweepInfo OdimVolumeSource::sweepAt(std::size_t i) const
+{
+  const Sweep& s = itsSweeps.at(i);
+  return {s.elangle, s.nrays, s.nbins, s.rscale, s.rstart,
+          s.gain, s.offset, s.nodata, s.undetect, s.raw.data()};
+}
+
 std::pair<double, double> OdimVolumeSource::heightRangeKm() const
 {
   // Heights radar beams can plausibly reach within the file's range. Cap

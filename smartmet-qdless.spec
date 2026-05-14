@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.14
-Release: 2%{?dist}.fmi
+Release: 3%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -108,6 +108,16 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Thu May 14 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.14-3.fmi
+- 3D point-cloud view for ODIM PVOL polar volumes. Press [3] inside a
+  PVOL file: the volume renders as a rotatable point cloud above a
+  tilted coastline-and-range-rings ground plane, with z-buffer
+  occlusion and the standard reflectivity palette. h/l yaw, j/k
+  pitch, +/- zoom, ,/. dBZ threshold, PgUp/PgDn vertical exaggeration
+  (default 8× because storms are ~30:1 wide:tall in true geometry),
+  0 reset camera, [3] toggle back to 2D. HUD bottom-right shows the
+  full camera state.
+
 * Thu May 14 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.14-2.fmi
 - ODIM-H5 polar volumes (/what/object=PVOL): each elevation sweep is
   exposed as a level and the data is rendered as a PPI on an
