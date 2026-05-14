@@ -94,6 +94,7 @@ class UI
     bool hasTimeAxis = true;     // false when timeCount() <= 1
     bool hasMultipleParams = true;
     bool hasMultipleLevels = true;
+    bool hasNativeHeight = false;  // source supports cross-section [Y] toggle
   };
   void popupHelp(HelpContext ctx);
   void popupHelp();  // gridded-data default — calls popupHelp({}) internally

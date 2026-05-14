@@ -236,6 +236,11 @@ class App
   // chart. Drawn as a dot on the map. Cleared when the mouse leaves
   // the chart or the popup closes.
   std::optional<std::pair<double, double>> itsCrossHoverLatLon;
+  // When the source supports native height-sampling (PVOL): draw the
+  // cross-section with Y-axis in km (true RHI). Toggled with [Y]. Falls
+  // back to one row per elevation angle when false. Has no effect for
+  // sources without hasNativeHeight().
+  bool itsCrossHeightAxis = true;
 
   // Animation state.
   bool itsAnimating = false;

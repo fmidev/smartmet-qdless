@@ -1434,7 +1434,7 @@ void App::drawCrossSection(UI& ui)
   const double lat2 = itsCrossLat2;
   const double lon2 = itsCrossLon2;
 
-  const bool heightMode = itsSource->hasNativeHeight();
+  const bool heightMode = itsSource->hasNativeHeight() && itsCrossHeightAxis;
 
   // Haversine distance for the X-axis scale.
   auto haversineKm = [](double la1, double lo1, double la2, double lo2) {
@@ -1671,14 +1671,21 @@ void App::drawCrossSection(UI& ui)
   padSpaces(os, interiorW - static_cast<int>(endpts.size()));
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
 
-  // Footer.
+  // Footer. Mention the [Y] toggle only when the source actually offers
+  // both axes — for pressure/hybrid data it's a no-op.
   pos(3 + chartH);
-  std::string_view footer = " 'x' close, \xe2\x86\x90/\xe2\x86\x92 step time, Space animate";
-  // The arrows are 3 bytes each in UTF-8 but render as 1 cell, so subtract
-  // the byte/cell skew when computing visible width for padding.
-  const int footerCells = static_cast<int>(footer.size()) - 4;  // 2 arrows * 2 extra bytes
+  const std::string footerStr =
+      itsSource->hasNativeHeight()
+          ? std::string(" 'x' close, 'y' Y-axis: ") +
+                (heightMode ? "km \xe2\x86\x92 angle" : "angle \xe2\x86\x92 km") +
+                ", \xe2\x86\x90/\xe2\x86\x92 step time"
+          : std::string(" 'x' close, \xe2\x86\x90/\xe2\x86\x92 step time, Space animate");
+  // Each ←/→ arrow is 3 bytes UTF-8 but 1 cell wide; the toggle string also
+  // has one → for the same skew. Count them dynamically.
+  const int arrowsInFooter = itsSource->hasNativeHeight() ? 3 : 2;
+  const int footerCells = static_cast<int>(footerStr.size()) - 2 * arrowsInFooter;
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m"
-     << footer;
+     << footerStr;
   padSpaces(os, interiorW - footerCells);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
 
@@ -2707,6 +2714,11 @@ void App::renderTimeline(UI& ui)
   std::string label = itsSource->paramShortName(id);
   label += "  ";
   label += currentTimeLabel();
+  // Level reminder for multi-level sources (pressure/hybrid/elangle/CAPPI).
+  // Single-level sources skip this so we don't waste bar real estate.
+  if (itsSource->levelCount() > 1)
+    label += fmt::format("  L:{}",
+                         itsSource->levelLabel(itsSource->currentLevelIndex()));
   if (const std::string orig = originTimeLabel(); !orig.empty())
     label += "   (analysis " + orig + ")";
   if (itsAnimating) label += fmt::format("  [{} ms]", itsAnimationDelayMs);
@@ -3284,6 +3296,26 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       return true;
     }
 
+    // Quick level step without opening the popup. '<' / '>' for the
+    // shift-required form and ',' / '.' for the unshifted keys — both
+    // work the same so users can pick whichever is on top of their key.
+    case '<':
+    case ',':
+    case '>':
+    case '.':
+      if (itsSource->levelCount() > 1)
+      {
+        const int n = static_cast<int>(itsSource->levelCount());
+        const int delta = (key == '<' || key == ',') ? -1 : +1;
+        int cur = static_cast<int>(itsSource->currentLevelIndex());
+        cur = std::clamp(cur + delta, 0, n - 1);
+        selectLevel(cur);
+        itsLastMessage = fmt::format(
+            "Level: {} ({}/{})",
+            itsSource->levelLabel(static_cast<std::size_t>(cur)), cur + 1, n);
+      }
+      return true;
+
     case '+':
     case '=':
       itsViewport.zoom(0.7F);
@@ -3315,6 +3347,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       ctx.hasTimeAxis = itsSource->timeCount() > 1;
       ctx.hasMultipleParams = itsSource->paramIds().size() > 1;
       ctx.hasMultipleLevels = itsSource->levelCount() > 1;
+      ctx.hasNativeHeight = itsSource->hasNativeHeight();
       ui.popupHelp(ctx);
     }
       return true;
@@ -3640,7 +3673,29 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       else
       {
         itsCrossPicks = 2;
+        // Each new cross-section opens in height mode when supported,
+        // matching the [X]Section bottom-bar default. Stays user-toggled
+        // within a single section but doesn't persist across sections.
+        itsCrossHeightAxis = true;
         itsLastMessage = "Cross-section: click first endpoint";
+      }
+      return true;
+
+    case 'y':
+    case 'Y':
+      // Toggle the cross-section Y-axis between km (true RHI) and one
+      // row per elevation angle. Only meaningful when the section is
+      // open and the source can sample at arbitrary heights.
+      if (itsCrossActive && itsSource->hasNativeHeight())
+      {
+        itsCrossHeightAxis = !itsCrossHeightAxis;
+        itsLastMessage = itsCrossHeightAxis
+                             ? "Cross-section: Y-axis = height (km)"
+                             : "Cross-section: Y-axis = elevation angle";
+      }
+      else if (itsCrossActive)
+      {
+        itsLastMessage = "Y-axis toggle: this source has no 3D height info";
       }
       return true;
 

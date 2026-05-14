@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.14
-Release: 1%{?dist}.fmi
+Release: 2%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -108,6 +108,28 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Thu May 14 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.14-2.fmi
+- ODIM-H5 polar volumes (/what/object=PVOL): each elevation sweep is
+  exposed as a level and the data is rendered as a PPI on an
+  azimuthal-equidistant grid centred on the radar. A synthetic "MAX"
+  level at the top of the level list paints the column-max composite
+  for a one-glance storm overview.
+- Cross-section on PVOL becomes a true RHI by default: Y-axis in km
+  above the radar, each pixel routed to the sweep whose beam passes
+  through it under the 4/3-Earth refraction model. Press [Y] inside
+  the cross-section to flip between height (km) and elevation angle.
+- Probe popup (click on map) switches to a vertical-profile chart on
+  single-time / multi-level sources: dBZ vs elangle at the picked
+  point, arrows step elevations, map tracks the active sweep.
+- Quick level cycling without opening the popup: `<`/`>` (or `,`/`.`)
+  step the level down/up. Top status bar shows the active level
+  whenever the source has more than one.
+- Bottom status bar hides the [W]ind toggle for sources that don't
+  carry WindUMS+WindVMS (e.g. radar files).
+- Cross-section endpoint clicks now route through BUTTON1_RELEASED in
+  addition to BUTTON1_CLICKED so terminals that don't synthesise a
+  CLICKED event no longer fall through to the time-series probe.
+
 * Thu May 14 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.14-1.fmi
 - PNG-tree browser: --dir on a directory with subdirs (and no image
   files directly at the root) opens a leaf picker at startup instead of

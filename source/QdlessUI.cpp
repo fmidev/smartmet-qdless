@@ -702,7 +702,11 @@ void UI::popupHelp(HelpContext ctx)
 
   add("q  Esc", "Quit");
   if (ctx.hasMultipleParams && !ctx.isImage && !ctx.isShape) add("p", "Parameter menu");
-  if (ctx.hasMultipleLevels && !ctx.isImage && !ctx.isShape) add("L (Shift)", "Level menu");
+  if (ctx.hasMultipleLevels && !ctx.isImage && !ctx.isShape)
+  {
+    add("L (Shift)", "Level menu");
+    add("< > or , .", "Step level down / up");
+  }
   if (!noTime)
   {
     add("\xe2\x86\x90 \xe2\x86\x92", "Previous / next time");
@@ -749,7 +753,12 @@ void UI::popupHelp(HelpContext ctx)
     add("i", "Toggle city overlay");
     add("PgUp PgDn", "Cities: sparser / denser");
     add("/", "Place search");
-    if (!noProbe) add("x", "Cross-section");
+    if (!noProbe)
+    {
+      add("x", "Cross-section");
+      if (ctx.hasNativeHeight)
+        add("y in section", "Y-axis: height (km) \xe2\x86\x94 elevation angle");
+    }
   }
   add("e", "Export PNG");
   add("", "");
