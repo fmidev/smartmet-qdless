@@ -4,6 +4,7 @@
 #include "QdlessGridFilesSource.h"
 #include "QdlessImageSource.h"
 #include "QdlessOdimSource.h"
+#include "QdlessOdimVolumeSource.h"
 #include "QdlessQueryDataSource.h"
 #include "QdlessShapeSource.h"
 
@@ -88,6 +89,11 @@ std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
     case FileKind::kNetCDF:
       return std::make_unique<GridFilesSource>(filename);
     case FileKind::kHdf5:
+      // ODIM-H5 polar volume: separate backend that handles per-sweep
+      // geometry and exposes elevations as levels. Probe before the 2D
+      // OdimSource branch because both probes succeed for PVOL files.
+      if (OdimVolumeSource::isVolume(filename))
+        return std::make_unique<OdimVolumeSource>(filename);
       if (OdimSource::isOdim(filename))
         return std::make_unique<OdimSource>(filename);
       // NetCDF4 (HDF5 magic, no ODIM /what/object). Hand off to grid-files.

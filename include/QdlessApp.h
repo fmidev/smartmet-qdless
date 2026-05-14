@@ -362,6 +362,9 @@ class App
                              int originRow, int originCol) const;
   std::string buildWindArrows(int cellW, int cellH, int originRow, int originCol);
   std::string buildCityLabels(int cellW, int cellH, int originRow, int originCol);
+  // True if the active source carries both WindUMS and WindVMS — used to
+  // gate the [W]ind status-bar toggle and the wind-arrow overlay.
+  bool hasWindComponents() const;
 
   // Optional pin marker (lat, lon) drawn on the map; set by place search and
   // click-to-probe. Persists until the next set.

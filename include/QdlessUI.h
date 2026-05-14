@@ -55,9 +55,13 @@ class UI
   //   browseMode  — --dir tree mode: offer [D]Browse to re-open the
   //                 PNG-tree picker. Coexists with imageMode (the
   //                 picked leaf loads as a multi-file image source).
+  //   hasWind     — source carries WindUMS + WindVMS. Hides the [W]ind
+  //                 toggle when false (the overlay would render nothing
+  //                 anyway, e.g. for radar PVOL files).
   // imageMode wins when both image and shape flags are set.
   void drawStatusBar(bool imageMode = false, bool shapeMode = false,
-                     bool pgMode = false, bool browseMode = false);
+                     bool pgMode = false, bool browseMode = false,
+                     bool hasWind = true);
 
 
   // Re-blank ncurses windows (after popup close). Caller redraws map.

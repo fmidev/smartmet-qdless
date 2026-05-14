@@ -82,6 +82,13 @@ class DataSource
   virtual void selectLevelIndex(std::size_t i) = 0;
   virtual float levelValueAt(std::size_t i) const = 0;
 
+  // Does the level value increase with altitude? Pressure decreases
+  // (1000 hPa near ground, 100 hPa at altitude) — default false. Height
+  // levels (m above sea), CAPPI heights, and radar elevation angles
+  // increase — those backends override to true so the cross-section
+  // popup orients the Y-axis with ground at the bottom.
+  virtual bool levelsAscendWithValue() const { return false; }
+
   // Sample the currently-selected (param, time, level) slice at a given
   // lat/lon. Returns kFloatMissing or non-finite for missing / out-of-grid.
   virtual float interpolatedValue(double lat, double lon) const = 0;

@@ -1444,9 +1444,15 @@ void App::drawCrossSection(UI& ui)
   for (int i = 0; i < nLevels; ++i) levelValues[i] = itsSource->levelValueAt(i);
   std::vector<int> levelOrder(nLevels);
   std::iota(levelOrder.begin(), levelOrder.end(), 0);
-  // Pressure level: smaller value = higher altitude; show smallest at top.
+  // Pressure-style (default): smaller value = higher altitude; show
+  // smallest at top. Height-style (elangle, height-in-m): larger value =
+  // higher altitude; show largest at top so ground sits at the bottom.
+  const bool ascend = itsSource->levelsAscendWithValue();
   std::sort(levelOrder.begin(), levelOrder.end(),
-            [&](int a, int b) { return levelValues[a] < levelValues[b]; });
+            [&](int a, int b) {
+              return ascend ? levelValues[a] > levelValues[b]
+                            : levelValues[a] < levelValues[b];
+            });
 
   // Layout: chartW columns x nLevels rows.
   const int desiredW = std::min(80, COLS - 16);
@@ -2081,17 +2087,24 @@ void App::appendGraticuleBraille(std::ostringstream& os, const std::vector<Rgb>&
   }
 }
 
-std::string App::buildWindArrows(int cellW, int cellH, int originRow, int originCol)
+bool App::hasWindComponents() const
 {
-  // Find U and V param IDs in this file. If either is missing, render nothing.
   NFmiEnumConverter conv;
   const int uEnum = conv.ToEnum("WindUMS");
   const int vEnum = conv.ToEnum("WindVMS");
-  if (uEnum == kFmiBadParameter || vEnum == kFmiBadParameter) return {};
-  auto hasParam = [this](int e) {
-    return std::find(itsParamIds.begin(), itsParamIds.end(), e) != itsParamIds.end();
-  };
-  if (!hasParam(uEnum) || !hasParam(vEnum)) return {};
+  if (uEnum == kFmiBadParameter || vEnum == kFmiBadParameter) return false;
+  const auto& ids = itsParamIds;
+  return std::find(ids.begin(), ids.end(), uEnum) != ids.end() &&
+         std::find(ids.begin(), ids.end(), vEnum) != ids.end();
+}
+
+std::string App::buildWindArrows(int cellW, int cellH, int originRow, int originCol)
+{
+  // Find U and V param IDs in this file. If either is missing, render nothing.
+  if (!hasWindComponents()) return {};
+  NFmiEnumConverter conv;
+  const int uEnum = conv.ToEnum("WindUMS");
+  const int vEnum = conv.ToEnum("WindVMS");
 
   // Save current param to restore at the end.
   const int savedParam = itsSource->currentParamId();
@@ -2641,7 +2654,8 @@ void App::renderTimeline(UI& ui)
   const bool pgMode = (itsPgDataset != nullptr);
   ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
                   static_cast<int>(itsSource->timeCount()));
-  ui.drawStatusBar(itsSource->isImage(), isShape, pgMode, !itsOpts.browseRoot.empty());
+  ui.drawStatusBar(itsSource->isImage(), isShape, pgMode, !itsOpts.browseRoot.empty(),
+                   hasWindComponents());
   doupdate();
 }
 
@@ -3707,6 +3721,27 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         // < 2 cells of motion → click, not drag.
         if (std::abs(dx) + std::abs(dy) < 2)
         {
+          // Route short PRESS+RELEASE pairs to the cross-section picker
+          // when one is pending. Some terminals deliver PRESS/RELEASE
+          // without a synthesised CLICKED, so the cross-section branch
+          // below never fires for them and the probe popup wins instead.
+          if (itsCrossPicks > 0)
+          {
+            if (itsCrossPicks == 2)
+            {
+              itsCrossX1 = itsDragStartX;
+              itsCrossY1 = itsDragStartY;
+              itsCrossPicks = 1;
+              itsLastMessage = "Cross-section: click second endpoint";
+            }
+            else
+            {
+              beginCrossSection(itsCrossX1, itsCrossY1, itsDragStartX, itsDragStartY, ui);
+              itsCrossPicks = 0;
+              if (itsCrossActive) itsLastMessage.clear();
+            }
+            return true;
+          }
           openProbe(itsDragStartX, itsDragStartY, ui);
           return true;
         }

@@ -205,7 +205,8 @@ void UI::drawTimeline(const std::string& label, int idx, int total)
   wnoutrefresh(itsTimeWin);
 }
 
-void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseMode)
+void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseMode,
+                       bool hasWind)
 {
   werase(itsStatusWin);
   // Layout: [Q]uit  [P]aram  [L]evel  Time ←→  Zoom +/-  Pan hjkl  [0]Reset  [?]Help
@@ -227,7 +228,7 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseM
     }
     put("[G]Legend", 1);
     put("[N]Grid", 1);
-    put("[W]ind", 1);
+    if (hasWind) put("[W]ind", 1);
     put("[I]Cities", 1);
     put("[C]oast", 1);
     put("[B]orders", 1);
