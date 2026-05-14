@@ -3024,38 +3024,59 @@ void App::openProbe(int cellX, int cellY, UI& ui)
 
 void App::openProbeAt(double lat, double lon, UI& ui)
 {
+  // Single-time, multi-level files (e.g. radar PVOL) have a degenerate
+  // time-series, so the probe popup samples across LEVELS instead and
+  // becomes a vertical profile chart. Arrow keys then step elevations;
+  // the marker on the chart tracks the active level. Falls back to the
+  // standard time-series whenever there's more than one time step.
+  const bool useLevels = (itsSource->timeCount() <= 1 && itsSource->levelCount() > 1);
+
   // The popup runs an event loop until the user closes it via the keyboard.
   // A click outside the chart but on the map area is reported back as a
   // request to re-probe at that cell — we update the marker, redraw the
   // map, and reopen the popup at the new location.
   while (true)
   {
-    // Sample the current parameter at this lat/lon for every time step.
-    // Save and restore the time index so the rest of the UI keeps its state.
+    // Sample the current parameter at this lat/lon for every step (each
+    // step is one time index in the default mode, one level in VPR mode).
+    // Save and restore the iterated index so the rest of the UI keeps state.
     std::vector<float> series;
-    std::vector<std::string> timeLabels;
-    series.reserve(itsSource->timeCount());
-    timeLabels.reserve(itsSource->timeCount());
+    std::vector<std::string> stepLabels;
+    const std::size_t stepCount =
+        useLevels ? itsSource->levelCount() : itsSource->timeCount();
+    series.reserve(stepCount);
+    stepLabels.reserve(stepCount);
     const std::size_t savedTime = itsSource->currentTimeIndex();
-    for (std::size_t i = 0; i < itsSource->timeCount(); ++i)
+    const std::size_t savedLevel = itsSource->currentLevelIndex();
+    for (std::size_t i = 0; i < stepCount; ++i)
     {
-      itsSource->selectTimeIndex(i);
+      if (useLevels) itsSource->selectLevelIndex(i);
+      else itsSource->selectTimeIndex(i);
       series.push_back(transform(itsSource->interpolatedValue(lat, lon)));
-      timeLabels.push_back(currentTimeLabel());
+      stepLabels.push_back(useLevels ? itsSource->levelLabel(i) : currentTimeLabel());
     }
-    itsSource->selectTimeIndex(savedTime);
+    if (useLevels) itsSource->selectLevelIndex(savedLevel);
+    else itsSource->selectTimeIndex(savedTime);
 
     NFmiEnumConverter conv;
     std::string param = itsSource->paramShortName(itsSource->currentParamId());
 
     // Callback: when the user presses an arrow inside the popup, update the
-    // querydata's time index, refresh the bottom timeline label so the time
-    // there tracks the popup marker, then redraw the map underneath. The
-    // popup loop re-emits its raw-ANSI on top, so the popup stays visible.
+    // iterated dimension (time or level) and redraw the map. Bottom timeline
+    // only refreshes on time changes — for VPR it stays on the one valid
+    // time and would just flicker.
     auto onTimeChange = [&](int newIdx) {
-      itsSource->selectTimeIndex(static_cast<unsigned long>(newIdx));
-      renderTimeline(ui);
-      drawMap(ui);
+      if (useLevels)
+      {
+        itsSource->selectLevelIndex(static_cast<unsigned long>(newIdx));
+        drawMap(ui);
+      }
+      else
+      {
+        itsSource->selectTimeIndex(static_cast<unsigned long>(newIdx));
+        renderTimeline(ui);
+        drawMap(ui);
+      }
     };
 
     // Translate the marker lat/lon into a terminal cell so the popup can
@@ -3099,12 +3120,18 @@ void App::openProbeAt(double lat, double lon, UI& ui)
       return s;
     };
     const std::string units = itsSource->paramUnits(itsSource->currentParamId());
-    int finalIdx = ui.popupTimeseries(param, lat, lon, series, timeLabels,
-                                      static_cast<int>(savedTime), itsRenderer,
-                                      activePanel().palette, onTimeChange, computeStats,
-                                      units, &itsAnimationDelayMs,
-                                      avoidRow, avoidCol, &clickRow, &clickCol);
-    itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
+    // Viewport stats sweep across times; they're meaningless when the popup
+    // is iterating levels, so suppress that overlay in VPR mode.
+    int finalIdx = ui.popupTimeseries(
+        param, lat, lon, series, stepLabels,
+        static_cast<int>(useLevels ? savedLevel : savedTime), itsRenderer,
+        activePanel().palette, onTimeChange,
+        useLevels ? std::function<UI::StatsSeries()>{} : computeStats,
+        units, &itsAnimationDelayMs, avoidRow, avoidCol, &clickRow, &clickCol);
+    if (useLevels)
+      itsSource->selectLevelIndex(static_cast<unsigned long>(finalIdx));
+    else
+      itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
 
     if (clickRow < 0 || clickCol < 0) break;  // closed via keyboard
 
