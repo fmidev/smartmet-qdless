@@ -1440,8 +1440,13 @@ void App::drawCrossSection(UI& ui)
   // Collect level values + sort indices so the popup shows high altitude /
   // low pressure on top.
   std::vector<float> levelValues(nLevels);
+  std::vector<std::string> levelLabels_(nLevels);
   const std::size_t savedLevel = itsSource->currentLevelIndex();
-  for (int i = 0; i < nLevels; ++i) levelValues[i] = itsSource->levelValueAt(i);
+  for (int i = 0; i < nLevels; ++i)
+  {
+    levelValues[i] = itsSource->levelValueAt(i);
+    levelLabels_[i] = itsSource->levelLabel(static_cast<std::size_t>(i));
+  }
   std::vector<int> levelOrder(nLevels);
   std::iota(levelOrder.begin(), levelOrder.end(), 0);
   // Pressure-style (default): smaller value = higher altitude; show
@@ -1464,8 +1469,8 @@ void App::drawCrossSection(UI& ui)
 
   // Compute label width for level labels.
   int labelW = 0;
-  for (float v : levelValues)
-    labelW = std::max(labelW, static_cast<int>(fmt::format("{:g}", v).size()));
+  for (const auto& s : levelLabels_)
+    labelW = std::max(labelW, static_cast<int>(s.size()));
   labelW = std::max(labelW, 4);
 
   // Haversine distance for the X-axis scale.
@@ -1565,7 +1570,7 @@ void App::drawCrossSection(UI& ui)
     pos(1 + cy);
     os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m ";
     // Label.
-    os << fmt::format("{:>{}g}", levelValues[levelOrder[cy]], labelW) << " \xe2\x94\xa4";
+    os << fmt::format("{:>{}}", levelLabels_[levelOrder[cy]], labelW) << " \xe2\x94\xa4";
 
     // Render this row's chart cells using a tiny Renderer call.
     // Build the slice: subRows sub-rows of pixels for this level.
@@ -2737,22 +2742,28 @@ std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
       rows.emplace_back("Times", fmt::format("{} steps, {} -> {}", nt, first, last));
   }
 
-  // Levels.
+  // Levels — ignore non-finite sentinels (used by sources with synthetic
+  // levels like PVOL's "MAX" composite) for the min/max display.
   const std::size_t nl = itsSource->levelCount();
   if (nl > 0)
   {
-    float lo = itsSource->levelValueAt(0);
-    float hi = lo;
-    for (std::size_t i = 1; i < nl; ++i)
+    float lo = std::numeric_limits<float>::infinity();
+    float hi = -std::numeric_limits<float>::infinity();
+    std::size_t finiteCount = 0;
+    for (std::size_t i = 0; i < nl; ++i)
     {
       const float v = itsSource->levelValueAt(i);
+      if (!std::isfinite(v)) continue;
       lo = std::min(lo, v);
       hi = std::max(hi, v);
+      ++finiteCount;
     }
-    if (nl == 1)
-      rows.emplace_back("Levels", fmt::format("1 ({:g})", lo));
-    else
+    if (finiteCount == 1)
+      rows.emplace_back("Levels", fmt::format("{} ({:g})", nl, lo));
+    else if (finiteCount > 1)
       rows.emplace_back("Levels", fmt::format("{} ({:g}..{:g})", nl, lo, hi));
+    else
+      rows.emplace_back("Levels", fmt::format("{}", nl));
   }
 
   rows.emplace_back("", "");
@@ -2790,7 +2801,7 @@ std::vector<std::string> App::levelLabels() const
   std::vector<std::string> out;
   out.reserve(itsSource->levelCount());
   for (std::size_t i = 0; i < itsSource->levelCount(); ++i)
-    out.push_back(fmt::format("{:g}", itsSource->levelValueAt(i)));
+    out.push_back(itsSource->levelLabel(i));
   return out;
 }
 
@@ -3948,7 +3959,7 @@ int App::runOnce()
             << currentTimeLabel() << " (" << (itsSource->currentTimeIndex() + 1) << "/"
             << itsSource->timeCount() << ")";
   if (!origLabel.empty()) std::cout << " | analysis: " << origLabel;
-  std::cout << " | level: " << itsSource->levelValueAt(itsSource->currentLevelIndex())
+  std::cout << " | level: " << itsSource->levelLabel(itsSource->currentLevelIndex())
             << " (" << (itsSource->currentLevelIndex() + 1) << "/" << itsSource->levelCount()
             << ") | range: [" << dataMin << ", " << dataMax
             << "] | palette: " << activePanel().palette.name()

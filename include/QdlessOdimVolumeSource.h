@@ -54,6 +54,7 @@ class OdimVolumeSource : public DataSource
   std::size_t currentLevelIndex() const override;
   void selectLevelIndex(std::size_t i) override;
   float levelValueAt(std::size_t i) const override;
+  std::string levelLabel(std::size_t i) const override;
   bool levelsAscendWithValue() const override { return true; }
 
   float interpolatedValue(double lat, double lon) const override;
@@ -81,6 +82,10 @@ class OdimVolumeSource : public DataSource
     double undetect = 0;
     std::vector<float> raw;    // raw values, row-major (ray, bin), length nrays*nbins
   };
+
+  // Sample one sweep at world XY (metres east/north of the radar).
+  // Returns NaN for out-of-cone / nodata / undetect.
+  float sampleSweep(const Sweep& s, double x, double y) const;
 
   std::string itsFilename;
   std::unique_ptr<NFmiArea> itsArea;  // AEQD centred on the radar

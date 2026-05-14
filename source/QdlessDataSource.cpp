@@ -1,5 +1,7 @@
 #include "QdlessDataSource.h"
 
+#include <fmt/format.h>
+
 #include "QdlessGeoTiffSource.h"
 #include "QdlessGridFilesSource.h"
 #include "QdlessImageSource.h"
@@ -126,6 +128,11 @@ void DataSource::latLonToUV(double lat, double lon, double& u, double& v) const
   const double lonSpan = bbox.maxLon - bbox.minLon;
   u = lonSpan > 0 ? (lon - bbox.minLon) / lonSpan : 0.0;
   v = latSpan > 0 ? (bbox.maxLat - lat) / latSpan : 0.0;
+}
+
+std::string DataSource::levelLabel(std::size_t i) const
+{
+  return fmt::format("{:g}", levelValueAt(i));
 }
 
 std::string DataSource::gridSignature() const

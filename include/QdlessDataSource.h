@@ -89,6 +89,12 @@ class DataSource
   // popup orients the Y-axis with ground at the bottom.
   virtual bool levelsAscendWithValue() const { return false; }
 
+  // Human-readable label for level `i`, used by the [L] popup and the
+  // status line. Default formats `levelValueAt(i)` as a number; sources
+  // with synthetic levels (e.g. PVOL "MAX" composite) override to give
+  // those entries a string tag instead of a meaningless numeric value.
+  virtual std::string levelLabel(std::size_t i) const;
+
   // Sample the currently-selected (param, time, level) slice at a given
   // lat/lon. Returns kFloatMissing or non-finite for missing / out-of-grid.
   virtual float interpolatedValue(double lat, double lon) const = 0;

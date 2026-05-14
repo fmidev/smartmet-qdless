@@ -224,36 +224,38 @@ void OdimVolumeSource::selectTimeIndex(std::size_t /*i*/) {}
 NFmiMetTime OdimVolumeSource::currentValidTime() const { return itsValidTime; }
 NFmiMetTime OdimVolumeSource::originTime() const { return itsValidTime; }
 
-std::size_t OdimVolumeSource::levelCount() const { return itsSweeps.size(); }
+// Total level count = real sweeps + 1 synthetic "MAX" composite level at
+// the end (index sweeps.size()). With levelsAscendWithValue=true and a
+// +infinity sentinel, MAX sorts to the top of the cross-section — the
+// row becomes the "envelope" of all elevations along the chosen line.
+std::size_t OdimVolumeSource::levelCount() const { return itsSweeps.size() + 1; }
 std::size_t OdimVolumeSource::currentLevelIndex() const { return itsCurrentLevel; }
 
 void OdimVolumeSource::selectLevelIndex(std::size_t i)
 {
-  if (i < itsSweeps.size()) itsCurrentLevel = i;
+  if (i <= itsSweeps.size()) itsCurrentLevel = i;
 }
 
 float OdimVolumeSource::levelValueAt(std::size_t i) const
 {
-  if (i >= itsSweeps.size()) return 0.f;
-  return static_cast<float>(itsSweeps[i].elangle);
+  if (i < itsSweeps.size())
+    return static_cast<float>(itsSweeps[i].elangle);
+  // Synthetic MAX level — +∞ so it sorts above every real elangle in the
+  // height-style cross-section ordering.
+  return std::numeric_limits<float>::infinity();
 }
 
-float OdimVolumeSource::interpolatedValue(double lat, double lon) const
+std::string OdimVolumeSource::levelLabel(std::size_t i) const
 {
-  if (!itsArea || itsCurrentLevel >= itsSweeps.size())
-    return std::numeric_limits<float>::quiet_NaN();
+  if (i < itsSweeps.size()) return fmt::format("{:g}", itsSweeps[i].elangle);
+  return "MAX";
+}
 
-  const Sweep& s = itsSweeps[itsCurrentLevel];
+float OdimVolumeSource::sampleSweep(const Sweep& s, double x, double y) const
+{
   if (s.raw.empty()) return std::numeric_limits<float>::quiet_NaN();
 
-  // AEQD centred on the radar → world XY are metres east/north of the
-  // radar. World X = east, world Y = north for the +proj=aeqd ordering
-  // newbase uses.
-  const NFmiPoint world = itsArea->LatLonToWorldXY(NFmiPoint(lon, lat));
-  const double x = world.X();
-  const double y = world.Y();
   const double rGround = std::hypot(x, y);
-
   // Convert ground range to slant range for this elevation. Flat-Earth
   // approximation: r_s ≈ r_g / cos(α). Good to a few percent for α ≤ 45°
   // and ranges ≤ 250 km — adequate for terminal-resolution rendering.
@@ -262,7 +264,6 @@ float OdimVolumeSource::interpolatedValue(double lat, double lon) const
   const double rSlant = rGround / cosE;
   if (rSlant < s.rstart) return std::numeric_limits<float>::quiet_NaN();
 
-  // Bin index along the ray.
   const long bin = static_cast<long>((rSlant - s.rstart) / s.rscale);
   if (bin < 0 || bin >= static_cast<long>(s.nbins))
     return std::numeric_limits<float>::quiet_NaN();
@@ -284,6 +285,34 @@ float OdimVolumeSource::interpolatedValue(double lat, double lon) const
   // Both render transparent — see the matching note in OdimSource.
   if (dv == s.nodata || dv == s.undetect) return std::numeric_limits<float>::quiet_NaN();
   return static_cast<float>(s.gain * dv + s.offset);
+}
+
+float OdimVolumeSource::interpolatedValue(double lat, double lon) const
+{
+  if (!itsArea) return std::numeric_limits<float>::quiet_NaN();
+
+  // AEQD centred on the radar → world XY are metres east/north of the
+  // radar. World X = east, world Y = north for the +proj=aeqd ordering
+  // newbase uses.
+  const NFmiPoint world = itsArea->LatLonToWorldXY(NFmiPoint(lon, lat));
+  const double x = world.X();
+  const double y = world.Y();
+
+  // Synthetic MAX level: column-max projection — take the maximum
+  // physical value across all sweeps that observe this column. Useful
+  // as a storm overview when individual elevations are noisy or sparse.
+  if (itsCurrentLevel >= itsSweeps.size())
+  {
+    float best = std::numeric_limits<float>::quiet_NaN();
+    for (const auto& s : itsSweeps)
+    {
+      const float v = sampleSweep(s, x, y);
+      if (!std::isnan(v) && (std::isnan(best) || v > best)) best = v;
+    }
+    return best;
+  }
+
+  return sampleSweep(itsSweeps[itsCurrentLevel], x, y);
 }
 
 void OdimVolumeSource::uvToLatLon(double u, double v, double& lat, double& lon) const
