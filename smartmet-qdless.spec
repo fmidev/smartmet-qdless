@@ -33,6 +33,7 @@ BuildRequires: hdf5-devel >= 1.8.12
 BuildRequires: jsoncpp-devel
 BuildRequires: libjpeg-devel
 BuildRequires: libpng-devel
+BuildRequires: libwebp13-devel
 BuildRequires: make
 BuildRequires: ncurses-devel
 BuildRequires: netcdf-cxx4-devel
@@ -63,6 +64,7 @@ Requires: jsoncpp
 Requires: libgcc
 Requires: libjpeg
 Requires: libpng
+Requires: libwebp
 Requires: libstdc++
 Requires: ncurses-libs
 Requires: netcdf >= 4.3.3.1
