@@ -7,9 +7,18 @@ include $(shell echo $${PREFIX-/usr})/share/smartmet/devel/makefile.inc
 
 DEFINES = -DUNIX
 
+ifneq ($(wildcard /usr/include/webp13/webp/encode.h),)
+  WEBP_CFLAGS = -I/usr/include/webp13
+  WEBP_LIBS = -L$(libdir)/webp13 -lwebpdemux -lwebp
+else
+  WEBP_CFLAGS =
+  WEBP_LIBS = -lwebpdemux -lwebp
+endif
+
 INCLUDES += \
 	-isystem $(includedir)/netcdf-3 \
 	-I$(includedir)/smartmet \
+	$(WEBP_CFLAGS) \
 	-Iinclude
 
 LIBS += $(PREFIX_LDFLAGS) \
@@ -29,9 +38,10 @@ LIBS += $(PREFIX_LDFLAGS) \
 	-lboost_filesystem \
 	$(REQUIRED_LIBS) \
 	-lhdf5 \
-	-lwebpdemux -lwebp \
+	$(WEBP_LIBS) \
 	-lbz2 -ljpeg -lpng -lz -lrt \
-	-lpthread
+	-lpthread \
+	-ldl
 
 # Compilation directories
 
