@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.5.14
-Release: 3%{?dist}.fmi
+Version: 26.5.22
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Fri May 22 2026 Andris Pavēnis <andris.pavenis@fmi.fi> 26.5.22-1.fmi
+- Fix building RPM packages
+
 * Thu May 14 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.14-3.fmi
 - 3D point-cloud view for ODIM PVOL polar volumes. Press [3] inside a
   PVOL file: the volume renders as a rotatable point cloud above a
