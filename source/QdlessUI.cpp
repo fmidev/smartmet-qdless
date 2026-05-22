@@ -759,14 +759,14 @@ void UI::popupHelp(HelpContext ctx)
       if (ctx.hasNativeHeight)
         add("y in section", "Y-axis: height (km) \xe2\x86\x94 elevation angle");
     }
-    if (ctx.hasNativeHeight)
+    if (ctx.has3DVolume)
     {
       add("", "");
-      add("3", "Toggle 3D point-cloud view (PVOL only)");
+      add("3", "Toggle 3D point-cloud view");
       add("h l in 3D", "Yaw left / right");
       add("j k in 3D", "Pitch down / up");
       add("+ - in 3D", "Zoom in / out");
-      add(", . in 3D", "Lower / raise dBZ threshold");
+      add(", . in 3D", "Lower / raise threshold (dBZ for PVOL, % for QD)");
       add("PgUp PgDn in 3D", "Vertical exaggeration: more / less");
       add("0 in 3D", "Reset camera");
     }

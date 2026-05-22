@@ -3,11 +3,14 @@
 #include <newbase/NFmiArea.h>
 #include <newbase/NFmiEnumConverter.h>
 #include <newbase/NFmiFastQueryInfo.h>
+#include <newbase/NFmiGlobals.h>
+#include <newbase/NFmiParameterName.h>
 #include <newbase/NFmiPoint.h>
 #include <newbase/NFmiProducer.h>
 #include <newbase/NFmiQueryData.h>
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace Qdless
@@ -225,5 +228,153 @@ std::string QueryDataSource::gridSignature() const
   return std::string("qd:") + area->ProjStr() + "|" +
          std::to_string(itsInfo->GridXNumber()) + "x" +
          std::to_string(itsInfo->GridYNumber());
+}
+
+namespace
+{
+// Returns true if the file's param list contains GeomHeight (preferred) or
+// GeopHeight, with the same level set as everything else. Caller must
+// restore the param index afterwards. The probe leaves itsInfo pointing
+// at the first available height param, with a `useGeop` flag telling the
+// caller it needs to divide by g.
+bool selectHeightParam(NFmiFastQueryInfo& info, bool& useGeop)
+{
+  if (info.Param(kFmiGeomHeight))
+  {
+    useGeop = false;
+    return true;
+  }
+  if (info.Param(kFmiGeopHeight))
+  {
+    useGeop = true;
+    return true;
+  }
+  return false;
+}
+}  // namespace
+
+bool QueryDataSource::isVolumetric() const
+{
+  if (itsInfo->SizeLevels() < 2) return false;
+  const auto savedParam = itsInfo->ParamIndex();
+  bool useGeop = false;
+  const bool ok = selectHeightParam(*itsInfo, useGeop);
+  itsInfo->ParamIndex(savedParam);
+  return ok;
+}
+
+bool QueryDataSource::sampleVolume(const std::function<void(const VolumeSample&)>& cb) const
+{
+  const auto nLevels = itsInfo->SizeLevels();
+  const auto nLoc = itsInfo->SizeLocations();
+  if (nLevels < 2 || nLoc == 0) return false;
+
+  const auto savedParam = itsInfo->ParamIndex();
+  const auto savedLevel = itsInfo->LevelIndex();
+  const auto savedLoc = itsInfo->LocationIndex();
+
+  bool useGeop = false;
+  if (!selectHeightParam(*itsInfo, useGeop))
+  {
+    itsInfo->ParamIndex(savedParam);
+    return false;
+  }
+  const auto heightParamIndex = itsInfo->ParamIndex();
+  const double heightScale = useGeop ? (1.0 / 9.80665) : 1.0;
+
+  // Lat/lon per grid cell is invariant across level/param/time, so cache
+  // it once. 65 levels × 316·356 ≈ 7.3M emissions; we don't want to do
+  // a NFmiArea projection that many times.
+  std::vector<std::pair<float, float>> latlons(nLoc);
+  itsInfo->FirstLocation();
+  for (std::size_t i = 0; i < nLoc; ++i)
+  {
+    const NFmiPoint ll = itsInfo->LatLon();
+    latlons[i] = {static_cast<float>(ll.Y()), static_cast<float>(ll.X())};
+    if (!itsInfo->NextLocation()) break;
+  }
+
+  std::vector<float> heights(nLoc);
+  std::vector<float> values(nLoc);
+
+  for (std::size_t li = 0; li < nLevels; ++li)
+  {
+    // Heights at this level.
+    itsInfo->ParamIndex(heightParamIndex);
+    itsInfo->LevelIndex(static_cast<unsigned long>(li));
+    itsInfo->FirstLocation();
+    for (std::size_t i = 0; i < nLoc; ++i)
+    {
+      heights[i] = itsInfo->FloatValue();
+      if (!itsInfo->NextLocation()) break;
+    }
+    // Active-param values at this level.
+    itsInfo->ParamIndex(savedParam);
+    itsInfo->LevelIndex(static_cast<unsigned long>(li));
+    itsInfo->FirstLocation();
+    for (std::size_t i = 0; i < nLoc; ++i)
+    {
+      values[i] = itsInfo->FloatValue();
+      if (!itsInfo->NextLocation()) break;
+    }
+    for (std::size_t i = 0; i < nLoc; ++i)
+    {
+      const float h = heights[i];
+      const float v = values[i];
+      if (h == kFloatMissing || v == kFloatMissing) continue;
+      if (!std::isfinite(h) || !std::isfinite(v)) continue;
+      cb(VolumeSample{static_cast<double>(latlons[i].first),
+                      static_cast<double>(latlons[i].second),
+                      static_cast<double>(h) * heightScale, v});
+    }
+  }
+
+  itsInfo->ParamIndex(savedParam);
+  itsInfo->LevelIndex(savedLevel);
+  itsInfo->LocationIndex(savedLoc);
+  return true;
+}
+
+bool QueryDataSource::isSurfaceStack() const
+{
+  // Need at least the bottom two cloud layers plus precip + fog to make
+  // the synthetic stack visually meaningful. HighCloudCover is optional.
+  const auto savedParam = itsInfo->ParamIndex();
+  auto has = [&](FmiParameterName p) { return itsInfo->Param(p); };
+  const bool ok =
+      has(kFmiPrecipitation1h) && has(kFmiFogIntensity) &&
+      has(kFmiLowCloudCover) && has(kFmiMediumCloudCover);
+  itsInfo->ParamIndex(savedParam);
+  return ok;
+}
+
+bool QueryDataSource::sampleSlab(
+    int paramId, const std::function<void(double, double, float)>& cb) const
+{
+  const auto savedParam = itsInfo->ParamIndex();
+  const auto savedLoc = itsInfo->LocationIndex();
+
+  if (!itsInfo->Param(static_cast<FmiParameterName>(paramId)))
+  {
+    itsInfo->ParamIndex(savedParam);
+    return false;
+  }
+
+  itsInfo->FirstLocation();
+  const auto nLoc = itsInfo->SizeLocations();
+  for (std::size_t i = 0; i < nLoc; ++i)
+  {
+    const float v = itsInfo->FloatValue();
+    if (v != kFloatMissing && std::isfinite(v))
+    {
+      const NFmiPoint ll = itsInfo->LatLon();
+      cb(ll.Y(), ll.X(), v);
+    }
+    if (!itsInfo->NextLocation()) break;
+  }
+
+  itsInfo->ParamIndex(savedParam);
+  itsInfo->LocationIndex(savedLoc);
+  return true;
 }
 }  // namespace Qdless

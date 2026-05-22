@@ -2,6 +2,7 @@
 
 #include "QdlessMultiFileSource.h"
 #include "QdlessOdimVolumeSource.h"
+#include "QdlessQueryDataSource.h"
 #include "QdlessShapeSource.h"
 #include "QdlessUI.h"
 
@@ -1062,6 +1063,39 @@ Rgb App::borderColor() const
   // GSHHS coastlines (black) and political borders (grey-90), and
   // legible on both the flat-grey fill and the rainbow palette.
   return Rgb{0, 220, 0};
+}
+
+std::optional<Palette> App::loadPaletteByName(const std::string& name) const
+{
+  if (name.empty()) return std::nullopt;
+  std::vector<std::filesystem::path> candidates{
+      std::filesystem::path(itsOpts.paletteDir) / (name + ".json"),
+  };
+  try
+  {
+    const std::filesystem::path exeDir =
+        boost::dll::program_location().parent_path().string();
+    candidates.push_back(exeDir / "palettes" / (name + ".json"));
+    candidates.push_back(exeDir / ".." / "share" / "smartmet" / "qdless" / "palettes" /
+                         (name + ".json"));
+  }
+  catch (const std::exception&)
+  {
+  }
+  if (const char* home = std::getenv("HOME"))
+    candidates.push_back(std::filesystem::path(home) / ".config" / "qdless" / "palettes" /
+                         (name + ".json"));
+  for (const auto& path : candidates)
+  {
+    try
+    {
+      return Palette::loadFromFile(path.string());
+    }
+    catch (const std::exception&)
+    {
+    }
+  }
+  return std::nullopt;
 }
 
 void App::loadPalette()
@@ -3281,11 +3315,13 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         return true;
       case ',': case '<':
         itsThreshold3D -= 5;
-        itsLastMessage = fmt::format("3D threshold: {:.0f} dBZ", itsThreshold3D);
+        itsLastMessage =
+            fmt::format("3D threshold: {:.0f} {}", itsThreshold3D, itsThreshold3DUnit);
         return true;
       case '.': case '>':
         itsThreshold3D += 5;
-        itsLastMessage = fmt::format("3D threshold: {:.0f} dBZ", itsThreshold3D);
+        itsLastMessage =
+            fmt::format("3D threshold: {:.0f} {}", itsThreshold3D, itsThreshold3DUnit);
         return true;
       case KEY_PPAGE:  // PgUp — taller storms
         itsVexagger3D = std::min(50.0, itsVexagger3D * 1.4);
@@ -3405,6 +3441,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       ctx.hasMultipleParams = itsSource->paramIds().size() > 1;
       ctx.hasMultipleLevels = itsSource->levelCount() > 1;
       ctx.hasNativeHeight = itsSource->hasNativeHeight();
+      ctx.has3DVolume = sourceSupports3D();
       ui.popupHelp(ctx);
     }
       return true;
@@ -3797,18 +3834,21 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       return true;
 
     case '3':
-      // Toggle 3D point-cloud view. Only meaningful for PVOL sources;
-      // the renderer auto-reverts to 2D for everything else.
-      if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr)
+      // Toggle 3D point-cloud view. Active for PVOL polar volumes and for
+      // QueryData sources that carry a height field (GeomHeight /
+      // GeopHeight) alongside multiple levels. The renderer auto-reverts
+      // to 2D for everything else.
+      if (sourceSupports3D())
       {
         itsMode3D = !itsMode3D;
+        if (itsMode3D) apply3DDefaultsForSource();
         itsLastMessage = itsMode3D
                              ? "3D: h/l yaw, j/k pitch, +/- zoom, 0 reset, ,/. threshold"
                              : "3D mode off";
       }
       else
       {
-        itsLastMessage = "3D mode: PVOL polar volume sources only";
+        itsLastMessage = "3D mode: needs a polar volume or a multi-level QueryData file";
       }
       return true;
 
@@ -4021,11 +4061,28 @@ void App::drawMap(UI& ui)
   {
     if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr)
     {
-      draw3D(ui);
+      draw3D(ui.layout());
       return;
     }
-    // Drop back to 2D if the source isn't a PVOL — keeps the toggle
-    // safe even when the user pages through a multi-file batch.
+    if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
+        qd != nullptr)
+    {
+      // Prefer the real volumetric path when the file has a height field
+      // (hybrid / pressure levels). Fall back to the synthetic surface
+      // stack for "flat" files that only carry surface params.
+      if (qd->isVolumetric())
+      {
+        draw3DQueryData(ui.layout());
+        return;
+      }
+      if (qd->isSurfaceStack())
+      {
+        draw3DSurfaceStack(ui.layout());
+        return;
+      }
+    }
+    // Drop back to 2D if the active source can't be drawn in 3D — keeps
+    // the toggle safe across paging through a multi-file batch.
     itsMode3D = false;
   }
 
@@ -4175,7 +4232,7 @@ void App::drawMap(UI& ui)
 // world plane comes out as a circle (not an oval) on the terminal —
 // terminal cells are ≈ 1:2 wide:tall, so a sub-pixel row covers more
 // physical height than a sub-pixel column.
-void App::draw3D(UI& ui)
+void App::draw3D(const Layout& layout)
 {
   const auto* pvol = dynamic_cast<const OdimVolumeSource*>(itsSource.get());
   if (!pvol)
@@ -4184,8 +4241,16 @@ void App::draw3D(UI& ui)
     return;
   }
 
-  const auto& l = ui.layout();
+  const auto& l = layout;
   if (l.map.height < 4 || l.map.width < 4) return;
+
+  // The [c]/[b] handlers clear itsCoastlines / itsBorders when cycled
+  // to "off" and clear the cached path when cycled back, expecting the
+  // next drawMap to reload from disk. drawMap delegates to us in 3D
+  // mode, so we have to drive that reload ourselves — otherwise the
+  // map underlay vanishes after one c→off→on round-trip and never
+  // comes back until the user toggles [3] back to 2D.
+  loadCoastlines(l.map.width * 2, l.map.height * 4);
 
   // Single-panel only in 3D mode; ignores split layouts on purpose since
   // the same volume would just appear twice.
@@ -4280,10 +4345,12 @@ void App::draw3D(UI& ui)
     y = (lat - radarLat) * (M_PI / 180.0) * R_e;
   };
 
-  // Ground plane: coastlines first (low z so radar points above occlude).
-  // Re-use whatever coastlines were loaded for the previous 2D view.
+  // Ground plane: coastlines + borders, drawn to the quadrant buffer for
+  // Thick style (covers more area, easy to see at distance). Braille
+  // style is handled later as an overlay after the main render so it
+  // can use the finer 2×4 sub-cell grid the renderer can't reach.
   // Z = -1 (one metre below ground) so radar bins at h=0 still paint over.
-  auto drawPolylines = [&](const std::vector<Polyline>& polys, Rgb color) {
+  auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color) {
     for (const auto& p : polys)
     {
       if (p.lats.size() < 2) continue;
@@ -4299,8 +4366,10 @@ void App::draw3D(UI& ui)
       }
     }
   };
-  drawPolylines(itsCoastlines, Rgb{200, 200, 200});
-  drawPolylines(itsBorders, Rgb{120, 120, 120});
+  if (itsCoastlineStyle == LineStyle::Thick)
+    drawPolylinesThick(itsCoastlines, Rgb{200, 200, 200});
+  if (itsBorderStyle == LineStyle::Thick)
+    drawPolylinesThick(itsBorders, Rgb{120, 120, 120});
 
   // Range rings at 50, 100, 150, 200 km — visual anchor for distance.
   {
@@ -4366,8 +4435,19 @@ void App::draw3D(UI& ui)
         double col = 0, rowSx = 0;
         float depth = 0;
         project(wx, wy, wz, col, rowSx, depth);
-        plot(static_cast<int>(col), static_cast<int>(rowSx), depth,
-             activePanel().palette.lookup(transform(value)));
+        // Splat each bin to a 2×2 sub-pixel block: a single sub-pixel
+        // per bin makes the volume look sparse even with 500 radial
+        // bins, because adjacent bins along a ray collapse onto the
+        // same screen column at low elevations. The splat fills the
+        // gaps without losing resolution on dense storms (the z-buffer
+        // keeps the closest sample wherever they overlap).
+        const Rgb color = activePanel().palette.lookup(transform(value));
+        const int c = static_cast<int>(col);
+        const int r = static_cast<int>(rowSx);
+        plot(c,     r,     depth, color);
+        plot(c + 1, r,     depth, color);
+        plot(c,     r + 1, depth, color);
+        plot(c + 1, r + 1, depth, color);
       }
     }
   }
@@ -4376,11 +4456,135 @@ void App::draw3D(UI& ui)
   std::ostringstream os;
   itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
 
+  // Braille overlay for line styles set to Braille. Uses a finer 2×4
+  // sub-cell mask than the renderer's quadrant grid, with the camera's
+  // z-buffer (sampled at the nearest quadrant pixel) so radar bins
+  // still occlude coastlines behind them.
+  const bool brailleCoast =
+      itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder =
+      itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+  if (brailleCoast || brailleBorder)
+  {
+    const int bW = cellW * 2;
+    const int bH = cellH * 4;
+    std::vector<unsigned char> dotMask(static_cast<std::size_t>(bW) * bH, 0);
+    std::vector<Rgb> dotColor(static_cast<std::size_t>(bW) * bH, Rgb{0, 0, 0});
+
+    // Braille-grid projection: same x, but y scaled by 4/subRows so the
+    // same world coords land on the right braille row.
+    const double yFineScale = 4.0 / subRows;
+    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth) {
+      const double sx = rightX * wx + rightY * wy + rightZ * wz;
+      const double sy = upX * wx + upY * wy + upZ * wz;
+      const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
+      bx = static_cast<int>(std::round(bW / 2.0 + xscale * sx));
+      by = static_cast<int>(std::round(bH / 2.0 - yscale * yFineScale * sy));
+      depth = static_cast<float>(dp * depthScale);
+    };
+
+    auto plotB = [&](int bx, int by, float depth, Rgb color) {
+      if (bx < 0 || bx >= bW || by < 0 || by >= bH) return;
+      // Z-test against the quadrant z-buffer at the nearest sub-pixel.
+      const int qy = by * subRows / 4;
+      const std::size_t qidx = static_cast<std::size_t>(qy) * subW + bx;
+      if (depth >= zbuf[qidx]) return;
+      const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+      dotMask[bidx] = 1;
+      dotColor[bidx] = color;
+    };
+
+    auto lineB = [&](double wx0, double wy0, double wz0,
+                     double wx1, double wy1, double wz1, Rgb color) {
+      int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+      float d0 = 0, d1 = 0;
+      projectB(wx0, wy0, wz0, x0, y0, d0);
+      projectB(wx1, wy1, wz1, x1, y1, d1);
+      const int adx = std::abs(x1 - x0);
+      const int ady = std::abs(y1 - y0);
+      const int steps = std::max(adx, ady);
+      if (steps <= 0)
+      {
+        plotB(x0, y0, d0, color);
+        return;
+      }
+      for (int i = 0; i <= steps; ++i)
+      {
+        const double t = static_cast<double>(i) / steps;
+        const int cx = static_cast<int>(std::round(x0 + t * (x1 - x0)));
+        const int cy = static_cast<int>(std::round(y0 + t * (y1 - y0)));
+        const float dt = static_cast<float>(d0 + t * (d1 - d0));
+        plotB(cx, cy, dt, color);
+      }
+    };
+
+    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color) {
+      for (const auto& p : polys)
+      {
+        if (p.lats.size() < 2) continue;
+        double x0 = 0, y0 = 0;
+        latLonToXY(p.lats[0], p.lons[0], x0, y0);
+        for (std::size_t i = 1; i < p.lats.size(); ++i)
+        {
+          double x1 = 0, y1 = 0;
+          latLonToXY(p.lats[i], p.lons[i], x1, y1);
+          lineB(x0, y0, -1, x1, y1, -1, color);
+          x0 = x1;
+          y0 = y1;
+        }
+      }
+    };
+
+    if (brailleCoast) drawPolyB(itsCoastlines, Rgb{200, 200, 200});
+    if (brailleBorder) drawPolyB(itsBorders, Rgb{120, 120, 120});
+
+    // Emit positioned braille glyphs. BG sampled from the underlying
+    // quadrant pixel so radar volume colours still show through.
+    std::string brailleOut;
+    for (int cy = 0; cy < cellH; ++cy)
+    {
+      for (int cx = 0; cx < cellW; ++cx)
+      {
+        unsigned cellMask = 0;
+        Rgb cellFg{200, 200, 200};
+        for (int sy = 0; sy < 4; ++sy)
+        {
+          for (int sx = 0; sx < 2; ++sx)
+          {
+            const int bx = cx * 2 + sx;
+            const int by = cy * 4 + sy;
+            const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+            if (dotMask[bidx] != 0U)
+            {
+              cellMask |= 1U << brailleBit(sx, sy);
+              cellFg = dotColor[bidx];
+            }
+          }
+        }
+        if (cellMask == 0U) continue;
+        const int qy = cy * subRows;
+        const Rgb bg = pixels[static_cast<std::size_t>(qy) * subW + cx * 2];
+        brailleOut += "\x1b[";
+        brailleOut += std::to_string(l.map.row + cy + 1);
+        brailleOut += ';';
+        brailleOut += std::to_string(l.map.col + cx + 1);
+        brailleOut += 'H';
+        brailleOut += itsRenderer.bgEscape(bg);
+        brailleOut += itsRenderer.fgEscape(cellFg);
+        brailleOut += brailleGlyph(cellMask);
+      }
+    }
+    if (!brailleOut.empty())
+    {
+      os << brailleOut << "\x1b[0m";
+    }
+  }
+
   // Camera HUD bottom-right.
   const std::string hud = fmt::format(
-      " 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}dBZ ",
+      " 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}{} ",
       itsCamYaw * 180.0 / M_PI, itsCamPitch * 180.0 / M_PI,
-      itsCamZoom, itsVexagger3D, itsThreshold3D);
+      itsCamZoom, itsVexagger3D, itsThreshold3D, itsThreshold3DUnit);
   const int hudRow = l.map.row + l.map.height - 1;
   const int hudCol = std::max(l.map.col, l.map.col + l.map.width -
                                               static_cast<int>(hud.size()) - 1);
@@ -4390,6 +4594,651 @@ void App::draw3D(UI& ui)
   const std::string s = os.str();
   std::fwrite(s.data(), 1, s.size(), stdout);
   std::fflush(stdout);
+}
+
+// ---------------------------------------------------------------------------
+// 3D point-cloud renderer for QueryData sources with a height field.
+// ---------------------------------------------------------------------------
+//
+// Same camera + z-buffer + 2×2 splat as draw3D, but the point cloud
+// comes from QueryDataSource::sampleVolume() which yields one tuple
+// per (level, grid-cell) of the currently-active parameter, with the
+// height read from GeomHeight (or GeopHeight/g). The world frame is a
+// flat-Earth east/north plane anchored at the centre of the data's
+// lat/lon bounding box — accurate to a few percent across the ~2000 km
+// extent of typical NWP domains, which is good enough for an
+// interactive viewer.
+//
+// Differences from the PVOL path:
+//   - extent comes from boundingBox() not maxRangeMeters()
+//   - threshold is in % (cloud cover) not dBZ
+//   - default vexagger is much larger (~50×) because the troposphere
+//     is two orders of magnitude thinner than NWP domains are wide
+//   - the point cloud is dense at every cell (not sparse like radar
+//     echoes), so threshold gating matters more for both clutter and
+//     for keeping the inside of the cloud blob hidden by its near face
+void App::draw3DQueryData(const Layout& layout)
+{
+  const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
+  if (qd == nullptr || !qd->isVolumetric())
+  {
+    itsMode3D = false;
+    return;
+  }
+
+  const auto& l = layout;
+  if (l.map.height < 4 || l.map.width < 4) return;
+
+  // Same coastline reload trick as draw3D — see comment there.
+  loadCoastlines(l.map.width * 2, l.map.height * 4);
+
+  const int cellW = l.map.width;
+  const int cellH = l.map.height;
+  const int subRows = subRowsForStyle(itsCornerStyle);
+  const int subW = cellW * 2;
+  const int subH = cellH * subRows;
+  const double aspect = static_cast<double>(subRows) / 4.0;
+
+  // Camera basis (copied verbatim from draw3D — same maths).
+  const double cy = std::cos(itsCamYaw);
+  const double sy_ = std::sin(itsCamYaw);
+  const double cp = std::cos(itsCamPitch);
+  const double sp = std::sin(itsCamPitch);
+  const double rightX = cy,  rightY = sy_, rightZ = 0;
+  const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
+  const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
+
+  // Bbox-centred flat-Earth frame. extent = half-width of the larger
+  // axis (in metres) so the data fits the viewport at zoom=1 with the
+  // smaller axis under-using the screen — same convention as the PVOL
+  // path where `extent = maxRangeMeters()` is the data's outer radius.
+  const auto bb = itsSource->boundingBox();
+  const double lat0 = (bb.minLat + bb.maxLat) * 0.5;
+  const double lon0 = (bb.minLon + bb.maxLon) * 0.5;
+  constexpr double R_e = 6371000.0;
+  const double cosLat0 = std::cos(lat0 * M_PI / 180.0);
+  const double extentX =
+      (bb.maxLon - bb.minLon) * (M_PI / 180.0) * R_e * cosLat0 * 0.5;
+  const double extentY = (bb.maxLat - bb.minLat) * (M_PI / 180.0) * R_e * 0.5;
+  const double extent = std::max(extentX, extentY);
+  if (extent <= 0.0) return;
+
+  const double xscale = (subW / 2.0) / extent * itsCamZoom;
+  const double yscale = xscale / aspect;
+  const double depthScale = xscale;
+
+  std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH, Rgb{0, 0, 0, true});
+  std::vector<float> zbuf(static_cast<std::size_t>(subW) * subH,
+                          std::numeric_limits<float>::infinity());
+
+  auto project = [&](double wx, double wy, double wz,
+                     double& col, double& row, float& depth) {
+    const double sx = rightX * wx + rightY * wy + rightZ * wz;
+    const double sy = upX * wx + upY * wy + upZ * wz;
+    const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
+    col = subW / 2.0 + xscale * sx;
+    row = subH / 2.0 - yscale * sy;
+    depth = static_cast<float>(dp * depthScale);
+  };
+
+  auto plot = [&](int c, int r, float depth, Rgb color) {
+    if (c < 0 || c >= subW || r < 0 || r >= subH) return;
+    const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
+    if (depth < zbuf[idx])
+    {
+      zbuf[idx] = depth;
+      pixels[idx] = color;
+    }
+  };
+
+  auto drawLine = [&](double wx0, double wy0, double wz0,
+                      double wx1, double wy1, double wz1, Rgb color) {
+    double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
+    float d0 = 0, d1 = 0;
+    project(wx0, wy0, wz0, c0, r0, d0);
+    project(wx1, wy1, wz1, c1, r1, d1);
+    const double dc = c1 - c0;
+    const double dr = r1 - r0;
+    const double dd = static_cast<double>(d1) - static_cast<double>(d0);
+    const int steps = static_cast<int>(std::ceil(std::max(std::abs(dc), std::abs(dr))));
+    if (steps <= 0)
+    {
+      plot(static_cast<int>(std::round(c0)), static_cast<int>(std::round(r0)), d0, color);
+      return;
+    }
+    for (int i = 0; i <= steps; ++i)
+    {
+      const double t = static_cast<double>(i) / steps;
+      const int c = static_cast<int>(std::round(c0 + t * dc));
+      const int r = static_cast<int>(std::round(r0 + t * dr));
+      const float d = static_cast<float>(d0 + t * dd);
+      plot(c, r, d, color);
+    }
+  };
+
+  // Flat-Earth lat/lon → east/north metres, anchored at the bbox centre.
+  auto latLonToXY = [&](double lat, double lon, double& x, double& y) {
+    x = (lon - lon0) * (M_PI / 180.0) * R_e * cosLat0;
+    y = (lat - lat0) * (M_PI / 180.0) * R_e;
+  };
+
+  auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color) {
+    for (const auto& p : polys)
+    {
+      if (p.lats.size() < 2) continue;
+      double x0 = 0, y0 = 0;
+      latLonToXY(p.lats[0], p.lons[0], x0, y0);
+      for (std::size_t i = 1; i < p.lats.size(); ++i)
+      {
+        double x1 = 0, y1 = 0;
+        latLonToXY(p.lats[i], p.lons[i], x1, y1);
+        drawLine(x0, y0, -1, x1, y1, -1, color);
+        x0 = x1;
+        y0 = y1;
+      }
+    }
+  };
+  if (itsCoastlineStyle == LineStyle::Thick)
+    drawPolylinesThick(itsCoastlines, Rgb{200, 200, 200});
+  if (itsBorderStyle == LineStyle::Thick)
+    drawPolylinesThick(itsBorders, Rgb{120, 120, 120});
+
+  // Volume points. The sampler walks every (level, grid-cell) of the
+  // active parameter; we threshold and splat in the camera frame. The
+  // sampler restores info state on return, so the cb is the only place
+  // we touch per-point work — keep it lean.
+  const float threshold = itsThreshold3D;
+  const double vexagger = itsVexagger3D;
+  qd->sampleVolume([&](const QueryDataSource::VolumeSample& s) {
+    if (!std::isfinite(s.value) || s.value < threshold) return;
+    double wx = 0, wy = 0;
+    latLonToXY(s.lat, s.lon, wx, wy);
+    const double wz = s.heightMeters * vexagger;
+    double col = 0, rowSx = 0;
+    float depth = 0;
+    project(wx, wy, wz, col, rowSx, depth);
+    const Rgb color = activePanel().palette.lookup(transform(s.value));
+    const int c = static_cast<int>(col);
+    const int r = static_cast<int>(rowSx);
+    plot(c,     r,     depth, color);
+    plot(c + 1, r,     depth, color);
+    plot(c,     r + 1, depth, color);
+    plot(c + 1, r + 1, depth, color);
+  });
+
+  std::ostringstream os;
+  itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
+
+  // Braille overlay for coastlines / borders — identical mechanics to
+  // draw3D, just with the bbox-centred latLonToXY plugged in.
+  const bool brailleCoast =
+      itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder =
+      itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+  if (brailleCoast || brailleBorder)
+  {
+    const int bW = cellW * 2;
+    const int bH = cellH * 4;
+    std::vector<unsigned char> dotMask(static_cast<std::size_t>(bW) * bH, 0);
+    std::vector<Rgb> dotColor(static_cast<std::size_t>(bW) * bH, Rgb{0, 0, 0});
+    const double yFineScale = 4.0 / subRows;
+    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth) {
+      const double sx = rightX * wx + rightY * wy + rightZ * wz;
+      const double sy = upX * wx + upY * wy + upZ * wz;
+      const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
+      bx = static_cast<int>(std::round(bW / 2.0 + xscale * sx));
+      by = static_cast<int>(std::round(bH / 2.0 - yscale * yFineScale * sy));
+      depth = static_cast<float>(dp * depthScale);
+    };
+    auto plotB = [&](int bx, int by, float depth, Rgb color) {
+      if (bx < 0 || bx >= bW || by < 0 || by >= bH) return;
+      const int qy = by * subRows / 4;
+      const std::size_t qidx = static_cast<std::size_t>(qy) * subW + bx;
+      if (depth >= zbuf[qidx]) return;
+      const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+      dotMask[bidx] = 1;
+      dotColor[bidx] = color;
+    };
+    auto lineB = [&](double wx0, double wy0, double wz0,
+                     double wx1, double wy1, double wz1, Rgb color) {
+      int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+      float d0 = 0, d1 = 0;
+      projectB(wx0, wy0, wz0, x0, y0, d0);
+      projectB(wx1, wy1, wz1, x1, y1, d1);
+      const int adx = std::abs(x1 - x0);
+      const int ady = std::abs(y1 - y0);
+      const int steps = std::max(adx, ady);
+      if (steps <= 0)
+      {
+        plotB(x0, y0, d0, color);
+        return;
+      }
+      for (int i = 0; i <= steps; ++i)
+      {
+        const double t = static_cast<double>(i) / steps;
+        const int cx = static_cast<int>(std::round(x0 + t * (x1 - x0)));
+        const int cy_ = static_cast<int>(std::round(y0 + t * (y1 - y0)));
+        const float dt = static_cast<float>(d0 + t * (d1 - d0));
+        plotB(cx, cy_, dt, color);
+      }
+    };
+    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color) {
+      for (const auto& p : polys)
+      {
+        if (p.lats.size() < 2) continue;
+        double x0 = 0, y0 = 0;
+        latLonToXY(p.lats[0], p.lons[0], x0, y0);
+        for (std::size_t i = 1; i < p.lats.size(); ++i)
+        {
+          double x1 = 0, y1 = 0;
+          latLonToXY(p.lats[i], p.lons[i], x1, y1);
+          lineB(x0, y0, -1, x1, y1, -1, color);
+          x0 = x1;
+          y0 = y1;
+        }
+      }
+    };
+    if (brailleCoast) drawPolyB(itsCoastlines, Rgb{200, 200, 200});
+    if (brailleBorder) drawPolyB(itsBorders, Rgb{120, 120, 120});
+
+    std::string brailleOut;
+    for (int cy_ = 0; cy_ < cellH; ++cy_)
+    {
+      for (int cx = 0; cx < cellW; ++cx)
+      {
+        unsigned cellMask = 0;
+        Rgb cellFg{200, 200, 200};
+        for (int sy = 0; sy < 4; ++sy)
+        {
+          for (int sx = 0; sx < 2; ++sx)
+          {
+            const int bx = cx * 2 + sx;
+            const int by = cy_ * 4 + sy;
+            const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+            if (dotMask[bidx] != 0U)
+            {
+              cellMask |= 1U << brailleBit(sx, sy);
+              cellFg = dotColor[bidx];
+            }
+          }
+        }
+        if (cellMask == 0U) continue;
+        const int qy = cy_ * subRows;
+        const Rgb bg = pixels[static_cast<std::size_t>(qy) * subW + cx * 2];
+        brailleOut += "\x1b[";
+        brailleOut += std::to_string(l.map.row + cy_ + 1);
+        brailleOut += ';';
+        brailleOut += std::to_string(l.map.col + cx + 1);
+        brailleOut += 'H';
+        brailleOut += itsRenderer.bgEscape(bg);
+        brailleOut += itsRenderer.fgEscape(cellFg);
+        brailleOut += brailleGlyph(cellMask);
+      }
+    }
+    if (!brailleOut.empty()) os << brailleOut << "\x1b[0m";
+  }
+
+  const std::string hud = fmt::format(
+      " 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}{} ",
+      itsCamYaw * 180.0 / M_PI, itsCamPitch * 180.0 / M_PI,
+      itsCamZoom, itsVexagger3D, itsThreshold3D, itsThreshold3DUnit);
+  const int hudRow = l.map.row + l.map.height - 1;
+  const int hudCol = std::max(l.map.col, l.map.col + l.map.width -
+                                              static_cast<int>(hud.size()) - 1);
+  os << "\x1b[" << (hudRow + 1) << ';' << (hudCol + 1) << "H"
+     << "\x1b[48;5;235m\x1b[38;5;15m" << hud << "\x1b[0m";
+
+  const std::string s = os.str();
+  std::fwrite(s.data(), 1, s.size(), stdout);
+  std::fflush(stdout);
+}
+
+// ---------------------------------------------------------------------------
+// Surface-stack 3D renderer for QueryData files without a real vertical axis.
+// ---------------------------------------------------------------------------
+//
+// fmi.sqd carries Precipitation1h, FogIntensity, LowCloudCover,
+// MediumCloudCover, HighCloudCover as separate "surface" parameters with
+// no per-cell height. We stack them at canonical heights so the user
+// gets a cartoon 3D weather picture — enough to read where the
+// precipitation column is, where the fog lies, and how the cloud decks
+// stack vertically. Same camera / z-buffer / splat pipeline as the real
+// volumetric path, but the point cloud is much sparser (5 layers × grid).
+//
+// itsThreshold3D acts on the cloud-cover layers only; precipitation and
+// fog use their own fixed thresholds (mm/h and index value respectively)
+// because the , / . keys would otherwise wipe out one of the three
+// fundamentally-different-unit signals.
+void App::draw3DSurfaceStack(const Layout& layout)
+{
+  const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
+  if (qd == nullptr || !qd->isSurfaceStack())
+  {
+    itsMode3D = false;
+    return;
+  }
+
+  const auto& l = layout;
+  if (l.map.height < 4 || l.map.width < 4) return;
+  loadCoastlines(l.map.width * 2, l.map.height * 4);
+
+  const int cellW = l.map.width;
+  const int cellH = l.map.height;
+  const int subRows = subRowsForStyle(itsCornerStyle);
+  const int subW = cellW * 2;
+  const int subH = cellH * subRows;
+  const double aspect = static_cast<double>(subRows) / 4.0;
+
+  // Camera basis.
+  const double cy = std::cos(itsCamYaw);
+  const double sy_ = std::sin(itsCamYaw);
+  const double cp = std::cos(itsCamPitch);
+  const double sp = std::sin(itsCamPitch);
+  const double rightX = cy,  rightY = sy_, rightZ = 0;
+  const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
+  const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
+
+  const auto bb = itsSource->boundingBox();
+  const double lat0 = (bb.minLat + bb.maxLat) * 0.5;
+  const double lon0 = (bb.minLon + bb.maxLon) * 0.5;
+  constexpr double R_e = 6371000.0;
+  const double cosLat0 = std::cos(lat0 * M_PI / 180.0);
+  const double extentX =
+      (bb.maxLon - bb.minLon) * (M_PI / 180.0) * R_e * cosLat0 * 0.5;
+  const double extentY = (bb.maxLat - bb.minLat) * (M_PI / 180.0) * R_e * 0.5;
+  const double extent = std::max(extentX, extentY);
+  if (extent <= 0.0) return;
+
+  const double xscale = (subW / 2.0) / extent * itsCamZoom;
+  const double yscale = xscale / aspect;
+  const double depthScale = xscale;
+
+  std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH, Rgb{0, 0, 0, true});
+  std::vector<float> zbuf(static_cast<std::size_t>(subW) * subH,
+                          std::numeric_limits<float>::infinity());
+
+  auto project = [&](double wx, double wy, double wz,
+                     double& col, double& row, float& depth) {
+    const double sx = rightX * wx + rightY * wy + rightZ * wz;
+    const double sy = upX * wx + upY * wy + upZ * wz;
+    const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
+    col = subW / 2.0 + xscale * sx;
+    row = subH / 2.0 - yscale * sy;
+    depth = static_cast<float>(dp * depthScale);
+  };
+  auto plot = [&](int c, int r, float depth, Rgb color) {
+    if (c < 0 || c >= subW || r < 0 || r >= subH) return;
+    const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
+    if (depth < zbuf[idx])
+    {
+      zbuf[idx] = depth;
+      pixels[idx] = color;
+    }
+  };
+  auto drawLine = [&](double wx0, double wy0, double wz0,
+                      double wx1, double wy1, double wz1, Rgb color) {
+    double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
+    float d0 = 0, d1 = 0;
+    project(wx0, wy0, wz0, c0, r0, d0);
+    project(wx1, wy1, wz1, c1, r1, d1);
+    const double dc = c1 - c0, dr = r1 - r0;
+    const double dd = static_cast<double>(d1) - static_cast<double>(d0);
+    const int steps =
+        static_cast<int>(std::ceil(std::max(std::abs(dc), std::abs(dr))));
+    if (steps <= 0)
+    {
+      plot(static_cast<int>(std::round(c0)), static_cast<int>(std::round(r0)),
+           d0, color);
+      return;
+    }
+    for (int i = 0; i <= steps; ++i)
+    {
+      const double t = static_cast<double>(i) / steps;
+      plot(static_cast<int>(std::round(c0 + t * dc)),
+           static_cast<int>(std::round(r0 + t * dr)),
+           static_cast<float>(d0 + t * dd), color);
+    }
+  };
+  auto latLonToXY = [&](double lat, double lon, double& x, double& y) {
+    x = (lon - lon0) * (M_PI / 180.0) * R_e * cosLat0;
+    y = (lat - lat0) * (M_PI / 180.0) * R_e;
+  };
+  auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color) {
+    for (const auto& p : polys)
+    {
+      if (p.lats.size() < 2) continue;
+      double x0 = 0, y0 = 0;
+      latLonToXY(p.lats[0], p.lons[0], x0, y0);
+      for (std::size_t i = 1; i < p.lats.size(); ++i)
+      {
+        double x1 = 0, y1 = 0;
+        latLonToXY(p.lats[i], p.lons[i], x1, y1);
+        drawLine(x0, y0, -1, x1, y1, -1, color);
+        x0 = x1;
+        y0 = y1;
+      }
+    }
+  };
+  if (itsCoastlineStyle == LineStyle::Thick)
+    drawPolylinesThick(itsCoastlines, Rgb{200, 200, 200});
+  if (itsBorderStyle == LineStyle::Thick)
+    drawPolylinesThick(itsBorders, Rgb{120, 120, 120});
+
+  // Layer table. Heights are canonical mid-of-deck values:
+  //   precipitation column starts at ground;
+  //   fog hugs the surface (raised slightly so it isn't z-fought by precip);
+  //   low cloud  ~ 1.5 km (cloud base 0..2 km);
+  //   medium     ~ 3.5 km (2..6 km);
+  //   high       ~ 8 km   (6..12 km, mostly cirrus).
+  //
+  // Each layer pulls its own palette from qdless.conf via paletteForParam
+  // and falls back to a sensible builtin if unavailable. The cloud-cover
+  // layers share one threshold (itsThreshold3D); precipitation and fog
+  // have parameter-specific thresholds because their units aren't %.
+  struct Layer
+  {
+    FmiParameterName paramId;
+    const char* shortName;
+    double heightKm;
+    float threshold;            // value below this is skipped
+    const char* paletteName;    // override for stack viewing
+    Rgb fallback;               // tint when palette can't be loaded
+  };
+  const float cloudThreshold = itsThreshold3D;
+  const std::array<Layer, 5> layers{{
+      {kFmiPrecipitation1h, "Precipitation1h",  0.0,  0.1F,
+       "precipitation1h",       Rgb{ 80, 120, 200}},
+      {kFmiFogIntensity,    "FogIntensity",     0.1,  0.5F,
+       "fog_intensity",         Rgb{200, 200, 100}},
+      {kFmiLowCloudCover,   "LowCloudCover",    1.5,  cloudThreshold,
+       "totalcloudcover_color", Rgb{220, 220, 220}},
+      {kFmiMediumCloudCover,"MediumCloudCover", 3.5,  cloudThreshold,
+       "totalcloudcover_color", Rgb{200, 200, 220}},
+      {kFmiHighCloudCover,  "HighCloudCover",   8.0,  cloudThreshold,
+       "totalcloudcover_color", Rgb{180, 200, 240}},
+  }};
+
+  const double vexagger = itsVexagger3D;
+  // Convert km → metres → exaggerated metres. Done per-layer (constant
+  // across all cells of that layer) so each sample is just a multiply.
+  for (const auto& layer : layers)
+  {
+    auto pal = loadPaletteByName(layer.paletteName);
+    const double wz = layer.heightKm * 1000.0 * vexagger;
+    qd->sampleSlab(layer.paramId, [&](double lat, double lon, float v) {
+      if (!std::isfinite(v) || v < layer.threshold) return;
+      double wx = 0, wy = 0;
+      latLonToXY(lat, lon, wx, wy);
+      double col = 0, rowSx = 0;
+      float depth = 0;
+      project(wx, wy, wz, col, rowSx, depth);
+      const Rgb color = pal ? pal->lookup(v) : layer.fallback;
+      const int c = static_cast<int>(col);
+      const int r = static_cast<int>(rowSx);
+      plot(c,     r,     depth, color);
+      plot(c + 1, r,     depth, color);
+      plot(c,     r + 1, depth, color);
+      plot(c + 1, r + 1, depth, color);
+    });
+  }
+
+  std::ostringstream os;
+  itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
+
+  // Coastline / border braille overlay — same shape as the other 3D
+  // paths. Pulled out as a lambda over the per-renderer scaling so the
+  // diff with draw3DQueryData stays obvious.
+  const bool brailleCoast =
+      itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder =
+      itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+  if (brailleCoast || brailleBorder)
+  {
+    const int bW = cellW * 2;
+    const int bH = cellH * 4;
+    std::vector<unsigned char> dotMask(static_cast<std::size_t>(bW) * bH, 0);
+    std::vector<Rgb> dotColor(static_cast<std::size_t>(bW) * bH, Rgb{0, 0, 0});
+    const double yFineScale = 4.0 / subRows;
+    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth) {
+      const double sx = rightX * wx + rightY * wy + rightZ * wz;
+      const double sy = upX * wx + upY * wy + upZ * wz;
+      const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
+      bx = static_cast<int>(std::round(bW / 2.0 + xscale * sx));
+      by = static_cast<int>(std::round(bH / 2.0 - yscale * yFineScale * sy));
+      depth = static_cast<float>(dp * depthScale);
+    };
+    auto plotB = [&](int bx, int by, float depth, Rgb color) {
+      if (bx < 0 || bx >= bW || by < 0 || by >= bH) return;
+      const int qy = by * subRows / 4;
+      const std::size_t qidx = static_cast<std::size_t>(qy) * subW + bx;
+      if (depth >= zbuf[qidx]) return;
+      const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+      dotMask[bidx] = 1;
+      dotColor[bidx] = color;
+    };
+    auto lineB = [&](double wx0, double wy0, double wz0,
+                     double wx1, double wy1, double wz1, Rgb color) {
+      int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+      float d0 = 0, d1 = 0;
+      projectB(wx0, wy0, wz0, x0, y0, d0);
+      projectB(wx1, wy1, wz1, x1, y1, d1);
+      const int adx = std::abs(x1 - x0), ady = std::abs(y1 - y0);
+      const int steps = std::max(adx, ady);
+      if (steps <= 0)
+      {
+        plotB(x0, y0, d0, color);
+        return;
+      }
+      for (int i = 0; i <= steps; ++i)
+      {
+        const double t = static_cast<double>(i) / steps;
+        plotB(static_cast<int>(std::round(x0 + t * (x1 - x0))),
+              static_cast<int>(std::round(y0 + t * (y1 - y0))),
+              static_cast<float>(d0 + t * (d1 - d0)), color);
+      }
+    };
+    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color) {
+      for (const auto& p : polys)
+      {
+        if (p.lats.size() < 2) continue;
+        double x0 = 0, y0 = 0;
+        latLonToXY(p.lats[0], p.lons[0], x0, y0);
+        for (std::size_t i = 1; i < p.lats.size(); ++i)
+        {
+          double x1 = 0, y1 = 0;
+          latLonToXY(p.lats[i], p.lons[i], x1, y1);
+          lineB(x0, y0, -1, x1, y1, -1, color);
+          x0 = x1;
+          y0 = y1;
+        }
+      }
+    };
+    if (brailleCoast) drawPolyB(itsCoastlines, Rgb{200, 200, 200});
+    if (brailleBorder) drawPolyB(itsBorders, Rgb{120, 120, 120});
+
+    std::string brailleOut;
+    for (int cy_ = 0; cy_ < cellH; ++cy_)
+    {
+      for (int cx = 0; cx < cellW; ++cx)
+      {
+        unsigned cellMask = 0;
+        Rgb cellFg{200, 200, 200};
+        for (int sy = 0; sy < 4; ++sy)
+          for (int sx = 0; sx < 2; ++sx)
+          {
+            const int bx = cx * 2 + sx;
+            const int by = cy_ * 4 + sy;
+            const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+            if (dotMask[bidx] != 0U)
+            {
+              cellMask |= 1U << brailleBit(sx, sy);
+              cellFg = dotColor[bidx];
+            }
+          }
+        if (cellMask == 0U) continue;
+        const int qy = cy_ * subRows;
+        const Rgb bg = pixels[static_cast<std::size_t>(qy) * subW + cx * 2];
+        brailleOut += "\x1b[";
+        brailleOut += std::to_string(l.map.row + cy_ + 1);
+        brailleOut += ';';
+        brailleOut += std::to_string(l.map.col + cx + 1);
+        brailleOut += 'H';
+        brailleOut += itsRenderer.bgEscape(bg);
+        brailleOut += itsRenderer.fgEscape(cellFg);
+        brailleOut += brailleGlyph(cellMask);
+      }
+    }
+    if (!brailleOut.empty()) os << brailleOut << "\x1b[0m";
+  }
+
+  const std::string hud = fmt::format(
+      " 3D stack  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  "
+      "cloud≥{:.0f}{} ",
+      itsCamYaw * 180.0 / M_PI, itsCamPitch * 180.0 / M_PI,
+      itsCamZoom, itsVexagger3D, itsThreshold3D, itsThreshold3DUnit);
+  const int hudRow = l.map.row + l.map.height - 1;
+  const int hudCol = std::max(l.map.col, l.map.col + l.map.width -
+                                              static_cast<int>(hud.size()) - 1);
+  os << "\x1b[" << (hudRow + 1) << ';' << (hudCol + 1) << "H"
+     << "\x1b[48;5;235m\x1b[38;5;15m" << hud << "\x1b[0m";
+
+  const std::string s = os.str();
+  std::fwrite(s.data(), 1, s.size(), stdout);
+  std::fflush(stdout);
+}
+
+bool App::sourceSupports3D() const
+{
+  if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr) return true;
+  if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
+      qd != nullptr)
+    return qd->isVolumetric() || qd->isSurfaceStack();
+  return false;
+}
+
+void App::apply3DDefaultsForSource()
+{
+  // Defaults are picked per backend because the natural threshold scale
+  // and aspect ratio of the data differ wildly: dBZ ranges roughly
+  // -30..70 while cloud cover is 0..100, and NWP domains are two orders
+  // of magnitude wider than they are tall.
+  if (dynamic_cast<const QueryDataSource*>(itsSource.get()) != nullptr)
+  {
+    // 50% gates out the thin / partial-cover cells that the
+    // totalcloudcover_color palette still paints visibly, so the volume
+    // reads as cloud bodies and not a solid blob. , / . steps from here.
+    // Surface-stack mode reads the same threshold as the cloud-cover
+    // gate; precip and fog have their own fixed thresholds.
+    itsThreshold3D = 50.0F;       // %; mostly-cloudy or more
+    itsThreshold3DUnit = "%";
+    itsVexagger3D = 50.0;         // 2000 km wide × ~30 km tall → ~70:1
+  }
+  else
+  {
+    itsThreshold3D = -10.0F;      // dBZ; -10 captures most real echoes
+    itsThreshold3DUnit = "dBZ";
+    itsVexagger3D = 8.0;
+  }
 }
 
 int App::runOnce()
@@ -4406,6 +5255,33 @@ int App::runOnce()
   int cellH = std::max(1, ts.rows - 1);
   int subWidth = cellW * 2;
   int subHeight = cellH * 2;
+
+  // --3d: build a UI-less Layout and route through the 3D renderer.
+  // Useful for CI snapshots / regression checks since the 3D code paths
+  // are otherwise interactive-only. Falls back to 2D dump if the active
+  // source isn't 3D-capable so the flag is safe to set globally.
+  if (itsOpts.start3D && sourceSupports3D())
+  {
+    itsMode3D = true;
+    apply3DDefaultsForSource();
+    Layout layout{};
+    layout.map = {0, 0, cellH, cellW};
+    loadCoastlines(cellW * 2, cellH * 4);
+    if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr)
+    {
+      draw3D(layout);
+    }
+    else if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
+             qd != nullptr)
+    {
+      if (qd->isVolumetric())
+        draw3DQueryData(layout);
+      else
+        draw3DSurfaceStack(layout);
+    }
+    std::cout << "\x1b[" << ts.rows << ";1H\n";
+    return 0;
+  }
 
   float dataMin = 0;
   float dataMax = 0;
@@ -4466,6 +5342,15 @@ int App::runInteractive()
   {
     if (!openBrowsePicker(ui)) return 0;
     initFromSource();
+  }
+
+  // --3d: boot straight into 3D mode when the active source supports it.
+  // Silently fall back to 2D otherwise so passing --3d at startup is safe
+  // regardless of what file the user later opens via the in-app pickers.
+  if (itsOpts.start3D && sourceSupports3D())
+  {
+    itsMode3D = true;
+    apply3DDefaultsForSource();
   }
 
   bool quit = false;

@@ -95,6 +95,7 @@ class UI
     bool hasMultipleParams = true;
     bool hasMultipleLevels = true;
     bool hasNativeHeight = false;  // source supports cross-section [Y] toggle
+    bool has3DVolume = false;      // source has a renderable 3D volume
   };
   void popupHelp(HelpContext ctx);
   void popupHelp();  // gridded-data default — calls popupHelp({}) internally

@@ -2,6 +2,7 @@
 
 #include "QdlessDataSource.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,6 +50,40 @@ class QueryDataSource : public DataSource
 
   std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
   std::string gridSignature() const override;
+
+  // Volume sampling for the 3D point-cloud view. Returns true and emits
+  // (lat, lon, heightMeters, value) tuples for every (level, grid-cell)
+  // of the currently-active param at the currently-active time when this
+  // file carries a height field — kFmiGeomHeight, or kFmiGeopHeight which
+  // is divided by g=9.80665 to get geometric height. Returns false when
+  // there is no height field or only one level, leaving callbacks
+  // un-invoked. State (param / level / location index) is restored on
+  // return so the call is transparent to the rest of the App.
+  struct VolumeSample
+  {
+    double lat;
+    double lon;
+    double heightMeters;
+    float value;
+  };
+  bool isVolumetric() const;
+  bool sampleVolume(const std::function<void(const VolumeSample&)>& cb) const;
+
+  // True if the file carries the "surface stack" of layers used for the
+  // synthetic 3D cloud + precipitation view: Precipitation1h,
+  // FogIntensity, LowCloudCover, MediumCloudCover. HighCloudCover is
+  // optional. Used when the source has no real vertical axis (isVolumetric
+  // == false) so [3] can still render a layered point cloud at canonical
+  // heights — see App::draw3DSurfaceStack.
+  bool isSurfaceStack() const;
+
+  // Iterate every grid cell of the currently-active time + level for a
+  // *specified* parameter, yielding (lat, lon, value). Param/level/loc
+  // indices are restored on return. Returns false (without invoking cb)
+  // when paramId is not present in the file. Used by the surface-stack
+  // renderer to walk each layer's 2D slab independently.
+  bool sampleSlab(int paramId,
+                  const std::function<void(double lat, double lon, float value)>& cb) const;
 
  private:
   std::unique_ptr<NFmiQueryData> itsData;

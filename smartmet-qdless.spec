@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.22
-Release: 1%{?dist}.fmi
+Release: 2%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,6 +110,25 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 
 %changelog
+* Fri May 22 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.22-2.fmi
+- Extended the [3] 3D point-cloud view to QueryData sources. Two modes,
+  picked automatically:
+    * Volumetric: multi-level files that carry GeomHeight or GeopHeight
+      alongside the active parameter (e.g. TotalCloudCover on 65 hybrid
+      levels) — every (level, grid-cell) becomes a 3D point at its real
+      height.
+    * Surface stack: flat files that carry Precipitation1h, FogIntensity,
+      LowCloudCover, MediumCloudCover (HighCloudCover optional) — each
+      parameter is rendered at a canonical height (0 / 0.1 / 1.5 / 3.5
+      / 8 km) with its own palette, giving a cartoon vertical
+      cross-section of the weather.
+  Coastlines are projected through a flat-Earth frame anchored at the
+  data bbox centre. Threshold defaults to 50% cover for the cloud
+  layers; precip and fog use fixed sensible thresholds. Vertical
+  exaggeration defaults to 50× because NWP domains are two orders of
+  magnitude wider than they are tall. New --3d flag boots straight
+  into the 3D view (works with --dump too).
+
 * Fri May 22 2026 Andris Pavēnis <andris.pavenis@fmi.fi> 26.5.22-1.fmi
 - Fix building RPM packages
 

@@ -15,6 +15,12 @@
 
 namespace Qdless
 {
+// Forward declaration so draw3D / draw3DQueryData can accept a Layout
+// without QdlessApp.h needing to drag in QdlessUI.h (which pulls in
+// ncurses and panels). Full definition is in QdlessUI.h, included by
+// QdlessApp.cpp.
+struct Layout;
+
 struct Options
 {
   // Single-file convenience. Either `filename` or `filenames` (multi) is
@@ -58,6 +64,7 @@ struct Options
   double minLakeRoundness = 0.15;     // drop fractal shores (Saimaa ~0.05)
   double minIslandAreaKm2 = 10.0;     // drop sub-10 km² islets (Åland noise)
   bool dumpAndExit = false;       // print one frame to stdout and exit (no curses)
+  bool start3D = false;           // start in 3D point-cloud mode (e.g. --dump --3d)
 };
 
 // Per-panel state. Today there is always exactly one panel; the field set
@@ -138,6 +145,12 @@ class App
  private:
   void buildIndices();
   void loadPalette();
+  // Resolve a palette by name through the same candidate-directory
+  // search loadPalette() uses. Returns std::nullopt if no candidate
+  // file existed or could be parsed. Used by draw3DSurfaceStack to
+  // pick a different palette per layer (precip / fog / cloud) without
+  // disturbing the active panel's palette.
+  std::optional<Palette> loadPaletteByName(const std::string& name) const;
   // subPixelsW / subPixelsH are the sub-pixel dimensions the coastline
   // will be rendered into (cellW*2, cellH*4 for Braille — the finest
   // path). Pass 0 to derive them from the current terminal size — used
@@ -245,18 +258,33 @@ class App
   // 3D mode (radar volume): rotate-and-zoom view onto the polar data as
   // a point cloud above a coastline-and-graticule ground plane. Toggled
   // with [3]. Camera orbits the radar at (yaw, pitch); zoom scales the
-  // viewport. Falls back to 2D rendering for non-PVOL sources.
+  // viewport. Active for PVOL sources and for QueryData sources with a
+  // height parameter (GeomHeight / GeopHeight) alongside multiple
+  // levels; falls back to 2D for everything else.
   bool itsMode3D = false;
   double itsCamYaw = 0.0;          // radians; 0 = looking north from south
   double itsCamPitch = 0.6;        // radians; 0 = horizontal, π/2 = top-down
   double itsCamZoom = 1.0;         // 1.0 = data extent fits the viewport
-  float itsThreshold3D = 5.0F;     // drop bins below this dBZ (clear-air)
+  float itsThreshold3D = -10.0F;   // drop bins below this threshold. Units
+                                    // depend on the source: dBZ for PVOL
+                                    // (default −10), percent for QueryData
+                                    // cloud-cover-like fields, etc. , / .
+                                    // raise the bar interactively. Reset to
+                                    // a source-appropriate default each time
+                                    // 3D mode is toggled on.
   double itsVexagger3D = 8.0;      // vertical exaggeration. Radar volumes
                                     // are ~30:1 wide:tall in real geometry;
                                     // at true scale the storm flattens to a
                                     // disc. Default 8× makes the storm body
                                     // visibly tall without distorting echo
                                     // *positions* (only their heights stretch).
+                                    // NWP hybrid-level volumes are ~100:1
+                                    // wide:tall; default lifts to ~50× when
+                                    // entering 3D on a QueryData source.
+  // Label of the threshold unit currently in effect. Drives the HUD
+  // ("thresh=10dBZ" vs "thresh=10%") so the same key handlers serve
+  // both backends without leaking source-specific text into draw3D*.
+  std::string itsThreshold3DUnit = "dBZ";
 
   // Animation state.
   bool itsAnimating = false;
@@ -385,8 +413,34 @@ class App
   std::string buildCityLabels(int cellW, int cellH, int originRow, int originCol);
   // 3D volume renderer. Active only when itsMode3D and the source is a
   // PVOL. Writes a complete frame (radar points + ground-plane coastlines
-  // + status overlay) to stdout, replacing the usual 2D map.
-  void draw3D(UI& ui);
+  // + status overlay) to stdout, replacing the usual 2D map. Takes a
+  // Layout (not a UI) so `--dump --3d` can call it from runOnce without
+  // initscr.
+  void draw3D(const Layout& layout);
+  // QueryData volume renderer (cloud cover / cloud water on hybrid or
+  // pressure levels). Reuses the same orbit-and-zoom camera as draw3D
+  // but feeds the point cloud from QueryDataSource::sampleVolume()
+  // instead of the polar bin loop. Coastlines are projected through a
+  // flat-Earth frame anchored at the data bbox centre — same maths,
+  // different anchor.
+  void draw3DQueryData(const Layout& layout);
+  // Surface-stack 3D view for QueryData files that have no real vertical
+  // axis but carry the canonical "ground / fog / low / med / high"
+  // surface parameters (Precipitation1h, FogIntensity, LowCloudCover,
+  // MediumCloudCover, optional HighCloudCover). Each layer is rendered
+  // at a fixed canonical height with its own palette and threshold,
+  // producing a cartoon — but visually informative — vertical
+  // cross-section of the weather. Same camera + z-buffer pipeline as
+  // draw3DQueryData.
+  void draw3DSurfaceStack(const Layout& layout);
+  // True if the active source can be rendered in 3D. Tested by [3]
+  // and by drawMap when deciding whether to honour itsMode3D.
+  bool sourceSupports3D() const;
+  // Reset itsThreshold3D / itsThreshold3DUnit / itsVexagger3D to
+  // source-appropriate defaults (dBZ for PVOL, % for QueryData). Called
+  // each time 3D is toggled on so a switch between sources doesn't
+  // strand the user at the wrong threshold scale.
+  void apply3DDefaultsForSource();
   // True if the active source carries both WindUMS and WindVMS — used to
   // gate the [W]ind status-bar toggle and the wind-arrow overlay.
   bool hasWindComponents() const;

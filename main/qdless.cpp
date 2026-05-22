@@ -69,6 +69,8 @@ int main(int argc, char* argv[])
          po::value<double>(&opts.minIslandAreaKm2)->default_value(opts.minIslandAreaKm2),
          "minimum island area in km² (continents always shown; 0 disables)") //
         ("dump", po::bool_switch(&opts.dumpAndExit), "render one frame to stdout and exit") //
+        ("3d", po::bool_switch(&opts.start3D),
+         "start in 3D point-cloud mode (PVOL or multi-level QueryData with height field)") //
         ("dir",
          po::value<std::string>(&dirArg),
          "directory whose files (sorted by filename) form the time series") //
