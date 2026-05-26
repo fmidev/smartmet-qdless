@@ -65,6 +65,16 @@ struct Options
   double minIslandAreaKm2 = 10.0;     // drop sub-10 km² islets (Åland noise)
   bool dumpAndExit = false;       // print one frame to stdout and exit (no curses)
   bool start3D = false;           // start in 3D point-cloud mode (e.g. --dump --3d)
+  bool noExitEffect = false;      // skip the random quit animation
+  // Text spelled out by the word-reveal exit effect. Empty (the default) means
+  // the effect draws a random closing line from its built-in anthology;
+  // --exit-message overrides it with your own text.
+  std::string exitMessage;
+  // Restricts which exit effects play on quit: a comma-separated list of
+  // effect names (see --list-exit-effects). One name pins that effect; several
+  // pick at random among them. Empty (default) = any of them. Names match
+  // case/spacing/punctuation-insensitively; unknown names are ignored.
+  std::string exitEffects;
 };
 
 // Per-panel state. Today there is always exactly one panel; the field set
@@ -143,6 +153,27 @@ class App
   int runInteractive();
 
  private:
+  // Capture the current view as a full-screen raster and play a quit animation
+  // over it (see QdlessExitEffect). effectIndex < 0 picks one at random and
+  // honours --no-exit-effect (the real quit path); a concrete index forces
+  // that effect (preview / repeat / menu keys). seed == 0 picks a fresh seed;
+  // nonzero reproduces a prior run. wordsOverride, when non-empty, is the text
+  // fed to the word-reveal effect; empty falls back to itsOpts.exitMessage.
+  // Records what was played in itsLastExit{Index,Seed} for the repeat key.
+  void playExitEffect(int effectIndex = -1, unsigned seed = 0,
+                      const std::string& wordsOverride = {});
+  int itsExitEffectPreview = 0;  // next effect the cycle key (F9) shows
+  int itsExitWordPreview = 0;    // current word-reveal line for F11 / F12
+  int itsLastExitIndex = -1;     // last effect played, for the repeat key (F10)
+  unsigned itsLastExitSeed = 0;  // its seed; 0 = nothing played yet
+  // Most recent raster composed by a 3D renderer (point cloud, at map origin),
+  // cached so playExitEffect can animate a 3D view too. The 2D path re-samples
+  // via sampleSlice instead and leaves this untouched.
+  std::vector<Rgb> itsLast3DRaster;
+  int itsLast3DRasterW = 0;
+  int itsLast3DRasterH = 0;
+  void cache3DRaster(const std::vector<Rgb>& pixels, int subW, int subH);
+
   void buildIndices();
   void loadPalette();
   // Resolve a palette by name through the same candidate-directory

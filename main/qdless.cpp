@@ -6,6 +6,7 @@
 // coastline overlay and mouse-driven probe/timeseries.
 
 #include "QdlessApp.h"
+#include "QdlessExitEffect.h"
 
 #include <boost/program_options.hpp>
 
@@ -69,6 +70,15 @@ int main(int argc, char* argv[])
          po::value<double>(&opts.minIslandAreaKm2)->default_value(opts.minIslandAreaKm2),
          "minimum island area in km² (continents always shown; 0 disables)") //
         ("dump", po::bool_switch(&opts.dumpAndExit), "render one frame to stdout and exit") //
+        ("no-exit-effect", po::bool_switch(&opts.noExitEffect),
+         "disable the random animation played when quitting") //
+        ("exit-message", po::value<std::string>(&opts.exitMessage),
+         "text for the word-reveal exit effect (A-Z and spaces); "
+         "default: a random famous closing line") //
+        ("exit-effect", po::value<std::string>(&opts.exitEffects),
+         "pin the quit animation to a named effect, or a comma-separated set "
+         "to pick from at random (see --list-exit-effects); default: any") //
+        ("list-exit-effects", "list the exit effect names and exit") //
         ("3d", po::bool_switch(&opts.start3D),
          "start in 3D point-cloud mode (PVOL or multi-level QueryData with height field)") //
         ("dir",
@@ -94,6 +104,14 @@ int main(int argc, char* argv[])
     po::variables_map vm;
     po::store(po::command_line_parser(argc, argv).options(desc).positional(pos).run(), vm);
     po::notify(vm);
+
+    if (vm.count("list-exit-effects") != 0U)
+    {
+      std::cout << "Exit effects (use names with --exit-effect):\n";
+      for (int i = 0; i < Qdless::exitEffectCount(); ++i)
+        std::cout << "  " << Qdless::exitEffectName(i) << '\n';
+      return 0;
+    }
 
     // Resolve inputs: positionals + --dir contents. Multiple files build a
     // MultiFileSource; one file goes through the single-file fast path.

@@ -1,5 +1,6 @@
 #include "QdlessApp.h"
 
+#include "QdlessExitEffect.h"
 #include "QdlessMultiFileSource.h"
 #include "QdlessOdimVolumeSource.h"
 #include "QdlessQueryDataSource.h"
@@ -32,6 +33,7 @@
 #include <fstream>
 #include <iostream>
 #include <numeric>
+#include <random>
 #include <stdexcept>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -3346,6 +3348,88 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       quit = true;
       return false;
 
+    case KEY_F(9):
+    {
+      // Hidden: preview exit effects without quitting. Each press plays the
+      // next effect in sequence and names it on the timeline.
+      const int idx = itsExitEffectPreview;
+      playExitEffect(idx);
+      itsExitEffectPreview = (idx + 1) % exitEffectCount();
+      itsLastMessage =
+          fmt::format("Exit effect {}/{}: {}", idx + 1, exitEffectCount(), exitEffectName(idx));
+      ui.touch();
+      return true;
+    }
+
+    case KEY_F(10):
+    {
+      // Hidden: replay the last exit effect verbatim (same effect + seed).
+      if (itsLastExitSeed != 0)
+        playExitEffect(itsLastExitIndex, itsLastExitSeed);
+      else
+        playExitEffect(-1, 0);
+      itsLastMessage = fmt::format("Exit effect (repeat): {}", exitEffectName(itsLastExitIndex));
+      ui.touch();
+      return true;
+    }
+
+    case KEY_F(8):
+    {
+      // Hidden: pick an exit effect from a menu and play it.
+      std::vector<std::string> items;
+      items.reserve(static_cast<std::size_t>(exitEffectCount()));
+      for (int i = 0; i < exitEffectCount(); ++i)
+        items.emplace_back(exitEffectName(i));
+      const int sel = ui.popupMenu("Exit effect", items, itsExitEffectPreview);
+      if (sel >= 0)
+      {
+        itsExitEffectPreview = sel;
+        // For word reveal the current line is forced; other effects ignore it.
+        playExitEffect(sel, 0, exitWordline(itsExitWordPreview));
+        itsLastMessage = fmt::format("Exit effect: {}", exitEffectName(sel));
+      }
+      ui.touch();
+      return true;
+    }
+
+    case KEY_F(11):
+    {
+      // Hidden: cycle the current effect's sub-choice. For word reveal, step
+      // through the anthology lines; for any other effect, re-roll the seed.
+      if (itsLastExitIndex == exitEffectIndexByName("word reveal"))
+      {
+        itsExitWordPreview = (itsExitWordPreview + 1) % exitWordlineCount();
+        playExitEffect(itsLastExitIndex, 0, exitWordline(itsExitWordPreview));
+        itsLastMessage = fmt::format("Exit text {}/{}: {}", itsExitWordPreview + 1,
+                                     exitWordlineCount(), exitWordline(itsExitWordPreview));
+      }
+      else
+      {
+        playExitEffect(itsLastExitIndex, 0);  // <0 -> random; else fresh-seed variant
+        itsLastMessage = fmt::format("Exit effect (variant): {}", exitEffectName(itsLastExitIndex));
+      }
+      ui.touch();
+      return true;
+    }
+
+    case KEY_F(12):
+    {
+      // Hidden: pick a word-reveal anthology line from a menu and play it.
+      std::vector<std::string> items;
+      items.reserve(static_cast<std::size_t>(exitWordlineCount()));
+      for (int i = 0; i < exitWordlineCount(); ++i)
+        items.emplace_back(exitWordline(i));
+      const int sel = ui.popupMenu("Exit text", items, itsExitWordPreview);
+      if (sel >= 0)
+      {
+        itsExitWordPreview = sel;
+        playExitEffect(exitEffectIndexByName("word reveal"), 0, exitWordline(sel));
+        itsLastMessage = fmt::format("Exit text: {}", exitWordline(sel));
+      }
+      ui.touch();
+      return true;
+    }
+
     case KEY_LEFT:
     {
       auto idx = itsSource->currentTimeIndex();
@@ -4454,6 +4538,7 @@ void App::draw3D(const Layout& layout)
 
   // Render to stdout.
   std::ostringstream os;
+  cache3DRaster(pixels, subW, subH);
   itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
 
   // Braille overlay for line styles set to Braille. Uses a finer 2×4
@@ -4767,6 +4852,7 @@ void App::draw3DQueryData(const Layout& layout)
   });
 
   std::ostringstream os;
+  cache3DRaster(pixels, subW, subH);
   itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
 
   // Braille overlay for coastlines / borders — identical mechanics to
@@ -5083,6 +5169,7 @@ void App::draw3DSurfaceStack(const Layout& layout)
   }
 
   std::ostringstream os;
+  cache3DRaster(pixels, subW, subH);
   itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
 
   // Coastline / border braille overlay — same shape as the other 3D
@@ -5321,6 +5408,80 @@ int App::runOnce()
   return 0;
 }
 
+void App::cache3DRaster(const std::vector<Rgb>& pixels, int subW, int subH)
+{
+  itsLast3DRaster = pixels;  // copy: the caller still needs pixels for braille overlays
+  itsLast3DRasterW = subW;
+  itsLast3DRasterH = subH;
+}
+
+void App::playExitEffect(int effectIndex, unsigned seed, const std::string& wordsOverride)
+{
+  // The automatic quit path honours the opt-out; explicit previews / repeats /
+  // menu picks (effectIndex >= 0) don't.
+  if (effectIndex < 0 && itsOpts.noExitEffect) return;
+
+  // Resolve the "choose for me" pick against the optional --exit-effect
+  // allow-list (comma-separated names). One name pins it; several pick at
+  // random among them; empty / all-unknown leaves the full random pool.
+  if (effectIndex < 0 && !itsOpts.exitEffects.empty())
+  {
+    std::vector<int> allowed;
+    std::string tok;
+    auto add = [&]() {
+      const int idx = Qdless::exitEffectIndexByName(tok);
+      if (idx >= 0) allowed.push_back(idx);
+      tok.clear();
+    };
+    for (char c : itsOpts.exitEffects)
+    {
+      if (c == ',') add();
+      else tok.push_back(c);
+    }
+    add();
+    if (!allowed.empty())
+    {
+      std::mt19937 rng(std::random_device{}());
+      effectIndex = allowed[rng() % allowed.size()];
+    }
+  }
+
+  // 3D views own the screen with their own point-cloud raster; animate the most
+  // recent one. Otherwise snapshot the current 2D view at full-terminal
+  // resolution (sampleSlice reads the active panel's selection, which drawMap
+  // restored before we got here) and bake in the marker / cross-section /
+  // cities overlays so the freeze-frame matches what was on screen.
+  std::vector<Rgb> frame;
+  int subW = 0;
+  int subH = 0;
+  if (itsMode3D && !itsLast3DRaster.empty())
+  {
+    frame = itsLast3DRaster;
+    subW = itsLast3DRasterW;
+    subH = itsLast3DRasterH;
+  }
+  else
+  {
+    const auto ts = terminalSize();
+    subW = ts.cols * 2;
+    subH = ts.rows * subRowsForStyle(itsCornerStyle);
+    if (subW < 2 || subH < 2) return;
+    float dMin = 0;
+    float dMax = 0;
+    frame = sampleSlice(subW, subH, dMin, dMax);
+    overlayCities(frame, subW, subH);
+    overlayCrossSection(frame, subW, subH);
+    overlayMarker(frame, subW, subH);
+  }
+
+  if (subW < 2 || subH < 2 || frame.empty()) return;
+  const std::string& words = wordsOverride.empty() ? itsOpts.exitMessage : wordsOverride;
+  const auto played =
+      Qdless::playExitEffect(itsRenderer, std::move(frame), subW, subH, effectIndex, seed, words);
+  itsLastExitIndex = played.index;
+  itsLastExitSeed = played.seed;
+}
+
 int App::runInteractive()
 {
   UI ui;
@@ -5392,6 +5553,10 @@ int App::runInteractive()
     }
     needRedraw = handleKey(key, ui, quit);
   }
+
+  // Going-away present: a brief randomly-chosen animation over the last frame,
+  // played while curses is still up (the UI destructor's endwin runs after).
+  playExitEffect();
   return 0;
 }
 }  // namespace Qdless
