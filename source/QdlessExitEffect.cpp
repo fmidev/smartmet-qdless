@@ -2019,9 +2019,335 @@ void effectRubik(
             });
 }
 
+// Foot stomp: a giant flat bare foot — sole-first, five toes — drops from above
+// and squishes the data view flat, compressing it into the shrinking strip
+// beneath the descending sole until nothing is left, then stays planted.
+void effectFoot(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float fcx = (w - 1) * 0.5F;
+  // Wide flat foot: spans ~0.92*w across, squashed vertically so the whole
+  // print still fits the height (and so it reads as flat-footed).
+  const float sx = 0.77F * w;
+  const float sy = std::min(sx / ya, 0.43F * h);
+  const float footBottom = 1.02F * sy;  // the heel reaches this far below centre
+
+  // Five toes (sole view): big toe to little toe, in a shallow arc above the
+  // ball. {centre x, centre y, radius} in foot-local coords.
+  struct Toe
+  {
+    float x, y, r;
+  };
+  static const Toe kToes[5] = {{-0.34F, -0.82F, 0.170F},
+                               {-0.11F, -0.93F, 0.135F},
+                               {0.10F, -0.96F, 0.120F},
+                               {0.29F, -0.93F, 0.105F},
+                               {0.46F, -0.86F, 0.090F}};
+
+  auto inEllipse = [](float nx, float ny, float cx, float cy, float rx, float ry)
+  {
+    const float dx = (nx - cx) / rx;
+    const float dy = (ny - cy) / ry;
+    return dx * dx + dy * dy <= 1.0F;
+  };
+  // Solid foot silhouette in local coords (nx across, ny along; -1 ~ toe tips,
+  // +1 ~ heel): a wide ball, a full (flat-footed) arch, a rounded heel, toes.
+  auto inFoot = [&](float nx, float ny)
+  {
+    if (inEllipse(nx, ny, 0.0F, -0.42F, 0.60F, 0.46F))
+      return true;
+    if (inEllipse(nx, ny, 0.0F, 0.60F, 0.52F, 0.42F))
+      return true;
+    if (ny > -0.42F && ny < 0.60F && std::fabs(nx) <= 0.52F)  // filled arch (flat-footed)
+      return true;
+    for (const auto& toe : kToes)
+    {
+      const float dx = nx - toe.x;
+      const float dy = ny - toe.y;
+      if (dx * dx + dy * dy <= toe.r * toe.r)
+        return true;
+    }
+    return false;
+  };
+
+  const Rgb skin{226, 190, 158, false};
+  const Rgb pad{240, 205, 188, false};  // fleshy sole / toe pads (pinker, lighter)
+  const Rgb rim{150, 112, 84, false};   // darkened outline
+  // Paint the foot at (cx,cy) with half-extents (sx,sy); `alpha` fades it out.
+  auto drawFoot = [&](std::vector<Rgb>& dst, float cx, float cy, float sx, float sy, float alpha)
+  {
+    const int x0 = std::max(0, static_cast<int>(std::floor(cx - 0.66F * sx)));
+    const int x1 = std::min(w - 1, static_cast<int>(std::ceil(cx + 0.66F * sx)));
+    const int y0 = std::max(0, static_cast<int>(std::floor(cy - 1.14F * sy)));
+    const int y1 = std::min(h - 1, static_cast<int>(std::ceil(cy + 1.07F * sy)));
+    constexpr float e = 0.05F;  // neighbour offset for the rim test
+    for (int y = y0; y <= y1; ++y)
+      for (int x = x0; x <= x1; ++x)
+      {
+        const float nx = (x - cx) / sx;
+        const float ny = (y - cy) / sy;
+        if (!inFoot(nx, ny))
+          continue;
+        Rgb c = skin;
+        // Fleshy pads (ball, heel, toe tips) read as a sole.
+        bool isPad = inEllipse(nx, ny, 0.0F, -0.40F, 0.42F, 0.30F) ||
+                     inEllipse(nx, ny, 0.0F, 0.58F, 0.34F, 0.26F);
+        if (!isPad)
+          for (const auto& toe : kToes)
+            if (inEllipse(nx, ny, toe.x, toe.y, toe.r * 0.72F, toe.r * 0.72F))
+            {
+              isPad = true;
+              break;
+            }
+        if (isPad)
+          c = pad;
+        // Top-lit roundness, and a darkened rim where a neighbour falls outside.
+        float lit = 0.82F + 0.18F * (1.0F - std::min(1.0F, std::fabs(nx) / 0.62F));
+        if (!inFoot(nx - e, ny) || !inFoot(nx + e, ny) || !inFoot(nx, ny - e) ||
+            !inFoot(nx, ny + e))
+        {
+          c = rim;
+          lit = 1.0F;
+        }
+        const float k = lit * alpha;
+        dst[static_cast<std::size_t>(y) * w + x] = Rgb{static_cast<std::uint8_t>(c.r * k),
+                                                       static_cast<std::uint8_t>(c.g * k),
+                                                       static_cast<std::uint8_t>(c.b * k),
+                                                       false};
+      }
+  };
+
+  constexpr float tDown = 0.5F;  // the sole slams to the floor by here
+  runFrames(renderer,
+            w,
+            h,
+            1400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              // Stomp: the sole accelerates down, squishing the whole view into
+              // the shrinking strip beneath it; once down it stays planted.
+              const float p = std::min(1.0F, t / tDown);
+              const float contactY = p * p * h;
+              for (int y = static_cast<int>(std::ceil(contactY)); y < h; ++y)
+              {
+                const float frac = (y - contactY) / std::max(1.0F, h - contactY);
+                const int row = std::min(h - 1, static_cast<int>(frac * (h - 1)));
+                for (int x = 0; x < w; ++x)
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      src[static_cast<std::size_t>(row) * w + x];
+              }
+              drawFoot(dst, fcx, contactY - footBottom, sx, sy, 1.0F);
+            });
+}
+
+// "...and now for something completely different." The traditional Monty Python
+// foot — Terry Gilliam's side-on cut-out, a bare leg trailing off the top —
+// slides straight down and STOMPS, squishing the data view flat beneath its
+// flat sole, then stays planted.
+void effectMontyPython(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float px = (w - 1) * 0.52F;              // the ankle / leg column
+  const float sx = std::min(0.58F * w, h * ya);  // foot spans ~0.94*w toe to heel
+  const float sy = sx / ya;
+
+  // Side-profile foot (Bronzino's cherub foot, à la Gilliam) in local coords (nx
+  // across: toe at -1, heel at +0.66; ny up = negative, sole at 0). kTop is the
+  // rounded instep dome; kBot the flat sole, which scallops at the front into
+  // splayed toe pads. toeFreq/toePhase lay out the four toes.
+  constexpr float toeFreq = 43.0F;
+  constexpr float toePhase = 5.30F;
+  static const std::pair<float, float> kTop[] = {
+      {-1.00F, -0.14F},  // toe tips
+      {-0.78F, -0.22F},
+      {-0.52F, -0.34F},
+      {-0.26F, -0.47F},
+      {-0.08F, -0.52F},  // instep peak (forward of ankle)
+      {0.20F, -0.52F},   // high under the leg
+      {0.44F, -0.46F},   // achilles / back of ankle
+      {0.56F, -0.28F},
+      {0.64F, -0.08F}};  // heel
+  static const std::pair<float, float> kBot[] = {
+      {-1.00F, -0.01F}, {-0.86F, 0.00F}, {0.46F, 0.00F}, {0.58F, 0.00F}, {0.64F, -0.06F}};
+  auto profile = [](const std::pair<float, float>* p, int n, float x)
+  {
+    if (x <= p[0].first)
+      return p[0].second;
+    if (x >= p[n - 1].first)
+      return p[n - 1].second;
+    for (int i = 1; i < n; ++i)
+      if (x <= p[i].first)
+        return p[i - 1].second + (x - p[i - 1].first) / (p[i].first - p[i - 1].first) *
+                                     (p[i].second - p[i - 1].second);
+    return p[n - 1].second;
+  };
+  auto inFootBody = [&](float nx, float ny)
+  {
+    if (nx < -1.00F || nx > 0.64F)
+      return false;
+    float bot = profile(kBot, 5, nx);
+    if (nx < -0.42F)  // front: the sole scallops into separate toe pads
+      bot = -0.03F + 0.03F * std::cos(toeFreq * nx + toePhase);
+    return ny >= profile(kTop, 9, nx) && ny <= bot;
+  };
+  // The leg rises over the back of the foot: a thick ankle flaring out at the
+  // bottom and tapering up into the shin.
+  auto inLeg = [](float nx, float ny)
+  {
+    if (ny > -0.30F)
+      return false;
+    const float t = std::min(1.0F, (-0.30F - ny) / 0.80F);
+    return nx >= -0.04F + 0.06F * t && nx <= 0.48F - 0.05F * t;
+  };
+  auto inSkin = [&](float nx, float ny) { return inFootBody(nx, ny) || inLeg(nx, ny); };
+
+  // Bronzino's foot is pink: rose skin, dark-rose creases / outline, pale nail.
+  const Rgb skin{223, 163, 169, false};
+  const Rgb crease{178, 112, 124, false};  // dark rose, between the toes
+  const Rgb nail{236, 200, 200, false};
+  const Rgb rim{158, 96, 110, false};
+  // Paint the foot with its sole at screen y = cy (leg rising off the top);
+  // `alpha` fades it out.
+  auto drawFoot = [&](std::vector<Rgb>& dst, float cx, float cy, float alpha)
+  {
+    const int x0 = std::max(0, static_cast<int>(std::floor(cx - 1.05F * sx)));
+    const int x1 = std::min(w - 1, static_cast<int>(std::ceil(cx + 0.64F * sx)));
+    const int y1 = std::min(h - 1, static_cast<int>(std::ceil(cy + 0.05F * sy)));
+    constexpr float e = 0.04F;  // neighbour offset for the rim test
+    for (int y = 0; y <= y1; ++y)
+      for (int x = x0; x <= x1; ++x)
+      {
+        const float nx = (x - cx) / sx;
+        const float ny = (y - cy) / sy;
+        if (!inSkin(nx, ny))
+          continue;
+        Rgb c = skin;
+        float lit = 0.80F + 0.20F * std::min(1.0F, -ny / 0.50F);  // top-lit roundness
+        if (nx < -0.40F && ny > -0.18F && std::cos(toeFreq * nx + toePhase) < -0.30F)
+        {
+          c = crease;  // the splay between two toes
+          lit = 1.0F;
+        }
+        else if (nx <= -0.95F && ny >= -0.13F && ny <= -0.06F)
+        {
+          c = nail;  // big-toe nail at the front
+          lit = 1.0F;
+        }
+        if (!inSkin(nx - e, ny) || !inSkin(nx + e, ny) || !inSkin(nx, ny - e) ||
+            !inSkin(nx, ny + e))
+        {
+          c = rim;
+          lit = 1.0F;
+        }
+        const float k = lit * alpha;
+        dst[static_cast<std::size_t>(y) * w + x] = Rgb{static_cast<std::uint8_t>(c.r * k),
+                                                       static_cast<std::uint8_t>(c.g * k),
+                                                       static_cast<std::uint8_t>(c.b * k),
+                                                       false};
+      }
+  };
+
+  constexpr float tDown = 0.5F;  // the sole slams to the floor by here
+  runFrames(renderer,
+            w,
+            h,
+            700,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              // Stomp: the sole accelerates down, squishing the whole view into
+              // the shrinking strip beneath it; once down it stays planted.
+              const float p = std::min(1.0F, t / tDown);
+              const float contactY = p * p * h;
+              for (int y = static_cast<int>(std::ceil(contactY)); y < h; ++y)
+              {
+                const float frac = (y - contactY) / std::max(1.0F, h - contactY);
+                const int row = std::min(h - 1, static_cast<int>(frac * (h - 1)));
+                for (int x = 0; x < w; ++x)
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      src[static_cast<std::size_t>(row) * w + x];
+              }
+              drawFoot(dst, px, contactY, 1.0F);  // the sole presses at contactY
+            });
+}
+
+// "Light at the end of the tunnel": the view warps into a round, receding 3D
+// tunnel with a black vanishing point; the far end then lights up white and we
+// accelerate down the bore until the light floods the screen.
+void effectTunnel(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float cx = (w - 1) * 0.5F;
+  const float cy = (h - 1) * 0.5F;
+  const float maxR = std::sqrt(cx * cx + (cy * ya) * (cy * ya));  // corner distance
+  constexpr float kTwoPi = 6.2831853F;
+  runFrames(renderer,
+            w,
+            h,
+            2400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float form = std::min(1.0F, t / 0.18F);  // flat view -> tunnel
+              // The far end lights up (a small white disc), then the fly-in swells it.
+              const float lightOn = std::clamp((t - 0.24F) / 0.12F, 0.0F, 1.0F) * 0.06F * maxR;
+              const float fly = std::max(0.0F, (t - 0.40F) / 0.60F);  // 0 -> 1, accelerating in
+              const float zoff = fly * fly * 5.5F;
+              const float light = std::max(lightOn, fly * fly * maxR * 1.5F);
+              const float glow = std::max(2.0F, maxR * 0.09F);  // soft halo around the light
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const std::size_t idx = static_cast<std::size_t>(y) * w + x;
+                  const float dx = x - cx;
+                  const float dy = (y - cy) * ya;
+                  const float r = std::sqrt(dx * dx + dy * dy);
+                  if (r <= light)
+                  {
+                    dst[idx] = Rgb{255, 255, 255, false};
+                    continue;
+                  }
+                  // Bore wall: the view wrapped around by angle and tiled along depth;
+                  // 1/r bunches the rings toward the end for the perspective look, and
+                  // a gentle twist with zoff adds motion as we rush in.
+                  const float a = std::atan2(dy, dx);
+                  const float u = a / kTwoPi + 0.5F + zoff * 0.04F;
+                  const float vv = 0.32F / std::max(r / maxR, 0.004F) + zoff;
+                  const float sx = (u - std::floor(u)) * (w - 1);
+                  const float sy = (vv - std::floor(vv)) * (h - 1);
+                  Rgb c = sample(src, w, h, sx, sy);
+                  if (c.transparent)
+                    c = Rgb{18, 18, 22, false};
+                  // Cross-fade the flat view into the tunnel mapping as it forms.
+                  const Rgb& fc = src[idx];
+                  const Rgb fb = fc.transparent ? Rgb{0, 0, 0, false} : fc;
+                  c = Rgb{static_cast<std::uint8_t>(fb.r + (c.r - fb.r) * form),
+                          static_cast<std::uint8_t>(fb.g + (c.g - fb.g) * form),
+                          static_cast<std::uint8_t>(fb.b + (c.b - fb.b) * form),
+                          false};
+                  // Depth shade: black at the far end, bright at the mouth (ramped in
+                  // with formation so the very first frame is the untouched view).
+                  float shade = std::min(1.0F, r / maxR * 1.5F);
+                  shade = 1.0F - form * (1.0F - shade);
+                  Rgb px{static_cast<std::uint8_t>(c.r * shade),
+                         static_cast<std::uint8_t>(c.g * shade),
+                         static_cast<std::uint8_t>(c.b * shade),
+                         false};
+                  // Bloom: blend toward white just outside the light disc.
+                  if (r < light + glow)
+                  {
+                    const float g = std::min(1.0F, (light + glow - r) / glow);
+                    px = Rgb{static_cast<std::uint8_t>(px.r + (255 - px.r) * g),
+                             static_cast<std::uint8_t>(px.g + (255 - px.g) * g),
+                             static_cast<std::uint8_t>(px.b + (255 - px.b) * g),
+                             false};
+                  }
+                  dst[idx] = px;
+                }
+            });
+}
+
 // Effect roster. Keep in sync with the dispatch switch below and with the
 // names in exitEffectName().
-constexpr int kEffectCount = 23;
+constexpr int kEffectCount = 26;
 }  // namespace
 
 int exitEffectCount()
@@ -2036,7 +2362,8 @@ const char* exitEffectName(int effectIndex)
       "CRT off",  "fade",           "fire",        "fireworks",     "Pac-Man",
       "train",    "The End",        "eye wink",    "submarine",     "Bond barrel",
       "teardrop", "tears in rain",  "word reveal", "koyaanisqatsi", "rosebud",
-      "shiver",   "HAL 9000",       "Rubik"};
+      "shiver",   "HAL 9000",       "Rubik",       "foot stomp",    "Monty Python",
+      "tunnel"};
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return "random";
   return kNames[effectIndex];
@@ -2175,6 +2502,15 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
       break;
     case 22:
       effectRubik(renderer, frame, subW, subH, rng);
+      break;
+    case 23:
+      effectFoot(renderer, frame, subW, subH);
+      break;
+    case 24:
+      effectMontyPython(renderer, frame, subW, subH);
+      break;
+    case 25:
+      effectTunnel(renderer, frame, subW, subH);
       break;
     default:
       effectFade(renderer, frame, subW, subH);
