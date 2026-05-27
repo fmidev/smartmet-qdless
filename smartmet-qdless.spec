@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.27
-Release: 2%{?dist}.fmi
+Release: 3%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -108,8 +108,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/qdless.conf
 %{_datadir}/smartmet/qdless/palettes/*.json
 %{_datadir}/smartmet/qdless/cities1000.tsv
+%{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Wed May 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.27-3.fmi
+- New exit strategy
+
 * Wed May 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.27-2.fmi
 - Improved exit handling
 

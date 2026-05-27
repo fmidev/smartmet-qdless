@@ -1,5 +1,7 @@
 #include "QdlessExitEffect.h"
 
+#include "QdlessImageSource.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -7,6 +9,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -14,6 +19,8 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <boost/dll/runtime_symbol_info.hpp>
 
 #include <poll.h>
 #include <unistd.h>
@@ -2140,11 +2147,129 @@ void effectFoot(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
             });
 }
 
-// "...and now for something completely different." The traditional Monty Python
-// foot — Terry Gilliam's side-on cut-out, a bare leg trailing off the top —
-// slides straight down and STOMPS, squishing the data view flat beneath its
-// flat sole, then stays planted.
+// Resolve the path to the Monty Python foot image. Mirrors the cities1000.tsv
+// lookup in App: installed copy first, then the dev tree beside the binary,
+// then a user override. Returns empty if none exists.
+std::string findFootImage()
+{
+  std::vector<std::filesystem::path> candidates{
+      std::filesystem::path("/usr/share/smartmet/qdless/foot.png")};
+  try
+  {
+    const std::filesystem::path exeDir = boost::dll::program_location().parent_path().string();
+    candidates.push_back(exeDir / "data" / "foot.png");
+  }
+  catch (const std::exception&)
+  {
+  }
+  if (const char* home = std::getenv("HOME"))
+    candidates.push_back(std::filesystem::path(home) / ".config" / "qdless" / "foot.png");
+  for (const auto& p : candidates)
+  {
+    std::error_code ec;
+    if (std::filesystem::exists(p, ec))
+      return p.string();
+  }
+  return {};
+}
+
+// Decode data/foot.png via the project's image reader. Returns nullptr (and
+// leaves fw/fh untouched) if the file is missing or fails to decode, so the
+// caller can fall back to the hand-drawn foot.
+std::unique_ptr<ImageSource> loadFootImage(std::size_t& fw, std::size_t& fh)
+{
+  const std::string path = findFootImage();
+  if (path.empty())
+    return nullptr;
+  try
+  {
+    auto img = std::make_unique<ImageSource>(path);
+    const auto [iw, ih] = img->pixelSize();
+    if (iw == 0 || ih == 0)
+      return nullptr;
+    fw = iw;
+    fh = ih;
+    return img;
+  }
+  catch (const std::exception&)
+  {
+    return nullptr;
+  }
+}
+
+void effectMontyPythonProcedural(const Renderer& renderer,
+                                 const std::vector<Rgb>& src,
+                                 int w,
+                                 int h);
+
+// "...and now for something completely different." Terry Gilliam's foot
+// (data/foot.png) drops straight in from the top of the screen — sole leading —
+// and STOMPS, crushing the current view into a vanishing strip beneath it,
+// then stays planted. Each frame is composited into an off-screen buffer and
+// presented whole (DEC 2026 synchronised output) through the high-fidelity
+// block-glyph Renderer; nothing is drawn onto the live screen incrementally.
+// If the image isn't installed we fall back to the hand-drawn foot below.
 void effectMontyPython(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  // fw/fh are only needed so loadFootImage can reject a zero-sized decode; the
+  // stomp scales the painting to the screen, so the source aspect is unused.
+  [[maybe_unused]] std::size_t fw = 0;
+  [[maybe_unused]] std::size_t fh = 0;
+  std::unique_ptr<ImageSource> foot = loadFootImage(fw, fh);
+  if (!foot)
+  {
+    effectMontyPythonProcedural(renderer, src, w, h);
+    return;
+  }
+
+  // Sample the painting at (u,v) in [0,1]^2 — v=0 is the top (leg cut off the
+  // frame), v=1 the sole; u=0 the toes, u=1 the heel. Bilinear, full-res.
+  auto footPixel = [&](float u, float v) -> Rgb
+  { return foot->pixelAtUV(std::clamp(u, 0.0F, 0.999F), std::clamp(v, 0.0F, 0.999F)); };
+
+  runFrames(
+      renderer,
+      w,
+      h,
+      1100,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        // The sole accelerates down from the top (gravity: p^2) to the floor,
+        // compressing the whole view into the shrinking strip beneath it; the
+        // painting fills the screen above so a full slam blacks out the data.
+        // The slam lands at 40% of the run; the foot then stays planted and
+        // fully visible for the remaining 60%.
+        const float p = std::min(1.0F, t / 0.4F);
+        const float contactY = p * p * static_cast<float>(h);  // sole row
+        // Below the sole: the entire view squashed into [contactY, h).
+        for (int y = static_cast<int>(std::ceil(contactY)); y < h; ++y)
+        {
+          const float frac = (y - contactY) / std::max(1.0F, static_cast<float>(h) - contactY);
+          const int row = std::min(h - 1, static_cast<int>(frac * (h - 1)));
+          for (int x = 0; x < w; ++x)
+            dst[static_cast<std::size_t>(y) * w + x] = src[static_cast<std::size_t>(row) * w + x];
+        }
+        // Above the sole: the painting, sole (v=1) pinned to the contact line,
+        // scaled so it exactly fills the screen at full slam.
+        const int contactRow = static_cast<int>(std::ceil(contactY));
+        for (int y = 0; y < contactRow && y < h; ++y)
+        {
+          const float fv =
+              (static_cast<float>(y) - (contactY - static_cast<float>(h))) / static_cast<float>(h);
+          for (int x = 0; x < w; ++x)
+            dst[static_cast<std::size_t>(y) * w + x] = footPixel((x + 0.5F) / w, fv);
+        }
+      });
+}
+
+// Fallback for effectMontyPython when data/foot.png can't be loaded: a
+// hand-drawn Monty Python foot — Terry Gilliam's side-on cut-out, a bare leg
+// trailing off the top — slides straight down and STOMPS, squishing the data
+// view flat beneath its flat sole, then stays planted.
+void effectMontyPythonProcedural(const Renderer& renderer,
+                                 const std::vector<Rgb>& src,
+                                 int w,
+                                 int h)
 {
   const float ya = yAspectFor(renderer);
   const float px = (w - 1) * 0.52F;              // the ankle / leg column

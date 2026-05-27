@@ -4,6 +4,7 @@
 #include "QdlessPalette.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Qdless
@@ -67,6 +68,10 @@ class ImageSource : public DataSource
 
   SourceCategory category() const override { return SourceCategory::Image; }
   Rgb pixelAtUV(double u, double v) const override;
+
+  // Decoded pixel dimensions (width, height). Both 0 before/without a
+  // successful decode. Used by callers that need the source aspect ratio.
+  std::pair<std::size_t, std::size_t> pixelSize() const { return {itsNx, itsNy}; }
 
  private:
   std::string itsFilename;

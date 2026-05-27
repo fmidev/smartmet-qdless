@@ -95,6 +95,7 @@ install:
 	  $(INSTALL_DATA) $$f $(datadir)/smartmet/qdless/palettes/; \
 	done
 	$(INSTALL_DATA) data/cities1000.tsv $(datadir)/smartmet/qdless/cities1000.tsv
+	$(INSTALL_DATA) data/foot.png $(datadir)/smartmet/qdless/foot.png
 
 test:
 	@if [ -f test/Makefile ]; then cd test && $(MAKE) test; \
