@@ -186,6 +186,33 @@ make rpm             # build RPM
 make install         # install to $PREFIX/bin (default /usr/bin)
 ```
 
+### macOS (Homebrew)
+
+The fmidev tap ships a pre-built bottle for Apple Silicon. Install with:
+
+```bash
+brew tap fmidev/smartmet
+brew install fmidev/smartmet/smartmet-qdless
+```
+
+The formula pulls in all SmartMet library deps (`macgyver`, `gis`,
+`newbase`, `grid-files` and its transitives) plus `gshhg-gmt-nc4` for
+coastlines, so a fresh tap install is enough to run `qdless` against
+QueryData, GRIB, NetCDF, ODIM HDF, GeoTIFF, shapefiles and PostGIS.
+
+Palettes, `qdless.conf`, and `cities1000.tsv` are installed under
+`$(brew --prefix)/share/smartmet/qdless/` (baked into the binary via
+`-DQDLESS_DATA_DIR=...`); the coastline NetCDFs live at
+`$(brew --prefix)/share/gshhg-gmt-nc4/`. `--palette-dir`,
+`--coastline-dir`, and the `QDLESS_GRID_FILES_CONF` env var override the
+defaults at runtime.
+
+For source-level development on macOS — non-brew sibling builds against
+checked-out SmartMet libraries — there is a `Makefile.mac` carried in the
+[fmidev/homebrew-smartmet](https://github.com/fmidev/homebrew-smartmet)
+tap (`patches/qdless.Makefile.mac`) together with the small
+cross-platform patch the bottle applies.
+
 ## Usage
 
 ```bash
