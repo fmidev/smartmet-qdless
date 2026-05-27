@@ -35,13 +35,21 @@ struct ExitEffectPlay
 // a nonzero seed makes the run reproducible. `words` is the caller-supplied
 // text for the word-reveal effect (ignored by the others). Any key pressed
 // during the animation aborts it. Returns the index + seed used.
+//
+// `linesFrame` and `swedenMask` are optional geographic extras for the
+// "Utopia" effect: a subW×subH raster of just the coastlines + borders (on
+// black), and a subW×subH 0/1 mask of the pixels inside Sweden. Both nullptr
+// (or empty / wrong-sized) makes Utopia fall back to a plain fade. Other
+// effects ignore them.
 ExitEffectPlay playExitEffect(const Renderer& renderer,
                               std::vector<Rgb> frame,
                               int subW,
                               int subH,
                               int effectIndex = -1,
                               unsigned seed = 0,
-                              std::string words = {});
+                              std::string words = {},
+                              const std::vector<Rgb>* linesFrame = nullptr,
+                              const std::vector<char>* swedenMask = nullptr);
 
 // Number of distinct effects, and a short human-readable name for each
 // (for the preview status message). name() returns "random" out of range.

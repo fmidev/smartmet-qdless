@@ -14,7 +14,6 @@
 #include <newbase/NFmiGlobals.h>
 #include <newbase/NFmiPoint.h>
 
-
 #include <ncurses.h>
 
 #include <boost/dll/runtime_symbol_info.hpp>
@@ -22,11 +21,11 @@
 #include <fmt/ostream.h>
 #include <json/json.h>
 
+#include <sys/ioctl.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
-#include <sstream>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -34,8 +33,8 @@
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <stdexcept>
-#include <sys/ioctl.h>
 #include <unistd.h>
 
 namespace Qdless
@@ -46,9 +45,12 @@ const char* panelLayoutLabel(PanelLayout l)
 {
   switch (l)
   {
-    case PanelLayout::Single: return "Layout: single";
-    case PanelLayout::Side:   return "Layout: side-by-side";
-    case PanelLayout::Quad:   return "Layout: 2x2";
+    case PanelLayout::Single:
+      return "Layout: single";
+    case PanelLayout::Side:
+      return "Layout: side-by-side";
+    case PanelLayout::Quad:
+      return "Layout: 2x2";
   }
   return "Layout: ?";
 }
@@ -57,9 +59,12 @@ LineStyle nextLineStyle(LineStyle s)
 {
   switch (s)
   {
-    case LineStyle::Braille: return LineStyle::Thick;
-    case LineStyle::Thick:   return LineStyle::None;
-    case LineStyle::None:    return LineStyle::Braille;
+    case LineStyle::Braille:
+      return LineStyle::Thick;
+    case LineStyle::Thick:
+      return LineStyle::None;
+    case LineStyle::None:
+      return LineStyle::Braille;
   }
   return LineStyle::Braille;
 }
@@ -68,9 +73,12 @@ const char* lineStyleLabel(LineStyle s)
 {
   switch (s)
   {
-    case LineStyle::Braille: return "braille";
-    case LineStyle::Thick:   return "thick";
-    case LineStyle::None:    return "off";
+    case LineStyle::Braille:
+      return "braille";
+    case LineStyle::Thick:
+      return "thick";
+    case LineStyle::None:
+      return "off";
   }
   return "?";
 }
@@ -79,9 +87,12 @@ CornerStyle nextCornerStyle(CornerStyle s)
 {
   switch (s)
   {
-    case CornerStyle::Sextant:       return CornerStyle::SmallTriangle;
-    case CornerStyle::SmallTriangle: return CornerStyle::Square;
-    case CornerStyle::Square:        return CornerStyle::Sextant;
+    case CornerStyle::Sextant:
+      return CornerStyle::SmallTriangle;
+    case CornerStyle::SmallTriangle:
+      return CornerStyle::Square;
+    case CornerStyle::Square:
+      return CornerStyle::Sextant;
   }
   return CornerStyle::Sextant;
 }
@@ -90,9 +101,12 @@ const char* cornerStyleLabel(CornerStyle s)
 {
   switch (s)
   {
-    case CornerStyle::Sextant:       return "sextants";
-    case CornerStyle::SmallTriangle: return "triangles";
-    case CornerStyle::Square:        return "squares";
+    case CornerStyle::Sextant:
+      return "sextants";
+    case CornerStyle::SmallTriangle:
+      return "triangles";
+    case CornerStyle::Square:
+      return "squares";
   }
   return "?";
 }
@@ -112,14 +126,15 @@ std::string brailleGlyph(unsigned mask)
 
 unsigned brailleBit(int subCol, int subRow)
 {
-  if (subRow == 3) return (subCol == 0) ? 6U : 7U;
+  if (subRow == 3)
+    return (subCol == 0) ? 6U : 7U;
   return static_cast<unsigned>(subCol * 3 + subRow);
 }
 
 // Append a raw-ANSI cursor positioning + glyph for each cell of a vertical
 // or horizontal separator. `glyph` is a UTF-8 box-drawing character.
-void appendSeparator(std::ostringstream& os, int row, int col, int len, bool vertical,
-                     const char* glyph)
+void appendSeparator(
+    std::ostringstream& os, int row, int col, int len, bool vertical, const char* glyph)
 {
   // ESC[<row>;<col>H is 1-based; map our 0-based positions accordingly.
   // Use a dim cyan-on-black scheme that matches the popup borders.
@@ -223,13 +238,15 @@ std::string lowercased(const std::string& s)
 // Stream `n` space chars (no-op if n <= 0).
 void padSpaces(std::ostream& os, int n)
 {
-  if (n > 0) os << std::string(static_cast<std::size_t>(n), ' ');
+  if (n > 0)
+    os << std::string(static_cast<std::size_t>(n), ' ');
 }
 
 // "Nice" tick step for an axis spanning `range`: one of {1,2,5}*10^k.
 double niceStep(double range, int maxTicks)
 {
-  if (range <= 0 || maxTicks < 1) return 1.0;
+  if (range <= 0 || maxTicks < 1)
+    return 1.0;
   const double rough = range / maxTicks;
   const double exponent = std::floor(std::log10(rough));
   const double power = std::pow(10.0, exponent);
@@ -249,8 +266,7 @@ double niceStep(double range, int maxTicks)
 // Lower-case copy.
 std::string toLower(std::string s)
 {
-  std::transform(s.begin(), s.end(), s.begin(),
-                 [](unsigned char c) { return std::tolower(c); });
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
   return s;
 }
 
@@ -259,7 +275,8 @@ std::string toLower(std::string s)
 bool nameContains(const std::string& text, std::initializer_list<const char*> needles)
 {
   const std::string lower = toLower(text);
-  return std::any_of(needles.begin(), needles.end(),
+  return std::any_of(needles.begin(),
+                     needles.end(),
                      [&](const char* n) { return lower.find(n) != std::string::npos; });
 }
 
@@ -277,7 +294,8 @@ struct UnitGuess
 // Detection is conservative: we only propose a palette when the unit AND
 // the name agree on the parameter's nature, so e.g. a m/s ocean current
 // doesn't accidentally pick up the atmospheric wind palette.
-UnitGuess guessFromUnits(const std::string& shortName, const std::string& longName,
+UnitGuess guessFromUnits(const std::string& shortName,
+                         const std::string& longName,
                          const std::string& units)
 {
   UnitGuess g;
@@ -286,9 +304,14 @@ UnitGuess guessFromUnits(const std::string& shortName, const std::string& longNa
   // Sea-temperature names take priority over the generic temperature
   // palette so the realistic −2…+25 °C ramp is used instead of the
   // atmospheric −50…+50 °C one.
-  auto isSeaTempName = [&] {
-    return nameContains(both, {"sea_surface_temperature", "sea surface temperature",
-                               "sea_temperature", "sea temperature", "temperaturesea"}) ||
+  auto isSeaTempName = [&]
+  {
+    return nameContains(both,
+                        {"sea_surface_temperature",
+                         "sea surface temperature",
+                         "sea_temperature",
+                         "sea temperature",
+                         "temperaturesea"}) ||
            shortName == "TSEA" || shortName == "TSEA-C" || shortName == "SST";
   };
 
@@ -301,8 +324,7 @@ UnitGuess guessFromUnits(const std::string& shortName, const std::string& longNa
       g.palette = "seatemperature";
     }
     else if (nameContains(both, {"temperature", "dewpoint", "dew point"}) || shortName == "T" ||
-             shortName == "T-K" || shortName == "TD" || shortName == "TD-K" ||
-             shortName == "T2m")
+             shortName == "T-K" || shortName == "TD" || shortName == "TD-K" || shortName == "T2m")
     {
       g.offset = -273.15F;
       g.palette = "temperature";
@@ -318,14 +340,17 @@ UnitGuess guessFromUnits(const std::string& shortName, const std::string& longNa
     }
   }
   // Wind speed: m/s
-  else if (units == "m/s" || units == "m s-1" || units == "m s**-1" ||
-           units == "ms-1" || units == "ms**-1")
+  else if (units == "m/s" || units == "m s-1" || units == "m s**-1" || units == "ms-1" ||
+           units == "ms**-1")
   {
     if (nameContains(both, {"gust"}))
       g.palette = "windgust";
     else if (shortName == "WindUMS" || shortName == "WindVMS" ||
-             nameContains(both, {"u-component of wind", "v-component of wind",
-                                 "u component of wind", "v component of wind"}))
+             nameContains(both,
+                          {"u-component of wind",
+                           "v-component of wind",
+                           "u component of wind",
+                           "v component of wind"}))
       g.palette = "wind_component";
     else if (nameContains(both, {"wind"}) || shortName == "WS" || shortName == "FF")
       g.palette = "wind";
@@ -380,9 +405,13 @@ UnitGuess guessFromUnits(const std::string& shortName, const std::string& longNa
       g.palette = "temperature";
     else if (nameContains(both, {"gust"}))
       g.palette = "windgust";
-    else if (nameContains(both, {"wind"}) &&
-             !nameContains(both, {"u-component", "v-component", "u_component", "v_component",
-                                  "windums", "windvms"}))
+    else if (nameContains(both, {"wind"}) && !nameContains(both,
+                                                           {"u-component",
+                                                            "v-component",
+                                                            "u_component",
+                                                            "v_component",
+                                                            "windums",
+                                                            "windvms"}))
       g.palette = "wind";
     else if (nameContains(both, {"humidity"}))
       g.palette = "humidity";
@@ -414,7 +443,8 @@ std::string paletteForParam(const std::string& cfgPath, const std::string& param
         std::string needle = lowercased(paramName);
         for (const auto& key : palettes.getMemberNames())
         {
-          if (lowercased(key) == needle) return palettes[key].asString();
+          if (lowercased(key) == needle)
+            return palettes[key].asString();
         }
       }
     }
@@ -422,7 +452,8 @@ std::string paletteForParam(const std::string& cfgPath, const std::string& param
   // Fall back to the built-in defaults so it works without an installed conf.
   std::string needle = lowercased(paramName);
   for (const auto& [param, palette] : builtinPaletteMap())
-    if (lowercased(param) == needle) return palette;
+    if (lowercased(param) == needle)
+      return palette;
   return {};
 }
 }  // namespace
@@ -445,7 +476,8 @@ void Viewport::clamp()
   // We only clamp the span itself: keep it positive and bounded.
   constexpr float kMinSpan = 1e-4F;  // prevent zooming in past 0.01%
   constexpr float kMaxSpan = 3.0F;   // cap zoom-out at 3× bbox
-  auto bound = [&](float& lo, float& hi) {
+  auto bound = [&](float& lo, float& hi)
+  {
     float span = hi - lo;
     if (span < kMinSpan)
     {
@@ -508,8 +540,8 @@ App::App(Options opts) : itsOpts(std::move(opts))
     // PostgreSQL driver.
     GDALAllRegister();
     const std::string opener = "PG:" + itsOpts.pgConn;
-    auto* ds = static_cast<GDALDataset*>(GDALOpenEx(
-        opener.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
+    auto* ds = static_cast<GDALDataset*>(
+        GDALOpenEx(opener.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
     if (ds == nullptr)
       throw std::runtime_error("PostGIS connection failed: " + itsOpts.pgConn);
     itsPgDataset = ds;
@@ -536,7 +568,8 @@ App::App(Options opts) : itsOpts(std::move(opts))
   else
     itsSource = DataSource::open(itsOpts.filename);
   itsPanels.resize(1);
-  if (itsSource != nullptr) initFromSource();
+  if (itsSource != nullptr)
+    initFromSource();
 }
 
 void App::initFromSource()
@@ -553,8 +586,10 @@ void App::initFromSource()
   // Seed live overlay styles from CLI flags. After startup these are
   // cycled by the `c` / `b` keys; itsOpts.noCoastline / noBorders are not
   // updated further.
-  if (itsOpts.noCoastline) itsCoastlineStyle = LineStyle::None;
-  if (itsOpts.noBorders) itsBorderStyle = LineStyle::None;
+  if (itsOpts.noCoastline)
+    itsCoastlineStyle = LineStyle::None;
+  if (itsOpts.noBorders)
+    itsBorderStyle = LineStyle::None;
   // Image mode (naked PNG/WebP/JPEG/...): force every geographic overlay
   // off. The image has no projection — drawing a coastline at unit-square
   // (lat,lon) coords would spew lines at the wrong scale on top of a
@@ -602,29 +637,36 @@ void App::initFromSource()
   if (!itsOpts.layoutOverride.empty())
   {
     std::string s = itsOpts.layoutOverride;
-    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (s == "single") targetLayout = PanelLayout::Single;
-    else if (s == "side" || s == "side-by-side") targetLayout = PanelLayout::Side;
-    else if (s == "quad" || s == "2x2") targetLayout = PanelLayout::Quad;
-    else throw std::runtime_error("qdless: unknown --layout '" + itsOpts.layoutOverride +
-                                  "' (expected single, side, or quad)");
+    for (auto& c : s)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (s == "single")
+      targetLayout = PanelLayout::Single;
+    else if (s == "side" || s == "side-by-side")
+      targetLayout = PanelLayout::Side;
+    else if (s == "quad" || s == "2x2")
+      targetLayout = PanelLayout::Quad;
+    else
+      throw std::runtime_error("qdless: unknown --layout '" + itsOpts.layoutOverride +
+                               "' (expected single, side, or quad)");
   }
   else if (overrideIdx.size() == 2)
     targetLayout = PanelLayout::Side;
   else if (overrideIdx.size() >= 3)
     targetLayout = PanelLayout::Quad;
 
-  const std::size_t want = (targetLayout == PanelLayout::Quad)
-                               ? 4
-                               : (targetLayout == PanelLayout::Side ? 2 : 1);
+  const std::size_t want =
+      (targetLayout == PanelLayout::Quad) ? 4 : (targetLayout == PanelLayout::Side ? 2 : 1);
   if (overrideIdx.size() > want)
     throw std::runtime_error("qdless: --layout " + itsOpts.layoutOverride + " holds " +
                              std::to_string(want) + " panel(s), but " +
                              std::to_string(overrideIdx.size()) + " parameters were given");
 
-  auto resolveIndex = [](int requested, std::size_t size) -> std::size_t {
-    if (size == 0) return 0;
-    if (requested < 0) return size - 1;
+  auto resolveIndex = [](int requested, std::size_t size) -> std::size_t
+  {
+    if (size == 0)
+      return 0;
+    if (requested < 0)
+      return size - 1;
     if (static_cast<std::size_t>(requested) >= size)
       throw std::runtime_error("qdless: index " + std::to_string(requested) +
                                " out of range (size " + std::to_string(size) + ")");
@@ -655,12 +697,14 @@ void App::initFromSource()
       {
         const std::size_t src = (i < overrideIdx.size()) ? i : 0;
         const int newParamIdx = overrideIdx[src];
-        if (itsPanels[i].paramIndex == newParamIdx) continue;
+        if (itsPanels[i].paramIndex == newParamIdx)
+          continue;
         itsPanels[i].paramIndex = newParamIdx;
         // Re-resolve palette for this slot.
         const int savedActive = itsActivePanel;
         itsActivePanel = static_cast<int>(i);
-        if (newParamIdx >= 0 && newParamIdx < n) itsSource->selectParamId(itsParamIds[newParamIdx]);
+        if (newParamIdx >= 0 && newParamIdx < n)
+          itsSource->selectParamId(itsParamIds[newParamIdx]);
         itsSource->selectLevelIndex(itsPanels[i].levelIndex);
         loadPalette();
         itsActivePanel = savedActive;
@@ -701,12 +745,14 @@ std::string stripSchema(const std::string& full)
 void App::openPgLayer(const std::string& schemaTable)
 {
   auto* ds = static_cast<GDALDataset*>(itsPgDataset);
-  if (ds == nullptr) throw std::runtime_error("openPgLayer: no PG dataset");
+  if (ds == nullptr)
+    throw std::runtime_error("openPgLayer: no PG dataset");
   // Try both the qualified ("schema.table") and bare ("table") name —
   // OGR's PG driver normally reports layers as "schema.name", but
   // GetLayerByName accepts either form.
   OGRLayer* layer = ds->GetLayerByName(schemaTable.c_str());
-  if (layer == nullptr) layer = ds->GetLayerByName(stripSchema(schemaTable).c_str());
+  if (layer == nullptr)
+    layer = ds->GetLayerByName(stripSchema(schemaTable).c_str());
   if (layer == nullptr)
     throw std::runtime_error("PostGIS table not found: " + schemaTable);
   itsSource = std::make_unique<ShapeSource>(layer, schemaTable);
@@ -715,7 +761,8 @@ void App::openPgLayer(const std::string& schemaTable)
 bool App::openPgPicker(UI& ui)
 {
   auto* ds = static_cast<GDALDataset*>(itsPgDataset);
-  if (ds == nullptr) return false;
+  if (ds == nullptr)
+    return false;
   // Build the layer list once. Filtering by --schema (if given) is a
   // simple prefix match against the OGR-reported "schema.name".
   struct Entry
@@ -724,21 +771,23 @@ bool App::openPgPicker(UI& ui)
     std::string display;  // "schema.name (Polygon, 16 features)"
   };
   std::vector<Entry> entries;
-  const std::string prefix =
-      itsOpts.pgSchema.empty() ? std::string{} : itsOpts.pgSchema + ".";
+  const std::string prefix = itsOpts.pgSchema.empty() ? std::string{} : itsOpts.pgSchema + ".";
   for (int i = 0; i < ds->GetLayerCount(); ++i)
   {
     OGRLayer* layer = ds->GetLayer(i);
-    if (layer == nullptr) continue;
+    if (layer == nullptr)
+      continue;
     std::string name = layer->GetName();
-    if (!prefix.empty() && name.compare(0, prefix.size(), prefix) != 0) continue;
+    if (!prefix.empty() && name.compare(0, prefix.size(), prefix) != 0)
+      continue;
     // Hide non-spatial tables. OGR's PostgreSQL driver lists ALL
     // tables visible to the role, including pure attribute tables
     // (no geometry column) — those would land in the picker as
     // e.g. "wind" without anything renderable. wkbUnknown is OK
     // (mixed geometries), only wkbNone means "no geometry column".
     const OGRwkbGeometryType gt = layer->GetGeomType();
-    if (gt == wkbNone) continue;
+    if (gt == wkbNone)
+      continue;
     const char* gtype = OGRGeometryTypeToName(gt);
     // GetFeatureCount(false) skips the COUNT(*) round-trip; OGR
     // returns -1 if the driver can't supply a fast estimate.
@@ -757,9 +806,8 @@ bool App::openPgPicker(UI& ui)
   }
   if (entries.empty())
   {
-    throw std::runtime_error(
-        std::string("PostGIS: no layers visible") +
-        (prefix.empty() ? "" : " in schema " + itsOpts.pgSchema));
+    throw std::runtime_error(std::string("PostGIS: no layers visible") +
+                             (prefix.empty() ? "" : " in schema " + itsOpts.pgSchema));
   }
   // Auto-pick when only one match — the user's intent is unambiguous.
   if (entries.size() == 1)
@@ -771,12 +819,13 @@ bool App::openPgPicker(UI& ui)
   // string. The matcher's lastIdx vector remembers which entry each
   // visible row came from.
   std::vector<int> lastIdx;
-  auto matcher = [&](const std::string& q) {
+  auto matcher = [&](const std::string& q)
+  {
     std::vector<std::string> hits;
     lastIdx.clear();
     std::string lq = q;
-    std::transform(lq.begin(), lq.end(), lq.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+    std::transform(
+        lq.begin(), lq.end(), lq.begin(), [](unsigned char c) { return std::tolower(c); });
     for (std::size_t i = 0; i < entries.size(); ++i)
     {
       if (lq.empty())
@@ -786,7 +835,9 @@ bool App::openPgPicker(UI& ui)
         continue;
       }
       std::string lower = entries[i].display;
-      std::transform(lower.begin(), lower.end(), lower.begin(),
+      std::transform(lower.begin(),
+                     lower.end(),
+                     lower.begin(),
                      [](unsigned char c) { return std::tolower(c); });
       if (lower.find(lq) != std::string::npos)
       {
@@ -799,7 +850,8 @@ bool App::openPgPicker(UI& ui)
   const std::string title =
       "PostGIS layers" + (prefix.empty() ? std::string{} : " in " + itsOpts.pgSchema);
   const int sel = ui.popupSearch(title, matcher);
-  if (sel < 0 || sel >= static_cast<int>(lastIdx.size())) return false;
+  if (sel < 0 || sel >= static_cast<int>(lastIdx.size()))
+    return false;
   openPgLayer(entries[lastIdx[sel]].fullName);
   return true;
 }
@@ -808,10 +860,11 @@ namespace
 {
 bool isPngFile(const std::filesystem::path& p)
 {
-  if (!p.has_extension()) return false;
+  if (!p.has_extension())
+    return false;
   std::string ext = p.extension().string();
-  std::transform(ext.begin(), ext.end(), ext.begin(),
-                 [](unsigned char c) { return std::tolower(c); });
+  std::transform(
+      ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
   return ext == ".png";
 }
 
@@ -820,10 +873,13 @@ bool hasPngDirectChild(const std::filesystem::path& dir)
 {
   std::error_code ec;
   for (auto it = std::filesystem::directory_iterator(dir, ec);
-       it != std::filesystem::directory_iterator(); it.increment(ec))
+       it != std::filesystem::directory_iterator();
+       it.increment(ec))
   {
-    if (ec) return false;
-    if (it->is_regular_file(ec) && isPngFile(it->path())) return true;
+    if (ec)
+      return false;
+    if (it->is_regular_file(ec) && isPngFile(it->path()))
+      return true;
   }
   return false;
 }
@@ -836,9 +892,11 @@ std::vector<std::string> collectSortedPngs(const std::filesystem::path& dir)
   std::vector<std::string> out;
   std::error_code ec;
   for (auto it = std::filesystem::directory_iterator(dir, ec);
-       it != std::filesystem::directory_iterator(); it.increment(ec))
+       it != std::filesystem::directory_iterator();
+       it.increment(ec))
   {
-    if (ec) break;
+    if (ec)
+      break;
     if (it->is_regular_file(ec) && isPngFile(it->path()))
       out.push_back(it->path().string());
   }
@@ -851,10 +909,12 @@ void App::scanBrowseTree()
 {
   itsBrowseLeaves.clear();
   itsBrowseLeavesScanned = true;
-  if (itsOpts.browseRoot.empty()) return;
+  if (itsOpts.browseRoot.empty())
+    return;
   const std::filesystem::path root(itsOpts.browseRoot);
   std::error_code ec;
-  if (!std::filesystem::is_directory(root, ec)) return;
+  if (!std::filesystem::is_directory(root, ec))
+    return;
 
   // Pre-order walk. A directory that directly contains PNGs is a leaf
   // and we don't descend further into it — production trees put images
@@ -869,25 +929,31 @@ void App::scanBrowseTree()
       BrowseLeaf leaf;
       leaf.fullPath = cur.string();
       leaf.relPath = std::filesystem::relative(cur, root, ec).string();
-      if (leaf.relPath.empty() || leaf.relPath == ".") leaf.relPath = root.filename().string();
+      if (leaf.relPath.empty() || leaf.relPath == ".")
+        leaf.relPath = root.filename().string();
       itsBrowseLeaves.push_back(std::move(leaf));
       continue;
     }
     std::vector<std::filesystem::path> kids;
     for (auto it = std::filesystem::directory_iterator(cur, ec);
-         it != std::filesystem::directory_iterator(); it.increment(ec))
+         it != std::filesystem::directory_iterator();
+         it.increment(ec))
     {
-      if (ec) break;
-      if (it->is_directory(ec)) kids.push_back(it->path());
+      if (ec)
+        break;
+      if (it->is_directory(ec))
+        kids.push_back(it->path());
     }
     // Sort descending so that pop_back gives ascending traversal — keeps
     // the picker's default ordering predictable when the user opens it
     // before typing a query.
     std::sort(kids.rbegin(), kids.rend());
-    for (auto& k : kids) stack.push_back(std::move(k));
+    for (auto& k : kids)
+      stack.push_back(std::move(k));
   }
   // Final sort by display path for stable listing.
-  std::sort(itsBrowseLeaves.begin(), itsBrowseLeaves.end(),
+  std::sort(itsBrowseLeaves.begin(),
+            itsBrowseLeaves.end(),
             [](const BrowseLeaf& a, const BrowseLeaf& b) { return a.relPath < b.relPath; });
 }
 
@@ -912,7 +978,11 @@ bool App::openBrowsePicker(UI& ui)
   //   - search: flat fuzzy filter over relative leaf paths
   //   - browse: a column navigator that walks subdirs one level at a time
   // Both end by calling openBrowseLeaf and returning true.
-  enum class Mode { Search, Browse };
+  enum class Mode
+  {
+    Search,
+    Browse
+  };
   Mode mode = Mode::Search;
 
   // Column navigator state: the path being inspected, expressed relative
@@ -926,12 +996,13 @@ bool App::openBrowsePicker(UI& ui)
     if (mode == Mode::Search)
     {
       std::vector<int> lastIdx;
-      auto matcher = [&](const std::string& q) {
+      auto matcher = [&](const std::string& q)
+      {
         std::vector<std::string> hits;
         lastIdx.clear();
         std::string lq = q;
-        std::transform(lq.begin(), lq.end(), lq.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+        std::transform(
+            lq.begin(), lq.end(), lq.begin(), [](unsigned char c) { return std::tolower(c); });
         for (std::size_t i = 0; i < itsBrowseLeaves.size(); ++i)
         {
           const auto& path = itsBrowseLeaves[i].relPath;
@@ -942,7 +1013,9 @@ bool App::openBrowsePicker(UI& ui)
             continue;
           }
           std::string lower = path;
-          std::transform(lower.begin(), lower.end(), lower.begin(),
+          std::transform(lower.begin(),
+                         lower.end(),
+                         lower.begin(),
                          [](unsigned char c) { return std::tolower(c); });
           if (lower.find(lq) != std::string::npos)
           {
@@ -959,7 +1032,8 @@ bool App::openBrowsePicker(UI& ui)
         mode = Mode::Browse;
         continue;
       }
-      if (sel < 0 || sel >= static_cast<int>(lastIdx.size())) return false;
+      if (sel < 0 || sel >= static_cast<int>(lastIdx.size()))
+        return false;
       openBrowseLeaf(itsBrowseLeaves[lastIdx[sel]].fullPath);
       return true;
     }
@@ -968,25 +1042,33 @@ bool App::openBrowsePicker(UI& ui)
     // leaf, a "Load PNGs here" entry at the top. Special items:
     //   index 0: ".." when `here` is non-empty
     //   index 1 (or 0): "[Load PNGs here]" when current dir is a leaf
-    const std::filesystem::path absHere =
-        here.empty() ? std::filesystem::path(itsOpts.browseRoot)
-                     : std::filesystem::path(itsOpts.browseRoot) / here;
+    const std::filesystem::path absHere = here.empty()
+                                              ? std::filesystem::path(itsOpts.browseRoot)
+                                              : std::filesystem::path(itsOpts.browseRoot) / here;
     std::vector<std::filesystem::path> subdirs;
     bool isLeaf = hasPngDirectChild(absHere);
     if (!isLeaf)
     {
       std::error_code ec2;
       for (auto it = std::filesystem::directory_iterator(absHere, ec2);
-           it != std::filesystem::directory_iterator(); it.increment(ec2))
+           it != std::filesystem::directory_iterator();
+           it.increment(ec2))
       {
-        if (ec2) break;
-        if (it->is_directory(ec2)) subdirs.push_back(it->path());
+        if (ec2)
+          break;
+        if (it->is_directory(ec2))
+          subdirs.push_back(it->path());
       }
       std::sort(subdirs.begin(), subdirs.end());
     }
 
     std::vector<std::string> items;
-    enum class Kind { Up, Load, Subdir };
+    enum class Kind
+    {
+      Up,
+      Load,
+      Subdir
+    };
     std::vector<Kind> kinds;
     if (!here.empty())
     {
@@ -1007,13 +1089,14 @@ bool App::openBrowsePicker(UI& ui)
     {
       // Defensive: empty directory that's neither leaf nor has subdirs.
       // Auto-step up and try again.
-      if (here.empty()) return false;
+      if (here.empty())
+        return false;
       here = here.parent_path();
       continue;
     }
     const std::string title =
-        "Browse: " + (here.empty() ? itsOpts.browseRoot
-                                   : itsOpts.browseRoot + "/" + here.string()) +
+        "Browse: " +
+        (here.empty() ? itsOpts.browseRoot : itsOpts.browseRoot + "/" + here.string()) +
         "  (Tab: search)";
     const int sel = ui.popupMenu(title, items, 0, /*allowTab=*/true);
     if (sel == UI::kPopupSearchTab)
@@ -1021,7 +1104,8 @@ bool App::openBrowsePicker(UI& ui)
       mode = Mode::Search;
       continue;
     }
-    if (sel < 0) return false;
+    if (sel < 0)
+      return false;
     switch (kinds[sel])
     {
       case Kind::Up:
@@ -1036,8 +1120,10 @@ bool App::openBrowsePicker(UI& ui)
         // trailing '/'). Index into subdirs would be cleaner — compute
         // it back through the items[] layout offsets.
         int subIdx = sel;
-        if (!here.empty()) --subIdx;  // skip ".."
-        if (isLeaf) --subIdx;          // skip "[Load PNGs here]"
+        if (!here.empty())
+          --subIdx;  // skip ".."
+        if (isLeaf)
+          --subIdx;  // skip "[Load PNGs here]"
         if (subIdx >= 0 && subIdx < static_cast<int>(subdirs.size()))
           here = std::filesystem::relative(subdirs[subIdx], itsOpts.browseRoot);
         break;
@@ -1049,7 +1135,8 @@ bool App::openBrowsePicker(UI& ui)
 float App::transform(float v) const
 {
   // Same sentinel detection as Palette::lookup; keep them in sync.
-  if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F) return v;
+  if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F)
+    return v;
   const auto& p = activePanel();
   return v * p.valueScale + p.valueOffset;
 }
@@ -1069,14 +1156,14 @@ Rgb App::borderColor() const
 
 std::optional<Palette> App::loadPaletteByName(const std::string& name) const
 {
-  if (name.empty()) return std::nullopt;
+  if (name.empty())
+    return std::nullopt;
   std::vector<std::filesystem::path> candidates{
       std::filesystem::path(itsOpts.paletteDir) / (name + ".json"),
   };
   try
   {
-    const std::filesystem::path exeDir =
-        boost::dll::program_location().parent_path().string();
+    const std::filesystem::path exeDir = boost::dll::program_location().parent_path().string();
     candidates.push_back(exeDir / "palettes" / (name + ".json"));
     candidates.push_back(exeDir / ".." / "share" / "smartmet" / "qdless" / "palettes" /
                          (name + ".json"));
@@ -1143,9 +1230,12 @@ void App::loadPalette()
   }
 
   std::string paletteName = itsOpts.paletteOverride;
-  if (paletteName.empty()) paletteName = paletteForParam(itsOpts.configFile, shortName);
-  if (paletteName.empty()) paletteName = paletteForParam(itsOpts.configFile, longName);
-  if (paletteName.empty()) paletteName = guess.palette;
+  if (paletteName.empty())
+    paletteName = paletteForParam(itsOpts.configFile, shortName);
+  if (paletteName.empty())
+    paletteName = paletteForParam(itsOpts.configFile, longName);
+  if (paletteName.empty())
+    paletteName = guess.palette;
 
   if (!paletteName.empty())
   {
@@ -1161,8 +1251,7 @@ void App::loadPalette()
     try
     {
       // Cross-platform exe path: Linux /proc, macOS _NSGetExecutablePath, etc.
-      const std::filesystem::path exeDir =
-          boost::dll::program_location().parent_path().string();
+      const std::filesystem::path exeDir = boost::dll::program_location().parent_path().string();
       candidates.push_back(exeDir / "palettes" / (paletteName + ".json"));
       candidates.push_back(exeDir / ".." / "share" / "smartmet" / "qdless" / "palettes" /
                            (paletteName + ".json"));
@@ -1201,7 +1290,8 @@ void App::loadPalette()
       double lon = 0;
       itsSource->uvToLatLon((i + 0.5) / N, (j + 0.5) / N, lat, lon);
       const float v = transform(itsSource->interpolatedValue(lat, lon));
-      if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F) continue;
+      if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F)
+        continue;
       lo = std::min(lo, v);
       hi = std::max(hi, v);
     }
@@ -1255,8 +1345,8 @@ void App::loadCoastlines(int subPixelsW, int subPixelsH)
     auto path = Coastline::pickFile(itsOpts.coastlineDir, "GSHHS", degPerPix);
     if (!path.empty() && path != itsCoastlinePath)
     {
-      itsCoastlines = Coastline::read(path, itsOpts.minLakeAreaKm2, itsOpts.minLakeRoundness,
-                                      itsOpts.minIslandAreaKm2);
+      itsCoastlines = Coastline::read(
+          path, itsOpts.minLakeAreaKm2, itsOpts.minLakeRoundness, itsOpts.minIslandAreaKm2);
       itsCoastlinePath = path;
     }
   }
@@ -1271,8 +1361,7 @@ void App::loadCoastlines(int subPixelsW, int subPixelsH)
   }
 }
 
-std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
-                                  float& dataMax) const
+std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin, float& dataMax) const
 {
   std::vector<Rgb> out(static_cast<std::size_t>(subWidth) * subHeight, Palette::missingColor());
   dataMin = std::numeric_limits<float>::infinity();
@@ -1292,7 +1381,8 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin,
     vbox.maxLat = -std::numeric_limits<double>::infinity();
     vbox.minLon = std::numeric_limits<double>::infinity();
     vbox.maxLon = -std::numeric_limits<double>::infinity();
-    auto sample = [&](double u, double v) {
+    auto sample = [&](double u, double v)
+    {
       double lat = 0;
       double lon = 0;
       itsSource->uvToLatLon(u, v, lat, lon);
@@ -1363,8 +1453,7 @@ std::vector<App::ViewportStats> App::ensureViewportStats() const
   const int paramId = itsSource->currentParamId();
   const std::size_t levelIdx = itsSource->currentLevelIndex();
   constexpr float kEps = 1e-6F;
-  if (itsStatsCacheValid && itsStatsCacheParam == paramId &&
-      itsStatsCacheLevel == levelIdx &&
+  if (itsStatsCacheValid && itsStatsCacheParam == paramId && itsStatsCacheLevel == levelIdx &&
       std::fabs(itsStatsCacheViewport.uMin - itsViewport.uMin) < kEps &&
       std::fabs(itsStatsCacheViewport.uMax - itsViewport.uMax) < kEps &&
       std::fabs(itsStatsCacheViewport.vMin - itsViewport.vMin) < kEps &&
@@ -1413,7 +1502,8 @@ std::vector<App::ViewportStats> App::ensureViewportStats() const
         double lon = 0;
         itsSource->uvToLatLon(up, vp, lat, lon);
         const float val = transform(itsSource->interpolatedValue(lat, lon));
-        if (val == kFloatMissing || !std::isfinite(val) || std::fabs(val) > 1e6F) continue;
+        if (val == kFloatMissing || !std::isfinite(val) || std::fabs(val) > 1e6F)
+          continue;
         sum += val;
         ++count;
         lo = std::min(lo, val);
@@ -1464,7 +1554,8 @@ void App::beginCrossSection(int x1, int y1, int x2, int y2, UI& ui)
 
 void App::drawCrossSection(UI& ui)
 {
-  if (!itsCrossActive) return;
+  if (!itsCrossActive)
+    return;
 
   const double lat1 = itsCrossLat1;
   const double lon1 = itsCrossLon1;
@@ -1474,7 +1565,8 @@ void App::drawCrossSection(UI& ui)
   const bool heightMode = itsSource->hasNativeHeight() && itsCrossHeightAxis;
 
   // Haversine distance for the X-axis scale.
-  auto haversineKm = [](double la1, double lo1, double la2, double lo2) {
+  auto haversineKm = [](double la1, double lo1, double la2, double lo2)
+  {
     const double r1 = la1 * M_PI / 180.0;
     const double r2 = la2 * M_PI / 180.0;
     const double dla = (la2 - la1) * M_PI / 180.0;
@@ -1511,16 +1603,16 @@ void App::drawCrossSection(UI& ui)
     {
       // Row cy spans [heightHiKm − cy·step, heightHiKm − (cy+1)·step].
       // Label with the row's top edge — gives clean "12, 11, …, 1, 0".
-      const double top_km = heightHiKm - (heightHiKm - heightLoKm) *
-                                              static_cast<double>(cy) /
-                                              static_cast<double>(chartH);
+      const double top_km = heightHiKm - (heightHiKm - heightLoKm) * static_cast<double>(cy) /
+                                             static_cast<double>(chartH);
       rowLabels.push_back(fmt::format("{:g} km", top_km));
     }
   }
   else
   {
     const int nLevels = static_cast<int>(itsSource->levelCount());
-    if (nLevels < 2) return;
+    if (nLevels < 2)
+      return;
     chartH = nLevels;
     std::vector<float> levelValues(nLevels);
     rowLabels.assign(nLevels, std::string{});
@@ -1534,14 +1626,15 @@ void App::drawCrossSection(UI& ui)
     // Pressure-style: smaller value = higher altitude (smallest at top).
     // Height-style on non-RHI sources: largest at top so ground sits low.
     const bool ascend = itsSource->levelsAscendWithValue();
-    std::sort(levelOrder.begin(), levelOrder.end(),
-              [&](int a, int b) {
-                return ascend ? levelValues[a] > levelValues[b]
-                              : levelValues[a] < levelValues[b];
-              });
+    std::sort(
+        levelOrder.begin(),
+        levelOrder.end(),
+        [&](int a, int b)
+        { return ascend ? levelValues[a] > levelValues[b] : levelValues[a] < levelValues[b]; });
     // Reorder labels to match draw order.
     std::vector<std::string> tmp(nLevels);
-    for (int i = 0; i < nLevels; ++i) tmp[i] = rowLabels[levelOrder[i]];
+    for (int i = 0; i < nLevels; ++i)
+      tmp[i] = rowLabels[levelOrder[i]];
     rowLabels = std::move(tmp);
   }
 
@@ -1567,16 +1660,14 @@ void App::drawCrossSection(UI& ui)
     for (int sy = 0; sy < subH; ++sy)
     {
       const double v = static_cast<double>(sy) + 0.5;
-      const double h_km =
-          heightHiKm - (heightHiKm - heightLoKm) * v / static_cast<double>(subH);
+      const double h_km = heightHiKm - (heightHiKm - heightLoKm) * v / static_cast<double>(subH);
       for (int sx = 0; sx < subW; ++sx)
       {
         const double frac = (static_cast<double>(sx) + 0.5) / subW;
         const double lat = lat1 + frac * (lat2 - lat1);
         const double lon = lon1 + frac * (lon2 - lon1);
         const float val = transform(itsSource->interpolatedValueAtHeight(lat, lon, h_km));
-        pixels[static_cast<std::size_t>(sy) * subW + sx] =
-            activePanel().palette.lookup(val);
+        pixels[static_cast<std::size_t>(sy) * subW + sx] = activePanel().palette.lookup(val);
       }
     }
   }
@@ -1627,9 +1718,8 @@ void App::drawCrossSection(UI& ui)
   }
   // Line lives in the bottom half of the map → put the popup at the top of
   // the screen. Otherwise dock to bottom (just above the timeline).
-  const int top = (v01 > 0.5)
-                      ? std::max(0, l.map.row)
-                      : std::max(0, l.map.row + l.map.height - height);
+  const int top =
+      (v01 > 0.5) ? std::max(0, l.map.row) : std::max(0, l.map.row + l.map.height - height);
   // Horizontal: shift away from the line's horizontal centre when possible
   // so a roughly N–S line isn't covered. Falls back to centred when the map
   // is too narrow to offer a useful side.
@@ -1644,20 +1734,21 @@ void App::drawCrossSection(UI& ui)
   const int interiorW = width - 2;
 
   NFmiEnumConverter conv;
-  std::string title = "Cross-section: " + std::string(itsSource->paramShortName(itsSource->currentParamId()));
+  std::string title =
+      "Cross-section: " + std::string(itsSource->paramShortName(itsSource->currentParamId()));
 
   std::ostringstream os;
 
-  auto pos = [&](int row, int col = 0) {
-    os << "\x1b[" << (top + row + 1) << ';' << (left + col + 1) << 'H';
-  };
+  auto pos = [&](int row, int col = 0)
+  { os << "\x1b[" << (top + row + 1) << ';' << (left + col + 1) << 'H'; };
 
   // Top border with title.
   pos(0);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m"
      << "\xe2\x94\x8c\xe2\x94\x80[\x1b[38;5;15m" << title << "\x1b[38;5;14m]";
   int titleConsumed = 4 + static_cast<int>(title.size());
-  for (int i = 0; i < width - titleConsumed - 1; ++i) os << "\xe2\x94\x80";
+  for (int i = 0; i < width - titleConsumed - 1; ++i)
+    os << "\xe2\x94\x80";
   os << "\xe2\x94\x90\x1b[0m";
 
   // Chart rows: label │ <data row>.
@@ -1702,8 +1793,12 @@ void App::drawCrossSection(UI& ui)
   // Endpoints row.
   pos(2 + chartH);
   const std::string endpts =
-      fmt::format(" {:.2f}°N {:.2f}°E  ->  {:.2f}°N {:.2f}°E   total {:.1f} km", lat1, lon1, lat2,
-                  lon2, totalKm);
+      fmt::format(" {:.2f}°N {:.2f}°E  ->  {:.2f}°N {:.2f}°E   total {:.1f} km",
+                  lat1,
+                  lon1,
+                  lat2,
+                  lon2,
+                  totalKm);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m" << endpts;
   padSpaces(os, interiorW - static_cast<int>(endpts.size()));
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
@@ -1721,15 +1816,15 @@ void App::drawCrossSection(UI& ui)
   // has one → for the same skew. Count them dynamically.
   const int arrowsInFooter = itsSource->hasNativeHeight() ? 3 : 2;
   const int footerCells = static_cast<int>(footerStr.size()) - 2 * arrowsInFooter;
-  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m"
-     << footerStr;
+  os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m" << footerStr;
   padSpaces(os, interiorW - footerCells);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
 
   // Bottom border.
   pos(height - 1);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x94";
-  for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
+  for (int i = 0; i < width - 2; ++i)
+    os << "\xe2\x94\x80";
   os << "\xe2\x94\x98\x1b[0m";
 
   const std::string s = os.str();
@@ -1747,7 +1842,8 @@ void App::drawCrossSection(UI& ui)
 
 bool App::ensureCityIndex() const
 {
-  if (itsCityIndexAttempted) return !itsCityIndex.empty();
+  if (itsCityIndexAttempted)
+    return !itsCityIndex.empty();
   itsCityIndexAttempted = true;
 
   std::vector<std::filesystem::path> candidates{
@@ -1755,19 +1851,18 @@ bool App::ensureCityIndex() const
   };
   try
   {
-    const std::filesystem::path exeDir =
-        boost::dll::program_location().parent_path().string();
+    const std::filesystem::path exeDir = boost::dll::program_location().parent_path().string();
     candidates.push_back(exeDir / "data" / "cities1000.tsv");
   }
   catch (const std::exception&)
   {
   }
   if (const char* home = std::getenv("HOME"))
-    candidates.push_back(std::filesystem::path(home) / ".config" / "qdless" /
-                         "cities1000.tsv");
+    candidates.push_back(std::filesystem::path(home) / ".config" / "qdless" / "cities1000.tsv");
   for (const auto& path : candidates)
   {
-    if (std::filesystem::exists(path) && itsCityIndex.load(path.string())) return true;
+    if (std::filesystem::exists(path) && itsCityIndex.load(path.string()))
+      return true;
   }
   return false;
 }
@@ -1786,26 +1881,30 @@ void App::openPlaceSearch(UI& ui)
   double centerLat = 0;
   double centerLon = 0;
   itsSource->uvToLatLon((itsViewport.uMin + itsViewport.uMax) * 0.5,
-                        (itsViewport.vMin + itsViewport.vMax) * 0.5, centerLat, centerLon);
+                        (itsViewport.vMin + itsViewport.vMax) * 0.5,
+                        centerLat,
+                        centerLon);
 
   // The popup calls this lambda each keystroke; we keep the latest match
   // list outside so we can resolve the picked index back to a city.
   std::vector<std::size_t> lastMatchIds;
-  auto matcher = [&](const std::string& q) -> std::vector<std::string> {
+  auto matcher = [&](const std::string& q) -> std::vector<std::string>
+  {
     lastMatchIds = itsCityIndex.search(q, 12, centerLat, centerLon);
     std::vector<std::string> rows;
     rows.reserve(lastMatchIds.size());
     for (std::size_t i : lastMatchIds)
     {
       const auto& c = itsCityIndex.at(i);
-      rows.push_back(fmt::format("{}, {}  ({:.2f}, {:.2f})  pop {}", c.name, c.country, c.lat,
-                                 c.lon, c.population));
+      rows.push_back(fmt::format(
+          "{}, {}  ({:.2f}, {:.2f})  pop {}", c.name, c.country, c.lat, c.lon, c.population));
     }
     return rows;
   };
 
   const int picked = ui.popupSearch("Place search", matcher);
-  if (picked < 0 || picked >= static_cast<int>(lastMatchIds.size())) return;
+  if (picked < 0 || picked >= static_cast<int>(lastMatchIds.size()))
+    return;
   const auto& city = itsCityIndex.at(lastMatchIds[picked]);
 
   // Recentre viewport on the city in [0..1]² of the source's native space.
@@ -1836,7 +1935,11 @@ std::string App::exportPng(std::string& err) const
 {
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0) { err = "empty viewport"; return {}; }
+  if (spanU <= 0 || spanV <= 0)
+  {
+    err = "empty viewport";
+    return {};
+  }
 
   // Output size: aspect-ratio of the visible rectangle in the source's
   // native space (which preserves the native projection's shape), target
@@ -1850,11 +1953,12 @@ std::string App::exportPng(std::string& err) const
   // a library either way; we use GDAL's PNG driver below since GDAL
   // is already a dependency for shapefiles / PostGIS / GeoTIFF.
   // Background = white so "no data" cells leave a clean canvas.
-  std::vector<std::uint8_t> rgb(static_cast<std::size_t>(width) *
-                                    static_cast<std::size_t>(height) * 3,
-                                255);
-  auto setPixel = [&](int x, int y, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-    if (x < 0 || x >= width || y < 0 || y >= height) return;
+  std::vector<std::uint8_t> rgb(
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3, 255);
+  auto setPixel = [&](int x, int y, std::uint8_t r, std::uint8_t g, std::uint8_t b)
+  {
+    if (x < 0 || x >= width || y < 0 || y >= height)
+      return;
     const auto idx = (static_cast<std::size_t>(y) * width + x) * 3;
     rgb[idx] = r;
     rgb[idx + 1] = g;
@@ -1872,16 +1976,20 @@ std::string App::exportPng(std::string& err) const
       itsSource->uvToLatLon(u, v, lat, lon);
       const float val = transform(itsSource->interpolatedValue(lat, lon));
       Rgb c = activePanel().palette.lookup(val);
-      if (c.transparent) continue;  // leave white for "no data"
+      if (c.transparent)
+        continue;  // leave white for "no data"
       setPixel(px, py, c.r, c.g, c.b);
     }
   }
 
   // Coastline + border overlay (Bresenham into the RGB buffer).
-  auto drawPolylineImg = [&](const std::vector<Polyline>& polys,
-                             std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-    if (polys.empty()) return;
-    auto toPixel = [&](float lon, float lat) -> std::pair<int, int> {
+  auto drawPolylineImg =
+      [&](const std::vector<Polyline>& polys, std::uint8_t r, std::uint8_t g, std::uint8_t b)
+  {
+    if (polys.empty())
+      return;
+    auto toPixel = [&](float lon, float lat) -> std::pair<int, int>
+    {
       double u = 0;
       double v = 0;
       itsSource->latLonToUV(lat, lon, u, v);
@@ -1889,7 +1997,8 @@ std::string App::exportPng(std::string& err) const
       const double v01 = (v - itsViewport.vMin) / spanV;
       return {static_cast<int>(u01 * width), static_cast<int>(v01 * height)};
     };
-    auto line = [&](int x0, int y0, int x1, int y1) {
+    auto line = [&](int x0, int y0, int x1, int y1)
+    {
       int dx = std::abs(x1 - x0);
       int dy = -std::abs(y1 - y0);
       int sx = x0 < x1 ? 1 : -1;
@@ -1898,21 +2007,30 @@ std::string App::exportPng(std::string& err) const
       while (true)
       {
         setPixel(x0, y0, r, g, b);
-        if (x0 == x1 && y0 == y1) break;
+        if (x0 == x1 && y0 == y1)
+          break;
         int e2 = 2 * err2;
-        if (e2 >= dy) { err2 += dy; x0 += sx; }
-        if (e2 <= dx) { err2 += dx; y0 += sy; }
+        if (e2 >= dy)
+        {
+          err2 += dy;
+          x0 += sx;
+        }
+        if (e2 <= dx)
+        {
+          err2 += dx;
+          y0 += sy;
+        }
       }
     };
     for (const auto& pl : polys)
     {
-      if (pl.lons.size() < 2) continue;
+      if (pl.lons.size() < 2)
+        continue;
       auto prev = toPixel(pl.lons[0], pl.lats[0]);
       for (std::size_t i = 1; i < pl.lons.size(); ++i)
       {
         auto cur = toPixel(pl.lons[i], pl.lats[i]);
-        if (std::abs(cur.first - prev.first) < width &&
-            std::abs(cur.second - prev.second) < height)
+        if (std::abs(cur.first - prev.first) < width && std::abs(cur.second - prev.second) < height)
           line(prev.first, prev.second, cur.first, cur.second);
         prev = cur;
       }
@@ -1927,11 +2045,14 @@ std::string App::exportPng(std::string& err) const
   const std::string base = inputPath.stem().string();
   const std::string param = itsSource->paramShortName(itsSource->currentParamId());
   NFmiMetTime t = itsSource->currentValidTime();
-  const std::string filename =
-      fmt::format("{}_{}_{:04}{:02}{:02}_{:02}{:02}.png", base, param,
-                  static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
-                  static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
-                  static_cast<int>(t.GetMin()));
+  const std::string filename = fmt::format("{}_{}_{:04}{:02}{:02}_{:02}{:02}.png",
+                                           base,
+                                           param,
+                                           static_cast<int>(t.GetYear()),
+                                           static_cast<int>(t.GetMonth()),
+                                           static_cast<int>(t.GetDay()),
+                                           static_cast<int>(t.GetHour()),
+                                           static_cast<int>(t.GetMin()));
 
   // Encode via GDAL's PNG driver. Build an in-memory MEM dataset
   // with three Byte bands, blit our interleaved RGB buffer into it
@@ -1958,9 +2079,21 @@ std::string App::exportPng(std::string& err) const
   // (3 bytes per pixel), nLineSpace=width*3, nBandSpace=1 (band 0
   // is at offset 0, band 1 at offset 1, …).
   const int bandList[3] = {1, 2, 3};
-  CPLErr cerr = mem->RasterIO(GF_Write, 0, 0, width, height, rgb.data(), width,
-                              height, GDT_Byte, 3, const_cast<int*>(bandList), 3,
-                              static_cast<GSpacing>(width) * 3, 1, nullptr);
+  CPLErr cerr = mem->RasterIO(GF_Write,
+                              0,
+                              0,
+                              width,
+                              height,
+                              rgb.data(),
+                              width,
+                              height,
+                              GDT_Byte,
+                              3,
+                              const_cast<int*>(bandList),
+                              3,
+                              static_cast<GSpacing>(width) * 3,
+                              1,
+                              nullptr);
   if (cerr != CE_None)
   {
     GDALClose(mem);
@@ -1969,8 +2102,7 @@ std::string App::exportPng(std::string& err) const
   }
   try
   {
-    GDALDataset* png =
-        pngDrv->CreateCopy(filename.c_str(), mem, FALSE, nullptr, nullptr, nullptr);
+    GDALDataset* png = pngDrv->CreateCopy(filename.c_str(), mem, FALSE, nullptr, nullptr, nullptr);
     GDALClose(mem);
     if (png == nullptr)
     {
@@ -1993,7 +2125,8 @@ std::vector<std::array<int, 4>> App::traceGraticuleSegments(int bW, int bH) cons
   std::vector<std::array<int, 4>> out;
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0 || bW <= 0 || bH <= 0) return out;
+  if (spanU <= 0 || spanV <= 0 || bW <= 0 || bH <= 0)
+    return out;
 
   // Estimate the visible lat/lon extent by sampling along the viewport
   // border. With projected sources the extent is generally not rectilinear
@@ -2004,7 +2137,8 @@ std::vector<std::array<int, 4>> App::traceGraticuleSegments(int bW, int bH) cons
   double minLon = 180;
   double maxLon = -180;
   constexpr int kEdgeSamples = 32;
-  auto observe = [&](double u, double v) {
+  auto observe = [&](double u, double v)
+  {
     double lat = 0;
     double lon = 0;
     itsSource->uvToLatLon(u, v, lat, lon);
@@ -2021,7 +2155,8 @@ std::vector<std::array<int, 4>> App::traceGraticuleSegments(int bW, int bH) cons
     observe(itsViewport.uMin, itsViewport.vMin + t * spanV);  // left
     observe(itsViewport.uMax, itsViewport.vMin + t * spanV);  // right
   }
-  if (maxLat <= minLat || maxLon <= minLon) return out;
+  if (maxLat <= minLat || maxLon <= minLon)
+    return out;
 
   const double lonStep = niceStep(maxLon - minLon, 6);
   const double latStep = niceStep(maxLat - minLat, 6);
@@ -2034,7 +2169,8 @@ std::vector<std::array<int, 4>> App::traceGraticuleSegments(int bW, int bH) cons
   // segments that hug the viewport edges. A round-trip distinguishes the
   // two cases: in-grid points hit the same projection in both directions
   // and round-trip to floating-point precision; fallback points diverge.
-  auto toSub = [&](double lat, double lon) -> std::optional<std::pair<int, int>> {
+  auto toSub = [&](double lat, double lon) -> std::optional<std::pair<int, int>>
+  {
     double u = 0;
     double v = 0;
     itsSource->latLonToUV(lat, lon, u, v);
@@ -2042,22 +2178,27 @@ std::vector<std::array<int, 4>> App::traceGraticuleSegments(int bW, int bH) cons
     double lonBack = 0;
     itsSource->uvToLatLon(u, v, latBack, lonBack);
     double dlon = std::fmod(std::abs(lon - lonBack), 360.0);
-    if (dlon > 180.0) dlon = 360.0 - dlon;
-    if (std::abs(lat - latBack) > 0.5 || dlon > 0.5) return std::nullopt;
+    if (dlon > 180.0)
+      dlon = 360.0 - dlon;
+    if (std::abs(lat - latBack) > 0.5 || dlon > 0.5)
+      return std::nullopt;
     const double u01 = (u - itsViewport.uMin) / spanU;
     const double v01 = (v - itsViewport.vMin) / spanV;
-    return std::pair<int, int>{static_cast<int>(u01 * bW),
-                               static_cast<int>(v01 * bH)};
+    return std::pair<int, int>{static_cast<int>(u01 * bW), static_cast<int>(v01 * bH)};
   };
 
   // Emit segment only when both endpoints are valid AND the jump is small
   // enough to be a real adjacent pair (catches antimeridian wraps that the
   // round-trip can't see).
-  auto emit = [&](const std::optional<std::pair<int, int>>& a,
-                  const std::optional<std::pair<int, int>>& b) {
-    if (!a || !b) return;
-    if (std::abs(b->first - a->first) >= bW / 2) return;
-    if (std::abs(b->second - a->second) >= bH / 2) return;
+  auto emit =
+      [&](const std::optional<std::pair<int, int>>& a, const std::optional<std::pair<int, int>>& b)
+  {
+    if (!a || !b)
+      return;
+    if (std::abs(b->first - a->first) >= bW / 2)
+      return;
+    if (std::abs(b->second - a->second) >= bH / 2)
+      return;
     out.push_back({a->first, a->second, b->first, b->second});
   };
 
@@ -2096,12 +2237,14 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
 {
   const Rgb gridColor{120, 120, 120};
 
-  auto plot = [&](int x, int y) {
+  auto plot = [&](int x, int y)
+  {
     if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
       pixels[static_cast<std::size_t>(y) * subWidth + x] = gridColor;
   };
 
-  auto drawLine = [&](int x0, int y0, int x1, int y1) {
+  auto drawLine = [&](int x0, int y0, int x1, int y1)
+  {
     int dx = std::abs(x1 - x0);
     int dy = -std::abs(y1 - y0);
     int sx = x0 < x1 ? 1 : -1;
@@ -2110,10 +2253,19 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
     while (true)
     {
       plot(x0, y0);
-      if (x0 == x1 && y0 == y1) break;
+      if (x0 == x1 && y0 == y1)
+        break;
       int e2 = 2 * err;
-      if (e2 >= dy) { err += dy; x0 += sx; }
-      if (e2 <= dx) { err += dx; y0 += sy; }
+      if (e2 >= dy)
+      {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx)
+      {
+        err += dx;
+        y0 += sy;
+      }
     }
   };
 
@@ -2121,27 +2273,34 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
     drawLine(s[0], s[1], s[2], s[3]);
 }
 
-void App::appendGraticuleBraille(std::ostringstream& os, const std::vector<Rgb>& pixels,
-                                 int subWidth, int originRow, int originCol) const
+void App::appendGraticuleBraille(std::ostringstream& os,
+                                 const std::vector<Rgb>& pixels,
+                                 int subWidth,
+                                 int originRow,
+                                 int originCol) const
 {
-  if (subWidth <= 0) return;
+  if (subWidth <= 0)
+    return;
   const int subRows = subRowsForStyle(itsCornerStyle);
   const int cellW = subWidth / 2;
   const int subHeight = static_cast<int>(pixels.size()) / std::max(1, subWidth);
   const int cellH = subHeight / subRows;
-  if (cellW <= 0 || cellH <= 0) return;
+  if (cellW <= 0 || cellH <= 0)
+    return;
 
   // Higher-resolution sub-cell grid for the line: 2 cols × 4 rows per cell.
   const int bW = cellW * 2;
   const int bH = cellH * 4;
   std::vector<unsigned char> mask(static_cast<std::size_t>(bW) * bH, 0);
 
-  auto plot = [&](int x, int y) {
+  auto plot = [&](int x, int y)
+  {
     if (x >= 0 && x < bW && y >= 0 && y < bH)
       mask[static_cast<std::size_t>(y) * bW + x] = 1;
   };
 
-  auto drawLine = [&](int x0, int y0, int x1, int y1) {
+  auto drawLine = [&](int x0, int y0, int x1, int y1)
+  {
     int dx = std::abs(x1 - x0);
     int dy = -std::abs(y1 - y0);
     int sx = x0 < x1 ? 1 : -1;
@@ -2150,10 +2309,19 @@ void App::appendGraticuleBraille(std::ostringstream& os, const std::vector<Rgb>&
     while (true)
     {
       plot(x0, y0);
-      if (x0 == x1 && y0 == y1) break;
+      if (x0 == x1 && y0 == y1)
+        break;
       int e2 = 2 * err;
-      if (e2 >= dy) { err += dy; x0 += sx; }
-      if (e2 <= dx) { err += dx; y0 += sy; }
+      if (e2 >= dy)
+      {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx)
+      {
+        err += dx;
+        y0 += sy;
+      }
     }
   };
 
@@ -2178,7 +2346,8 @@ void App::appendGraticuleBraille(std::ostringstream& os, const std::vector<Rgb>&
             cellMask |= 1U << brailleBit(sx, sy);
         }
       }
-      if (cellMask == 0U) continue;
+      if (cellMask == 0U)
+        continue;
       const Rgb bg = pixels[static_cast<std::size_t>(cy * subRows) * subWidth + (cx * 2)];
       out += "\x1b[";
       out += std::to_string(originRow + cy + 1);
@@ -2202,7 +2371,8 @@ bool App::hasWindComponents() const
   NFmiEnumConverter conv;
   const int uEnum = conv.ToEnum("WindUMS");
   const int vEnum = conv.ToEnum("WindVMS");
-  if (uEnum == kFmiBadParameter || vEnum == kFmiBadParameter) return false;
+  if (uEnum == kFmiBadParameter || vEnum == kFmiBadParameter)
+    return false;
   const auto& ids = itsParamIds;
   return std::find(ids.begin(), ids.end(), uEnum) != ids.end() &&
          std::find(ids.begin(), ids.end(), vEnum) != ids.end();
@@ -2211,7 +2381,8 @@ bool App::hasWindComponents() const
 std::string App::buildWindArrows(int cellW, int cellH, int originRow, int originCol)
 {
   // Find U and V param IDs in this file. If either is missing, render nothing.
-  if (!hasWindComponents()) return {};
+  if (!hasWindComponents())
+    return {};
   NFmiEnumConverter conv;
   const int uEnum = conv.ToEnum("WindUMS");
   const int vEnum = conv.ToEnum("WindVMS");
@@ -2221,7 +2392,8 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
 
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0) return {};
+  if (spanU <= 0 || spanV <= 0)
+    return {};
 
   // Place arrows on a sparser grid so they don't crowd. Aim ~1 arrow per
   // 4×2 cells (cells are roughly 1:2 aspect ratio in most fonts).
@@ -2241,7 +2413,11 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
   };
 
   // Collect samples for all marker positions. We need U then V.
-  struct Sample { int cx, cy; float u, v; };
+  struct Sample
+  {
+    int cx, cy;
+    float u, v;
+  };
   std::vector<Sample> samples;
   samples.reserve(static_cast<std::size_t>(cellW * cellH) / (stepX * stepY) + 1);
 
@@ -2282,10 +2458,13 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
   std::ostringstream os;
   for (const auto& s : samples)
   {
-    if (!std::isfinite(s.u) || !std::isfinite(s.v)) continue;
-    if (std::abs(s.u) > 1e10F || std::abs(s.v) > 1e10F) continue;
+    if (!std::isfinite(s.u) || !std::isfinite(s.v))
+      continue;
+    if (std::abs(s.u) > 1e10F || std::abs(s.v) > 1e10F)
+      continue;
     const float speed = std::sqrt(s.u * s.u + s.v * s.v);
-    if (speed < 0.5F) continue;  // skip near-calm cells
+    if (speed < 0.5F)
+      continue;  // skip near-calm cells
 
     // Direction: meteorological u/v have u>0=eastward, v>0=northward.
     // atan2(v, u) gives angle from east axis CCW.
@@ -2312,20 +2491,27 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
   return os.str();
 }
 
-void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight,
-                           const std::vector<Polyline>& polylines, Rgb color) const
+void App::overlayPolylines(std::vector<Rgb>& pixels,
+                           int subWidth,
+                           int subHeight,
+                           const std::vector<Polyline>& polylines,
+                           Rgb color) const
 {
-  if (polylines.empty()) return;
+  if (polylines.empty())
+    return;
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0) return;
+  if (spanU <= 0 || spanV <= 0)
+    return;
 
-  auto plot = [&](int x, int y) {
+  auto plot = [&](int x, int y)
+  {
     if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
       pixels[static_cast<std::size_t>(y) * subWidth + x] = color;
   };
 
-  auto drawLine = [&](int x0, int y0, int x1, int y1) {
+  auto drawLine = [&](int x0, int y0, int x1, int y1)
+  {
     int dx = std::abs(x1 - x0);
     int dy = -std::abs(y1 - y0);
     int sx = x0 < x1 ? 1 : -1;
@@ -2334,7 +2520,8 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
     while (true)
     {
       plot(x0, y0);
-      if (x0 == x1 && y0 == y1) break;
+      if (x0 == x1 && y0 == y1)
+        break;
       int e2 = 2 * err;
       if (e2 >= dy)
       {
@@ -2349,7 +2536,8 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
     }
   };
 
-  auto toSub = [&](float lon, float lat) -> std::pair<int, int> {
+  auto toSub = [&](float lon, float lat) -> std::pair<int, int>
+  {
     double u = 0;
     double v = 0;
     itsSource->latLonToUV(lat, lon, u, v);
@@ -2360,7 +2548,8 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
 
   for (const auto& pl : polylines)
   {
-    if (pl.lons.size() < 2) continue;
+    if (pl.lons.size() < 2)
+      continue;
     auto prev = toSub(pl.lons[0], pl.lats[0]);
     for (std::size_t i = 1; i < pl.lons.size(); ++i)
     {
@@ -2373,17 +2562,85 @@ void App::overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight
   }
 }
 
-void App::appendPolylineBraille(std::ostringstream& os,
-                                const std::vector<Polyline>& polylines, Rgb color,
-                                const std::vector<Rgb>& pixels, int subWidth,
-                                int originRow, int originCol) const
+void App::buildUtopiaGeo(int subWidth,
+                         int subHeight,
+                         std::vector<Rgb>& lines,
+                         std::vector<char>& swedenMask) const
 {
-  if (polylines.empty() || subWidth <= 0) return;
+  if (itsCoastlines.empty() && itsBorders.empty())
+    return;  // not a geographic view
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  if (spanU <= 0 || spanV <= 0)
+    return;
+
+  // Coastlines + borders rendered on black — what stays once the data fades.
+  lines.assign(static_cast<std::size_t>(subWidth) * subHeight, Rgb{0, 0, 0});
+  overlayPolylines(lines, subWidth, subHeight, itsCoastlines, Rgb{210, 210, 220});
+  overlayPolylines(lines, subWidth, subHeight, itsBorders, Rgb{120, 120, 135});
+
+  // An approximate outline of mainland Sweden (lon, lat), walked as a loop.
+  static const std::array<std::pair<float, float>, 16> kSweden = {{{13.4F, 55.35F},
+                                                                   {12.0F, 57.7F},
+                                                                   {11.2F, 58.9F},
+                                                                   {12.2F, 61.0F},
+                                                                   {12.6F, 63.0F},
+                                                                   {14.1F, 64.5F},
+                                                                   {15.4F, 66.3F},
+                                                                   {17.9F, 68.4F},
+                                                                   {20.3F, 69.05F},
+                                                                   {23.65F, 67.95F},
+                                                                   {24.15F, 65.83F},
+                                                                   {21.5F, 63.3F},
+                                                                   {19.0F, 60.9F},
+                                                                   {18.3F, 59.4F},
+                                                                   {16.6F, 56.5F},
+                                                                   {14.7F, 56.0F}}};
+  std::array<float, kSweden.size()> px{};
+  std::array<float, kSweden.size()> py{};
+  for (std::size_t i = 0; i < kSweden.size(); ++i)
+  {
+    double u = 0;
+    double v = 0;
+    itsSource->latLonToUV(kSweden[i].second, kSweden[i].first, u, v);
+    px[i] = static_cast<float>((u - itsViewport.uMin) / spanU * subWidth);
+    py[i] = static_cast<float>((v - itsViewport.vMin) / spanV * subHeight);
+  }
+  // Point-in-polygon (ray casting) for every sub-pixel.
+  swedenMask.assign(static_cast<std::size_t>(subWidth) * subHeight, 0);
+  for (int y = 0; y < subHeight; ++y)
+  {
+    const float fy = y + 0.5F;
+    for (int x = 0; x < subWidth; ++x)
+    {
+      const float fx = x + 0.5F;
+      bool inside = false;
+      for (std::size_t i = 0, j = kSweden.size() - 1; i < kSweden.size(); j = i++)
+        if (((py[i] > fy) != (py[j] > fy)) &&
+            (fx < (px[j] - px[i]) * (fy - py[i]) / (py[j] - py[i] + 1e-9F) + px[i]))
+          inside = !inside;
+      if (inside)
+        swedenMask[static_cast<std::size_t>(y) * subWidth + x] = 1;
+    }
+  }
+}
+
+void App::appendPolylineBraille(std::ostringstream& os,
+                                const std::vector<Polyline>& polylines,
+                                Rgb color,
+                                const std::vector<Rgb>& pixels,
+                                int subWidth,
+                                int originRow,
+                                int originCol) const
+{
+  if (polylines.empty() || subWidth <= 0)
+    return;
   const int subRows = subRowsForStyle(itsCornerStyle);
   const int cellW = subWidth / 2;
   const int subHeight = static_cast<int>(pixels.size()) / std::max(1, subWidth);
   const int cellH = subHeight / subRows;
-  if (cellW <= 0 || cellH <= 0) return;
+  if (cellW <= 0 || cellH <= 0)
+    return;
 
   // Higher-resolution sub-cell grid for the line: 2 cols × 4 rows per cell.
   const int bW = cellW * 2;
@@ -2392,14 +2649,17 @@ void App::appendPolylineBraille(std::ostringstream& os,
 
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0) return;
+  if (spanU <= 0 || spanV <= 0)
+    return;
 
-  auto plot = [&](int x, int y) {
+  auto plot = [&](int x, int y)
+  {
     if (x >= 0 && x < bW && y >= 0 && y < bH)
       mask[static_cast<std::size_t>(y) * bW + x] = 1;
   };
 
-  auto drawLine = [&](int x0, int y0, int x1, int y1) {
+  auto drawLine = [&](int x0, int y0, int x1, int y1)
+  {
     int dx = std::abs(x1 - x0);
     int dy = -std::abs(y1 - y0);
     int sx = x0 < x1 ? 1 : -1;
@@ -2408,14 +2668,24 @@ void App::appendPolylineBraille(std::ostringstream& os,
     while (true)
     {
       plot(x0, y0);
-      if (x0 == x1 && y0 == y1) break;
+      if (x0 == x1 && y0 == y1)
+        break;
       int e2 = 2 * err;
-      if (e2 >= dy) { err += dy; x0 += sx; }
-      if (e2 <= dx) { err += dx; y0 += sy; }
+      if (e2 >= dy)
+      {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx)
+      {
+        err += dx;
+        y0 += sy;
+      }
     }
   };
 
-  auto toSub = [&](float lon, float lat) -> std::pair<int, int> {
+  auto toSub = [&](float lon, float lat) -> std::pair<int, int>
+  {
     double u = 0;
     double v = 0;
     itsSource->latLonToUV(lat, lon, u, v);
@@ -2426,7 +2696,8 @@ void App::appendPolylineBraille(std::ostringstream& os,
 
   for (const auto& pl : polylines)
   {
-    if (pl.lons.size() < 2) continue;
+    if (pl.lons.size() < 2)
+      continue;
     auto prev = toSub(pl.lons[0], pl.lats[0]);
     for (std::size_t i = 1; i < pl.lons.size(); ++i)
     {
@@ -2457,7 +2728,8 @@ void App::appendPolylineBraille(std::ostringstream& os,
             cellMask |= 1U << brailleBit(sx, sy);
         }
       }
-      if (cellMask == 0U) continue;
+      if (cellMask == 0U)
+        continue;
       const Rgb bg = pixels[static_cast<std::size_t>(cy * subRows) * subWidth + (cx * 2)];
       out += "\x1b[";
       out += std::to_string(originRow + cy + 1);
@@ -2478,10 +2750,12 @@ void App::appendPolylineBraille(std::ostringstream& os,
 
 void App::overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
 {
-  if (!itsMarker.has_value() || subWidth <= 0 || subHeight <= 0) return;
+  if (!itsMarker.has_value() || subWidth <= 0 || subHeight <= 0)
+    return;
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0) return;
+  if (spanU <= 0 || spanV <= 0)
+    return;
   double u = 0;
   double v = 0;
   itsSource->latLonToUV(itsMarker->first, itsMarker->second, u, v);
@@ -2492,7 +2766,8 @@ void App::overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) c
 
   const Rgb fg{255, 40, 40};
   const Rgb bg{255, 255, 255};
-  auto plot = [&](int x, int y, Rgb c) {
+  auto plot = [&](int x, int y, Rgb c)
+  {
     if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
       pixels[static_cast<std::size_t>(y) * subWidth + x] = c;
   };
@@ -2524,7 +2799,8 @@ int displayCells(const std::string& s)
 {
   int n = 0;
   for (unsigned char c : s)
-    if ((c & 0xC0) != 0x80) ++n;
+    if ((c & 0xC0) != 0x80)
+      ++n;
   return n;
 }
 
@@ -2534,10 +2810,16 @@ constexpr std::array<int, 7> kCityNSteps = {{5, 10, 25, 50, 100, 250, 500}};
 
 // Pick visible cities (lat/lon inside viewport), sorted by population
 // descending, capped at maxN.
-std::vector<std::size_t> visibleCities(const CityIndex& idx, const DataSource& src,
-                                       const Viewport& vp, int maxN)
+std::vector<std::size_t> visibleCities(const CityIndex& idx,
+                                       const DataSource& src,
+                                       const Viewport& vp,
+                                       int maxN)
 {
-  struct Hit { std::size_t i; int pop; };
+  struct Hit
+  {
+    std::size_t i;
+    int pop;
+  };
   std::vector<Hit> hits;
   for (std::size_t i = 0; i < idx.size(); ++i)
   {
@@ -2545,31 +2827,37 @@ std::vector<std::size_t> visibleCities(const CityIndex& idx, const DataSource& s
     double u = 0;
     double v = 0;
     src.latLonToUV(c.lat, c.lon, u, v);
-    if (u < vp.uMin || u > vp.uMax || v < vp.vMin || v > vp.vMax) continue;
+    if (u < vp.uMin || u > vp.uMax || v < vp.vMin || v > vp.vMax)
+      continue;
     hits.push_back({i, c.population});
   }
-  std::sort(hits.begin(), hits.end(),
-            [](const Hit& a, const Hit& b) { return a.pop > b.pop; });
-  if (static_cast<int>(hits.size()) > maxN) hits.resize(maxN);
+  std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.pop > b.pop; });
+  if (static_cast<int>(hits.size()) > maxN)
+    hits.resize(maxN);
   std::vector<std::size_t> out;
   out.reserve(hits.size());
-  for (const auto& h : hits) out.push_back(h.i);
+  for (const auto& h : hits)
+    out.push_back(h.i);
   return out;
 }
 }  // namespace
 
 void App::overlayCities(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
 {
-  if (!itsShowCities || subWidth <= 0 || subHeight <= 0) return;
-  if (!ensureCityIndex()) return;
+  if (!itsShowCities || subWidth <= 0 || subHeight <= 0)
+    return;
+  if (!ensureCityIndex())
+    return;
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0) return;
+  if (spanU <= 0 || spanV <= 0)
+    return;
 
   const auto picks = visibleCities(itsCityIndex, *itsSource, itsViewport, itsCityOverlayN);
   const Rgb dot{255, 255, 255};
   const Rgb halo{30, 30, 30};
-  auto plot = [&](int x, int y, Rgb c) {
+  auto plot = [&](int x, int y, Rgb c)
+  {
     if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
       pixels[static_cast<std::size_t>(y) * subWidth + x] = c;
   };
@@ -2583,19 +2871,23 @@ void App::overlayCities(std::vector<Rgb>& pixels, int subWidth, int subHeight) c
     const int cy = static_cast<int>((v - itsViewport.vMin) / spanV * subHeight);
     // 3×3 dark halo around a 1×1 white centre — readable against any palette.
     for (int dy = -1; dy <= 1; ++dy)
-      for (int dx = -1; dx <= 1; ++dx) plot(cx + dx, cy + dy, halo);
+      for (int dx = -1; dx <= 1; ++dx)
+        plot(cx + dx, cy + dy, halo);
     plot(cx, cy, dot);
   }
 }
 
 void App::overlayCrossSection(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
 {
-  if (!itsCrossActive || subWidth <= 0 || subHeight <= 0) return;
+  if (!itsCrossActive || subWidth <= 0 || subHeight <= 0)
+    return;
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0) return;
+  if (spanU <= 0 || spanV <= 0)
+    return;
 
-  auto toSub = [&](double lat, double lon) -> std::pair<int, int> {
+  auto toSub = [&](double lat, double lon) -> std::pair<int, int>
+  {
     double u = 0;
     double v = 0;
     itsSource->latLonToUV(lat, lon, u, v);
@@ -2604,12 +2896,14 @@ void App::overlayCrossSection(std::vector<Rgb>& pixels, int subWidth, int subHei
     return {static_cast<int>(u01 * subWidth), static_cast<int>(v01 * subHeight)};
   };
 
-  auto plot = [&](int x, int y, Rgb c) {
+  auto plot = [&](int x, int y, Rgb c)
+  {
     if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
       pixels[static_cast<std::size_t>(y) * subWidth + x] = c;
   };
 
-  auto drawSeg = [&](int x0, int y0, int x1, int y1, Rgb halo, Rgb line) {
+  auto drawSeg = [&](int x0, int y0, int x1, int y1, Rgb halo, Rgb line)
+  {
     int dx = std::abs(x1 - x0);
     int dy = -std::abs(y1 - y0);
     int sx = x0 < x1 ? 1 : -1;
@@ -2619,12 +2913,22 @@ void App::overlayCrossSection(std::vector<Rgb>& pixels, int subWidth, int subHei
     {
       for (int hy = -1; hy <= 1; ++hy)
         for (int hx = -1; hx <= 1; ++hx)
-          if (hx != 0 || hy != 0) plot(x0 + hx, y0 + hy, halo);
+          if (hx != 0 || hy != 0)
+            plot(x0 + hx, y0 + hy, halo);
       plot(x0, y0, line);
-      if (x0 == x1 && y0 == y1) break;
+      if (x0 == x1 && y0 == y1)
+        break;
       int e2 = 2 * err;
-      if (e2 >= dy) { err += dy; x0 += sx; }
-      if (e2 <= dx) { err += dx; y0 += sy; }
+      if (e2 >= dy)
+      {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx)
+      {
+        err += dx;
+        y0 += sy;
+      }
     }
   };
 
@@ -2651,14 +2955,17 @@ void App::overlayCrossSection(std::vector<Rgb>& pixels, int subWidth, int subHei
 
   // Endpoint markers: small filled discs with a halo, visible against
   // any palette and any line colour.
-  auto drawEndpoint = [&](double lat, double lon, Rgb c) {
+  auto drawEndpoint = [&](double lat, double lon, Rgb c)
+  {
     const auto p = toSub(lat, lon);
     for (int dy = -3; dy <= 3; ++dy)
       for (int dx = -3; dx <= 3; ++dx)
-        if (dx * dx + dy * dy <= 9) plot(p.first + dx, p.second + dy, halo);
+        if (dx * dx + dy * dy <= 9)
+          plot(p.first + dx, p.second + dy, halo);
     for (int dy = -2; dy <= 2; ++dy)
       for (int dx = -2; dx <= 2; ++dx)
-        if (dx * dx + dy * dy <= 4) plot(p.first + dx, p.second + dy, c);
+        if (dx * dx + dy * dy <= 4)
+          plot(p.first + dx, p.second + dy, c);
   };
   drawEndpoint(itsCrossLat1, itsCrossLon1, Rgb{40, 40, 255});
   drawEndpoint(itsCrossLat2, itsCrossLon2, Rgb{40, 40, 255});
@@ -2670,20 +2977,25 @@ void App::overlayCrossSection(std::vector<Rgb>& pixels, int subWidth, int subHei
     const auto p = toSub(itsCrossHoverLatLon->first, itsCrossHoverLatLon->second);
     for (int dy = -4; dy <= 4; ++dy)
       for (int dx = -4; dx <= 4; ++dx)
-        if (dx * dx + dy * dy <= 16) plot(p.first + dx, p.second + dy, halo);
+        if (dx * dx + dy * dy <= 16)
+          plot(p.first + dx, p.second + dy, halo);
     for (int dy = -3; dy <= 3; ++dy)
       for (int dx = -3; dx <= 3; ++dx)
-        if (dx * dx + dy * dy <= 9) plot(p.first + dx, p.second + dy, Rgb{255, 220, 40});
+        if (dx * dx + dy * dy <= 9)
+          plot(p.first + dx, p.second + dy, Rgb{255, 220, 40});
   }
 }
 
 std::string App::buildCityLabels(int cellW, int cellH, int originRow, int originCol)
 {
-  if (!itsShowCities || cellW <= 0 || cellH <= 0) return {};
-  if (!ensureCityIndex()) return {};
+  if (!itsShowCities || cellW <= 0 || cellH <= 0)
+    return {};
+  if (!ensureCityIndex())
+    return {};
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
-  if (spanU <= 0 || spanV <= 0) return {};
+  if (spanU <= 0 || spanV <= 0)
+    return {};
 
   const auto picks = visibleCities(itsCityIndex, *itsSource, itsViewport, itsCityOverlayN);
   // 1 cell of occupancy per (row, col); reject placements that overlap.
@@ -2697,7 +3009,8 @@ std::string App::buildCityLabels(int cellW, int cellH, int originRow, int origin
     itsSource->latLonToUV(c.lat, c.lon, u, v);
     const int cellX = static_cast<int>((u - itsViewport.uMin) / spanU * cellW);
     const int cellY = static_cast<int>((v - itsViewport.vMin) / spanV * cellH);
-    if (cellX < 0 || cellX >= cellW || cellY < 0 || cellY >= cellH) continue;
+    if (cellX < 0 || cellX >= cellW || cellY < 0 || cellY >= cellH)
+      continue;
 
     const std::string& name = c.name;
     const int w = displayCells(name);
@@ -2719,19 +3032,27 @@ std::string App::buildCityLabels(int cellW, int cellH, int originRow, int origin
         startX = cellX + dx;
       else
         startX = cellX + dx - w + 1;  // anchor right edge to the left of dot
-      if (rowY < 0 || rowY >= cellH || startX < 0 || startX + w > cellW) continue;
+      if (rowY < 0 || rowY >= cellH || startX < 0 || startX + w > cellW)
+        continue;
       bool collision = false;
       for (int k = 0; k < w; ++k)
-        if (occupied[rowY][startX + k]) { collision = true; break; }
-      if (collision) continue;
-      for (int k = 0; k < w; ++k) occupied[rowY][startX + k] = true;
+        if (occupied[rowY][startX + k])
+        {
+          collision = true;
+          break;
+        }
+      if (collision)
+        continue;
+      for (int k = 0; k < w; ++k)
+        occupied[rowY][startX + k] = true;
       // White on a dim background so the label is legible against any palette.
       os << "\x1b[" << (originRow + rowY + 1) << ';' << (originCol + startX + 1) << 'H'
          << "\x1b[1;48;5;235;38;5;231m" << name << "\x1b[0m";
       placed = true;
       break;
     }
-    if (!placed) continue;
+    if (!placed)
+      continue;
   }
   return os.str();
 }
@@ -2740,9 +3061,12 @@ std::string App::currentTimeLabel() const
 {
   NFmiMetTime t = itsSource->currentValidTime();
   return fmt::format("{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
-                     static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
-                     static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
-                     static_cast<int>(t.GetMin()), static_cast<int>(t.GetSec()));
+                     static_cast<int>(t.GetYear()),
+                     static_cast<int>(t.GetMonth()),
+                     static_cast<int>(t.GetDay()),
+                     static_cast<int>(t.GetHour()),
+                     static_cast<int>(t.GetMin()),
+                     static_cast<int>(t.GetSec()));
 }
 
 void App::renderTimeline(UI& ui)
@@ -2754,11 +3078,11 @@ void App::renderTimeline(UI& ui)
   // Level reminder for multi-level sources (pressure/hybrid/elangle/CAPPI).
   // Single-level sources skip this so we don't waste bar real estate.
   if (itsSource->levelCount() > 1)
-    label += fmt::format("  L:{}",
-                         itsSource->levelLabel(itsSource->currentLevelIndex()));
+    label += fmt::format("  L:{}", itsSource->levelLabel(itsSource->currentLevelIndex()));
   if (const std::string orig = originTimeLabel(); !orig.empty())
     label += "   (analysis " + orig + ")";
-  if (itsAnimating) label += fmt::format("  [{} ms]", itsAnimationDelayMs);
+  if (itsAnimating)
+    label += fmt::format("  [{} ms]", itsAnimationDelayMs);
   if (!itsLastMessage.empty())
   {
     label += "   ";
@@ -2767,10 +3091,11 @@ void App::renderTimeline(UI& ui)
   }
   const bool isShape = itsSource->isVector();
   const bool pgMode = (itsPgDataset != nullptr);
-  ui.drawTimeline(label, static_cast<int>(itsSource->currentTimeIndex()),
+  ui.drawTimeline(label,
+                  static_cast<int>(itsSource->currentTimeIndex()),
                   static_cast<int>(itsSource->timeCount()));
-  ui.drawStatusBar(itsSource->isImage(), isShape, pgMode, !itsOpts.browseRoot.empty(),
-                   hasWindComponents());
+  ui.drawStatusBar(
+      itsSource->isImage(), isShape, pgMode, !itsOpts.browseRoot.empty(), hasWindComponents());
   doupdate();
 }
 
@@ -2780,10 +3105,13 @@ std::string App::originTimeLabel() const
   // Year 0 = explicit "no origin time"; pre-2000 = grid-files placeholder
   // (NetCDF without a reference-time attribute parses as ~1970-10-01).
   // Either way, suppress the suffix rather than displaying obvious noise.
-  if (t.GetYear() < 2000) return {};
+  if (t.GetYear() < 2000)
+    return {};
   return fmt::format("{:04}-{:02}-{:02} {:02}:{:02} UTC",
-                     static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
-                     static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
+                     static_cast<int>(t.GetYear()),
+                     static_cast<int>(t.GetMonth()),
+                     static_cast<int>(t.GetDay()),
+                     static_cast<int>(t.GetHour()),
                      static_cast<int>(t.GetMin()));
 }
 
@@ -2792,20 +3120,26 @@ namespace
 std::string formatFileSize(std::uintmax_t bytes)
 {
   // Human-readable: KB / MB / GB up to 3 significant digits.
-  if (bytes < 1024) return fmt::format("{} B", bytes);
+  if (bytes < 1024)
+    return fmt::format("{} B", bytes);
   const double kb = bytes / 1024.0;
-  if (kb < 1024.0) return fmt::format("{:.1f} KB", kb);
+  if (kb < 1024.0)
+    return fmt::format("{:.1f} KB", kb);
   const double mb = kb / 1024.0;
-  if (mb < 1024.0) return fmt::format("{:.1f} MB", mb);
+  if (mb < 1024.0)
+    return fmt::format("{:.1f} MB", mb);
   return fmt::format("{:.2f} GB", mb / 1024.0);
 }
 
 std::string formatMetTime(const NFmiMetTime& t)
 {
-  if (t.GetYear() < 2000) return {};
+  if (t.GetYear() < 2000)
+    return {};
   return fmt::format("{:04}-{:02}-{:02} {:02}:{:02} UTC",
-                     static_cast<int>(t.GetYear()), static_cast<int>(t.GetMonth()),
-                     static_cast<int>(t.GetDay()), static_cast<int>(t.GetHour()),
+                     static_cast<int>(t.GetYear()),
+                     static_cast<int>(t.GetMonth()),
+                     static_cast<int>(t.GetDay()),
+                     static_cast<int>(t.GetHour()),
                      static_cast<int>(t.GetMin()));
 }
 }  // namespace
@@ -2823,7 +3157,8 @@ std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
 
   // Backend-specific extras (format, producer, grid type, dimensions, …)
   // come right after the file identification.
-  for (auto&& kv : itsSource->extraMetadata()) rows.push_back(std::move(kv));
+  for (auto&& kv : itsSource->extraMetadata())
+    rows.push_back(std::move(kv));
 
   rows.emplace_back("", "");
 
@@ -2863,7 +3198,8 @@ std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
     for (std::size_t i = 0; i < nl; ++i)
     {
       const float v = itsSource->levelValueAt(i);
-      if (!std::isfinite(v)) continue;
+      if (!std::isfinite(v))
+        continue;
       lo = std::min(lo, v);
       hi = std::max(hi, v);
       ++finiteCount;
@@ -2883,7 +3219,8 @@ std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
   std::string paramsLine;
   for (std::size_t i = 0; i < itsParamIds.size(); ++i)
   {
-    if (!paramsLine.empty()) paramsLine += ", ";
+    if (!paramsLine.empty())
+      paramsLine += ", ";
     const int id = itsParamIds[i];
     paramsLine += itsSource->paramShortName(id);
     if (auto u = itsSource->paramUnits(id); !u.empty())
@@ -2894,7 +3231,8 @@ std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
     }
   }
   rows.emplace_back("Params", fmt::format("{}", itsParamIds.size()));
-  if (!paramsLine.empty()) rows.emplace_back("", paramsLine);
+  if (!paramsLine.empty())
+    rows.emplace_back("", paramsLine);
   return rows;
 }
 
@@ -2902,7 +3240,8 @@ std::vector<std::string> App::paramLabels() const
 {
   std::vector<std::string> out;
   out.reserve(itsParamIds.size());
-  for (int id : itsParamIds) out.push_back(itsSource->paramShortName(id));
+  for (int id : itsParamIds)
+    out.push_back(itsSource->paramShortName(id));
   return out;
 }
 
@@ -2917,7 +3256,8 @@ std::vector<std::string> App::levelLabels() const
 
 void App::selectParam(int newIndex)
 {
-  if (newIndex < 0 || newIndex >= static_cast<int>(itsParamIds.size())) return;
+  if (newIndex < 0 || newIndex >= static_cast<int>(itsParamIds.size()))
+    return;
   activePanel().paramIndex = newIndex;
   itsSource->selectParamId(itsParamIds[newIndex]);
   loadPalette();  // re-resolve palette for the active panel's new parameter
@@ -2925,7 +3265,8 @@ void App::selectParam(int newIndex)
 
 void App::selectLevel(int newIndex)
 {
-  if (newIndex < 0 || newIndex >= static_cast<int>(itsSource->levelCount())) return;
+  if (newIndex < 0 || newIndex >= static_cast<int>(itsSource->levelCount()))
+    return;
   itsSource->selectLevelIndex(static_cast<unsigned long>(newIndex));
   activePanel().levelIndex = static_cast<std::size_t>(newIndex);
   itsOpts.levelIndex = newIndex;
@@ -2933,7 +3274,8 @@ void App::selectLevel(int newIndex)
 
 std::vector<PanelRect> App::currentPanelRects(int row, int col, int height, int width) const
 {
-  if (width <= 0 || height <= 0) return {};
+  if (width <= 0 || height <= 0)
+    return {};
   const PanelRect full{row, col, height, width};
   switch (itsPanelLayout)
   {
@@ -2941,7 +3283,8 @@ std::vector<PanelRect> App::currentPanelRects(int row, int col, int height, int 
       return {full};
     case PanelLayout::Side:
     {
-      if (width < 4) return {full};
+      if (width < 4)
+        return {full};
       const int leftW = (width - 1) / 2;
       const int rightW = width - 1 - leftW;
       return {
@@ -2951,7 +3294,8 @@ std::vector<PanelRect> App::currentPanelRects(int row, int col, int height, int 
     }
     case PanelLayout::Quad:
     {
-      if (width < 4 || height < 4) return {full};
+      if (width < 4 || height < 4)
+        return {full};
       const int leftW = (width - 1) / 2;
       const int rightW = width - 1 - leftW;
       const int topH = (height - 1) / 2;
@@ -2982,8 +3326,10 @@ std::optional<int> App::panelAtCell(const UI& ui, int cellX, int cellY) const
 
 void App::setActivePanel(int idx)
 {
-  if (idx < 0 || idx >= static_cast<int>(itsPanels.size())) return;
-  if (idx == itsActivePanel) return;
+  if (idx < 0 || idx >= static_cast<int>(itsPanels.size()))
+    return;
+  if (idx == itsActivePanel)
+    return;
   itsActivePanel = idx;
   // Restore source state so the rest of the UI sees the new active panel.
   if (activePanel().paramIndex >= 0 &&
@@ -2996,7 +3342,8 @@ void App::setActivePanel(int idx)
 void App::cycleActivePanel(int step)
 {
   const int n = static_cast<int>(itsPanels.size());
-  if (n <= 1) return;
+  if (n <= 1)
+    return;
   const int next = ((itsActivePanel + step) % n + n) % n;
   setActivePanel(next);
 }
@@ -3006,9 +3353,15 @@ void App::cyclePanelLayout()
   PanelLayout next = PanelLayout::Single;
   switch (itsPanelLayout)
   {
-    case PanelLayout::Single: next = PanelLayout::Side; break;
-    case PanelLayout::Side:   next = PanelLayout::Quad; break;
-    case PanelLayout::Quad:   next = PanelLayout::Single; break;
+    case PanelLayout::Single:
+      next = PanelLayout::Side;
+      break;
+    case PanelLayout::Side:
+      next = PanelLayout::Quad;
+      break;
+    case PanelLayout::Quad:
+      next = PanelLayout::Single;
+      break;
   }
   setPanelLayout(next);
 }
@@ -3019,9 +3372,15 @@ void App::setPanelLayout(PanelLayout layout)
   std::size_t want = 1;
   switch (layout)
   {
-    case PanelLayout::Single: want = 1; break;
-    case PanelLayout::Side:   want = 2; break;
-    case PanelLayout::Quad:   want = 4; break;
+    case PanelLayout::Single:
+      want = 1;
+      break;
+    case PanelLayout::Side:
+      want = 2;
+      break;
+    case PanelLayout::Quad:
+      want = 4;
+      break;
   }
 
   // Grow: clone the active panel for each new slot and rotate paramIndex
@@ -3034,7 +3393,8 @@ void App::setPanelLayout(PanelLayout layout)
     {
       const int slot = static_cast<int>(itsPanels.size());
       Panel p = base;
-      if (n > 0) p.paramIndex = (base.paramIndex + slot) % n;
+      if (n > 0)
+        p.paramIndex = (base.paramIndex + slot) % n;
       itsPanels.push_back(p);
 
       // Resolve palette / value-shift for the new panel.
@@ -3052,7 +3412,8 @@ void App::setPanelLayout(PanelLayout layout)
   if (itsPanels.size() > want)
   {
     itsPanels.resize(want);
-    if (itsActivePanel >= static_cast<int>(itsPanels.size())) itsActivePanel = 0;
+    if (itsActivePanel >= static_cast<int>(itsPanels.size()))
+      itsActivePanel = 0;
   }
 
   // Restore source to the active panel's selection.
@@ -3082,7 +3443,8 @@ bool App::cellToLatLon(const UI& ui, int cellX, int cellY, double& lat, double& 
 {
   float u = 0;
   float v = 0;
-  if (!cellToViewport(ui, cellX, cellY, u, v)) return false;
+  if (!cellToViewport(ui, cellX, cellY, u, v))
+    return false;
   itsSource->uvToLatLon(u, v, lat, lon);
   return true;
 }
@@ -3092,10 +3454,12 @@ void App::openProbe(int cellX, int cellY, UI& ui)
   // The probe is a time-series chart of the scalar value at the clicked
   // (lat, lon) over every available timestep. RGB triplets from a raw
   // image have no scalar interpretation — silently no-op.
-  if (itsSource->isImage()) return;
+  if (itsSource->isImage())
+    return;
   double lat = 0;
   double lon = 0;
-  if (!cellToLatLon(ui, cellX, cellY, lat, lon)) return;
+  if (!cellToLatLon(ui, cellX, cellY, lat, lon))
+    return;
   // Shapefile sources don't have a scalar time axis either — every
   // burn id is a feature index, not a measurement. Repurpose the
   // click as "show this polygon's .dbf attributes".
@@ -3116,7 +3480,8 @@ void App::openProbe(int cellX, int cellY, UI& ui)
     {
       double nlat = 0;
       double nlon = 0;
-      if (!cellToLatLon(ui, click->x, click->y, nlat, nlon)) break;
+      if (!cellToLatLon(ui, click->x, click->y, nlat, nlon))
+        break;
       auto next = shp->attributesAt(nlat, nlon);
       if (next.empty())
       {
@@ -3152,21 +3517,24 @@ void App::openProbeAt(double lat, double lon, UI& ui)
     // Save and restore the iterated index so the rest of the UI keeps state.
     std::vector<float> series;
     std::vector<std::string> stepLabels;
-    const std::size_t stepCount =
-        useLevels ? itsSource->levelCount() : itsSource->timeCount();
+    const std::size_t stepCount = useLevels ? itsSource->levelCount() : itsSource->timeCount();
     series.reserve(stepCount);
     stepLabels.reserve(stepCount);
     const std::size_t savedTime = itsSource->currentTimeIndex();
     const std::size_t savedLevel = itsSource->currentLevelIndex();
     for (std::size_t i = 0; i < stepCount; ++i)
     {
-      if (useLevels) itsSource->selectLevelIndex(i);
-      else itsSource->selectTimeIndex(i);
+      if (useLevels)
+        itsSource->selectLevelIndex(i);
+      else
+        itsSource->selectTimeIndex(i);
       series.push_back(transform(itsSource->interpolatedValue(lat, lon)));
       stepLabels.push_back(useLevels ? itsSource->levelLabel(i) : currentTimeLabel());
     }
-    if (useLevels) itsSource->selectLevelIndex(savedLevel);
-    else itsSource->selectTimeIndex(savedTime);
+    if (useLevels)
+      itsSource->selectLevelIndex(savedLevel);
+    else
+      itsSource->selectTimeIndex(savedTime);
 
     NFmiEnumConverter conv;
     std::string param = itsSource->paramShortName(itsSource->currentParamId());
@@ -3175,7 +3543,8 @@ void App::openProbeAt(double lat, double lon, UI& ui)
     // iterated dimension (time or level) and redraw the map. Bottom timeline
     // only refreshes on time changes — for VPR it stays on the one valid
     // time and would just flicker.
-    auto onTimeChange = [&](int newIdx) {
+    auto onTimeChange = [&](int newIdx)
+    {
       if (useLevels)
       {
         itsSource->selectLevelIndex(static_cast<unsigned long>(newIdx));
@@ -3215,7 +3584,8 @@ void App::openProbeAt(double lat, double lon, UI& ui)
 
     int clickRow = -1;
     int clickCol = -1;
-    auto computeStats = [this]() {
+    auto computeStats = [this]()
+    {
       UI::StatsSeries s;
       const auto cached = ensureViewportStats();
       s.min.reserve(cached.size());
@@ -3232,22 +3602,34 @@ void App::openProbeAt(double lat, double lon, UI& ui)
     const std::string units = itsSource->paramUnits(itsSource->currentParamId());
     // Viewport stats sweep across times; they're meaningless when the popup
     // is iterating levels, so suppress that overlay in VPR mode.
-    int finalIdx = ui.popupTimeseries(
-        param, lat, lon, series, stepLabels,
-        static_cast<int>(useLevels ? savedLevel : savedTime), itsRenderer,
-        activePanel().palette, onTimeChange,
-        useLevels ? std::function<UI::StatsSeries()>{} : computeStats,
-        units, &itsAnimationDelayMs, avoidRow, avoidCol, &clickRow, &clickCol);
+    int finalIdx = ui.popupTimeseries(param,
+                                      lat,
+                                      lon,
+                                      series,
+                                      stepLabels,
+                                      static_cast<int>(useLevels ? savedLevel : savedTime),
+                                      itsRenderer,
+                                      activePanel().palette,
+                                      onTimeChange,
+                                      useLevels ? std::function<UI::StatsSeries()>{} : computeStats,
+                                      units,
+                                      &itsAnimationDelayMs,
+                                      avoidRow,
+                                      avoidCol,
+                                      &clickRow,
+                                      &clickCol);
     if (useLevels)
       itsSource->selectLevelIndex(static_cast<unsigned long>(finalIdx));
     else
       itsSource->selectTimeIndex(static_cast<unsigned long>(finalIdx));
 
-    if (clickRow < 0 || clickCol < 0) break;  // closed via keyboard
+    if (clickRow < 0 || clickCol < 0)
+      break;  // closed via keyboard
 
     double newLat = 0;
     double newLon = 0;
-    if (!cellToLatLon(ui, clickCol, clickRow, newLat, newLon)) break;
+    if (!cellToLatLon(ui, clickCol, clickRow, newLat, newLon))
+      break;
 
     itsMarker = std::make_pair(newLat, newLon);
     drawMap(ui);
@@ -3268,16 +3650,24 @@ bool App::handleKey(int key, UI& ui, bool& quit)
   {
     switch (key)
     {
-      case 'p': case 'P':
+      case 'p':
+      case 'P':
       case 'L':
-      case 'g': case 'G':
-      case 'b': case 'B':
-      case 'c': case 'C':
-      case 'n': case 'N':
-      case 'w': case 'W':
-      case 'i': case 'I':
+      case 'g':
+      case 'G':
+      case 'b':
+      case 'B':
+      case 'c':
+      case 'C':
+      case 'n':
+      case 'N':
+      case 'w':
+      case 'W':
+      case 'i':
+      case 'I':
       case '/':
-      case 'x': case 'X':
+      case 'x':
+      case 'X':
         itsLastMessage = "Not available in image mode";
         return true;
     }
@@ -3287,27 +3677,33 @@ bool App::handleKey(int key, UI& ui, bool& quit)
   // handlers below so quit, parameter / level menu, etc. still work.
   if (itsMode3D)
   {
-    constexpr double kYawStep = 0.1;       // ≈ 5.7°
+    constexpr double kYawStep = 0.1;  // ≈ 5.7°
     constexpr double kPitchStep = 0.08;
     constexpr double kZoomStep = 0.8;
     switch (key)
     {
-      case 'h': case KEY_LEFT:
+      case 'h':
+      case KEY_LEFT:
         itsCamYaw -= kYawStep;
         return true;
-      case 'l': case KEY_RIGHT:
+      case 'l':
+      case KEY_RIGHT:
         itsCamYaw += kYawStep;
         return true;
-      case 'k': case KEY_UP:
+      case 'k':
+      case KEY_UP:
         itsCamPitch = std::clamp(itsCamPitch + kPitchStep, 0.0, M_PI_2);
         return true;
-      case 'j': case KEY_DOWN:
+      case 'j':
+      case KEY_DOWN:
         itsCamPitch = std::clamp(itsCamPitch - kPitchStep, 0.0, M_PI_2);
         return true;
-      case '+': case '=':
+      case '+':
+      case '=':
         itsCamZoom /= kZoomStep;
         return true;
-      case '-': case '_':
+      case '-':
+      case '_':
         itsCamZoom *= kZoomStep;
         return true;
       case '0':
@@ -3315,15 +3711,15 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         itsCamPitch = 0.6;
         itsCamZoom = 1.0;
         return true;
-      case ',': case '<':
+      case ',':
+      case '<':
         itsThreshold3D -= 5;
-        itsLastMessage =
-            fmt::format("3D threshold: {:.0f} {}", itsThreshold3D, itsThreshold3DUnit);
+        itsLastMessage = fmt::format("3D threshold: {:.0f} {}", itsThreshold3D, itsThreshold3DUnit);
         return true;
-      case '.': case '>':
+      case '.':
+      case '>':
         itsThreshold3D += 5;
-        itsLastMessage =
-            fmt::format("3D threshold: {:.0f} {}", itsThreshold3D, itsThreshold3DUnit);
+        itsLastMessage = fmt::format("3D threshold: {:.0f} {}", itsThreshold3D, itsThreshold3DUnit);
         return true;
       case KEY_PPAGE:  // PgUp — taller storms
         itsVexagger3D = std::min(50.0, itsVexagger3D * 1.4);
@@ -3400,8 +3796,10 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       {
         itsExitWordPreview = (itsExitWordPreview + 1) % exitWordlineCount();
         playExitEffect(itsLastExitIndex, 0, exitWordline(itsExitWordPreview));
-        itsLastMessage = fmt::format("Exit text {}/{}: {}", itsExitWordPreview + 1,
-                                     exitWordlineCount(), exitWordline(itsExitWordPreview));
+        itsLastMessage = fmt::format("Exit text {}/{}: {}",
+                                     itsExitWordPreview + 1,
+                                     exitWordlineCount(),
+                                     exitWordline(itsExitWordPreview));
       }
       else
       {
@@ -3462,14 +3860,16 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'P':
     {
       int picked = ui.popupMenu("Parameters", paramLabels(), activePanel().paramIndex);
-      if (picked >= 0) selectParam(picked);
+      if (picked >= 0)
+        selectParam(picked);
       return true;  // even on cancel, we need to repaint over the popup
     }
     case 'L':  // uppercase only — lowercase 'l' is reserved for pan-right
     {
-      int picked = ui.popupMenu("Levels", levelLabels(),
-                                static_cast<int>(itsSource->currentLevelIndex()));
-      if (picked >= 0) selectLevel(picked);
+      int picked =
+          ui.popupMenu("Levels", levelLabels(), static_cast<int>(itsSource->currentLevelIndex()));
+      if (picked >= 0)
+        selectLevel(picked);
       return true;
     }
 
@@ -3488,8 +3888,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         cur = std::clamp(cur + delta, 0, n - 1);
         selectLevel(cur);
         itsLastMessage = fmt::format(
-            "Level: {} ({}/{})",
-            itsSource->levelLabel(static_cast<std::size_t>(cur)), cur + 1, n);
+            "Level: {} ({}/{})", itsSource->levelLabel(static_cast<std::size_t>(cur)), cur + 1, n);
       }
       return true;
 
@@ -3540,8 +3939,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       {
         itsShapePaletteMode = (itsShapePaletteMode + 1) % 2;
         loadPalette();
-        itsLastMessage =
-            itsShapePaletteMode == 1 ? "Palette: rainbow" : "Palette: flat";
+        itsLastMessage = itsShapePaletteMode == 1 ? "Palette: rainbow" : "Palette: flat";
       }
       else
       {
@@ -3621,17 +4019,21 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       // Count UTF-8 codepoints, not bytes — Finnish placenames
       // (Ähtäri, Selkämeri) have 2-byte chars whose .size() is double
       // their visible width, which mis-pads the columns.
-      auto utf8Len = [](const std::string& s) {
+      auto utf8Len = [](const std::string& s)
+      {
         int w = 0;
         for (unsigned char c : s)
-          if ((c & 0xC0) != 0x80) ++w;
+          if ((c & 0xC0) != 0x80)
+            ++w;
         return w;
       };
-      auto padRight = [&](const std::string& s, int w) {
+      auto padRight = [&](const std::string& s, int w)
+      {
         const int len = utf8Len(s);
         // Overlong values are left as-is (the popup clips on the
         // right edge); shorter values get spaces added.
-        if (len >= w) return s;
+        if (len >= w)
+          return s;
         return s + std::string(static_cast<std::size_t>(w - len), ' ');
       };
       // Index column is just wide enough for "#" + largest id.
@@ -3647,7 +4049,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         for (std::size_t k = 0; k < nfields && k < attrs.size(); ++k)
           colW[k] = std::max(colW[k], utf8Len(attrs[k].second));
       }
-      for (auto& w : colW) w = std::min(w, 24);
+      for (auto& w : colW)
+        w = std::min(w, 24);
       // Header row: " #  | FIELD1 | FIELD2 | …"
       std::string header = padRight("#", idxColW);
       for (std::size_t k = 0; k < nfields; ++k)
@@ -3673,13 +4076,14 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       // feature each match maps to. popupSearch returns the index
       // into the most recent matches array, so we capture that here.
       std::vector<int> lastMatchIdx;
-      auto matcher = [&](const std::string& query) {
+      auto matcher = [&](const std::string& query)
+      {
         std::vector<std::string> hits;
         lastMatchIdx.clear();
         // Case-insensitive substring search across the whole row.
         std::string q = query;
-        std::transform(q.begin(), q.end(), q.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+        std::transform(
+            q.begin(), q.end(), q.begin(), [](unsigned char c) { return std::tolower(c); });
         for (int i = 0; i < n; ++i)
         {
           if (q.empty())
@@ -3689,7 +4093,9 @@ bool App::handleKey(int key, UI& ui, bool& quit)
             continue;
           }
           std::string lower = rows[i];
-          std::transform(lower.begin(), lower.end(), lower.begin(),
+          std::transform(lower.begin(),
+                         lower.end(),
+                         lower.begin(),
                          [](unsigned char c) { return std::tolower(c); });
           if (lower.find(q) != std::string::npos)
           {
@@ -3721,8 +4127,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       if (!itsShapeOutlines.empty())
       {
         itsShapeOutlineStyle = nextLineStyle(itsShapeOutlineStyle);
-        itsLastMessage =
-            std::string("Shape outlines: ") + lineStyleLabel(itsShapeOutlineStyle);
+        itsLastMessage = std::string("Shape outlines: ") + lineStyleLabel(itsShapeOutlineStyle);
         return true;
       }
       return false;
@@ -3789,16 +4194,16 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'i':
     case 'I':
       itsShowCities = !itsShowCities;
-      itsLastMessage = itsShowCities
-                           ? fmt::format("Cities: top {} visible", itsCityOverlayN)
-                           : "Cities off";
+      itsLastMessage =
+          itsShowCities ? fmt::format("Cities: top {} visible", itsCityOverlayN) : "Cities off";
       return true;
 
     case KEY_NPAGE:
     {
       // Denser: step N up.
       auto it = std::upper_bound(kCityNSteps.begin(), kCityNSteps.end(), itsCityOverlayN);
-      if (it != kCityNSteps.end()) itsCityOverlayN = *it;
+      if (it != kCityNSteps.end())
+        itsCityOverlayN = *it;
       itsShowCities = true;
       itsLastMessage = fmt::format("Cities: top {}", itsCityOverlayN);
       return true;
@@ -3867,9 +4272,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       if (itsCrossActive && itsSource->hasNativeHeight())
       {
         itsCrossHeightAxis = !itsCrossHeightAxis;
-        itsLastMessage = itsCrossHeightAxis
-                             ? "Cross-section: Y-axis = height (km)"
-                             : "Cross-section: Y-axis = elevation angle";
+        itsLastMessage = itsCrossHeightAxis ? "Cross-section: Y-axis = height (km)"
+                                            : "Cross-section: Y-axis = elevation angle";
       }
       else if (itsCrossActive)
       {
@@ -3925,10 +4329,10 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       if (sourceSupports3D())
       {
         itsMode3D = !itsMode3D;
-        if (itsMode3D) apply3DDefaultsForSource();
-        itsLastMessage = itsMode3D
-                             ? "3D: h/l yaw, j/k pitch, +/- zoom, 0 reset, ,/. threshold"
-                             : "3D mode off";
+        if (itsMode3D)
+          apply3DDefaultsForSource();
+        itsLastMessage =
+            itsMode3D ? "3D: h/l yaw, j/k pitch, +/- zoom, 0 reset, ,/. threshold" : "3D mode off";
       }
       else
       {
@@ -3953,7 +4357,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case KEY_MOUSE:
     {
       MEVENT ev;
-      if (getmouse(&ev) != OK) return false;
+      if (getmouse(&ev) != OK)
+        return false;
 
       // Optional debug log so we can inspect what the terminal actually
       // sends. Set QDLESS_DEBUG_MOUSE=1 in the environment to enable.
@@ -3964,16 +4369,18 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         FILE* f = std::fopen("/tmp/qdless-mouse.log", "a");
         if (f != nullptr)
         {
-          fmt::print(f, "mouse x={} y={} bstate=0x{:x}\n", ev.x, ev.y,
+          fmt::print(f,
+                     "mouse x={} y={} bstate=0x{:x}\n",
+                     ev.x,
+                     ev.y,
                      static_cast<unsigned long>(ev.bstate));
           std::fclose(f);
         }
       }
 
       const auto& l = ui.layout();
-      const bool inMap =
-          ev.x >= l.map.col && ev.x < l.map.col + l.map.width && ev.y >= l.map.row &&
-          ev.y < l.map.row + l.map.height;
+      const bool inMap = ev.x >= l.map.col && ev.x < l.map.col + l.map.width && ev.y >= l.map.row &&
+                         ev.y < l.map.row + l.map.height;
 
       // Cross-section hover: when the mouse is over the chart area, project
       // the column → fraction → (lat, lon) along the great-circle and store
@@ -3981,14 +4388,12 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       // the next drawMap call. Leaving the chart clears the dot.
       if (itsCrossActive && itsCrossChartW > 0)
       {
-        const bool inChart =
-            ev.x >= itsCrossChartCol && ev.x < itsCrossChartCol + itsCrossChartW &&
-            ev.y >= itsCrossChartRow && ev.y < itsCrossChartRow + itsCrossChartH;
+        const bool inChart = ev.x >= itsCrossChartCol && ev.x < itsCrossChartCol + itsCrossChartW &&
+                             ev.y >= itsCrossChartRow && ev.y < itsCrossChartRow + itsCrossChartH;
         std::optional<std::pair<double, double>> next;
         if (inChart)
         {
-          const double frac = (static_cast<double>(ev.x - itsCrossChartCol) + 0.5) /
-                              itsCrossChartW;
+          const double frac = (static_cast<double>(ev.x - itsCrossChartCol) + 0.5) / itsCrossChartW;
           const double lat = itsCrossLat1 + frac * (itsCrossLat2 - itsCrossLat1);
           const double lon = itsCrossLon1 + frac * (itsCrossLon2 - itsCrossLon1);
           next = std::make_pair(lat, lon);
@@ -4002,8 +4407,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
       // Any left-button click on a panel makes that panel active. Wheel /
       // motion events leave the focus alone.
-      const auto kButton1Click = static_cast<mmask_t>(
-          BUTTON1_PRESSED | BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED);
+      const auto kButton1Click =
+          static_cast<mmask_t>(BUTTON1_PRESSED | BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED);
       if ((ev.bstate & kButton1Click) != 0U)
       {
         if (auto panel = panelAtCell(ui, ev.x, ev.y); panel.has_value())
@@ -4021,7 +4426,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       {
         float u = 0;
         float v = 0;
-        if (cellToViewport(ui, ev.x, ev.y, u, v)) itsViewport.zoomAt(0.85F, u, v);
+        if (cellToViewport(ui, ev.x, ev.y, u, v))
+          itsViewport.zoomAt(0.85F, u, v);
         return true;
       }
       if (((ev.bstate & kWheelDown) != 0U) && inMap)
@@ -4040,7 +4446,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       {
         float u = 0;
         float v = 0;
-        if (cellToViewport(ui, ev.x, ev.y, u, v)) itsViewport.zoomAt(0.7F, u, v);
+        if (cellToViewport(ui, ev.x, ev.y, u, v))
+          itsViewport.zoomAt(0.7F, u, v);
         itsDragging = false;  // double-click can be preceded by stray PRESS
         return true;
       }
@@ -4064,7 +4471,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
       if ((ev.bstate & BUTTON1_RELEASED) != 0U)
       {
-        if (!itsDragging) return false;
+        if (!itsDragging)
+          return false;
         itsDragging = false;
         const int dx = ev.x - itsDragStartX;
         const int dy = ev.y - itsDragStartY;
@@ -4088,7 +4496,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
             {
               beginCrossSection(itsCrossX1, itsCrossY1, itsDragStartX, itsDragStartY, ui);
               itsCrossPicks = 0;
-              if (itsCrossActive) itsLastMessage.clear();
+              if (itsCrossActive)
+                itsLastMessage.clear();
             }
             return true;
           }
@@ -4119,7 +4528,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         {
           beginCrossSection(itsCrossX1, itsCrossY1, ev.x, ev.y, ui);
           itsCrossPicks = 0;
-          if (itsCrossActive) itsLastMessage.clear();
+          if (itsCrossActive)
+            itsLastMessage.clear();
         }
         return true;
       }
@@ -4148,8 +4558,7 @@ void App::drawMap(UI& ui)
       draw3D(ui.layout());
       return;
     }
-    if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
-        qd != nullptr)
+    if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get()); qd != nullptr)
     {
       // Prefer the real volumetric path when the file has a height field
       // (hybrid / pressure levels). Fall back to the synthetic surface
@@ -4171,7 +4580,8 @@ void App::drawMap(UI& ui)
   }
 
   const auto& l = ui.layout();
-  if (l.map.height < 2 || l.map.width < 2) return;
+  if (l.map.height < 2 || l.map.width < 2)
+    return;
 
   // Re-pick coastline resolution for the current viewport / map size.
   // Cheap when the selected file is unchanged; reads ~100ms at
@@ -4188,7 +4598,8 @@ void App::drawMap(UI& ui)
   for (std::size_t i = 0; i < rects.size() && i < itsPanels.size(); ++i)
   {
     const PanelRect& r = rects[i];
-    if (r.width < 2 || r.height < 2) continue;
+    if (r.width < 2 || r.height < 2)
+      continue;
 
     Panel& panel = itsPanels[i];
     if (panel.paramIndex >= 0 && panel.paramIndex < static_cast<int>(itsParamIds.size()))
@@ -4207,7 +4618,8 @@ void App::drawMap(UI& ui)
     auto pixels = sampleSlice(subW, subH, dMin, dMax);
     // Thick mode rasterises into the data buffer before the renderer so the
     // line shows as a half-cell quadrant block.
-    if (itsGraticuleStyle == LineStyle::Thick) overlayGraticule(pixels, subW, subH);
+    if (itsGraticuleStyle == LineStyle::Thick)
+      overlayGraticule(pixels, subW, subH);
     if (itsCoastlineStyle == LineStyle::Thick)
       overlayPolylines(pixels, subW, subH, itsCoastlines, Rgb{0, 0, 0});
     if (itsBorderStyle == LineStyle::Thick)
@@ -4272,7 +4684,8 @@ void App::drawMap(UI& ui)
     for (std::size_t i = 0; i < rects.size() && i < itsPanels.size(); ++i)
     {
       const auto& r = rects[i];
-      if (r.width < 4 || r.height < 1) continue;
+      if (r.width < 4 || r.height < 1)
+        continue;
       const Panel& p = itsPanels[i];
       std::string name;
       if (p.paramIndex >= 0 && p.paramIndex < static_cast<int>(itsParamIds.size()))
@@ -4283,8 +4696,7 @@ void App::drawMap(UI& ui)
       // Bold + bright yellow for active, dim white for inactive. Black bg
       // matches the map raster behind it.
       const char* style = active ? "\x1b[1m\x1b[40m\x1b[93m" : "\x1b[2m\x1b[40m\x1b[37m";
-      os << "\x1b[" << (r.row + 1) << ';' << (r.col + 1) << 'H' << style << visible
-         << "\x1b[0m";
+      os << "\x1b[" << (r.row + 1) << ';' << (r.col + 1) << 'H' << style << visible << "\x1b[0m";
     }
   }
 
@@ -4326,7 +4738,8 @@ void App::draw3D(const Layout& layout)
   }
 
   const auto& l = layout;
-  if (l.map.height < 4 || l.map.width < 4) return;
+  if (l.map.height < 4 || l.map.width < 4)
+    return;
 
   // The [c]/[b] handlers clear itsCoastlines / itsBorders when cycled
   // to "off" and clear the cached path when cycled back, expecting the
@@ -4356,7 +4769,7 @@ void App::draw3D(const Layout& layout)
   const double sy_ = std::sin(itsCamYaw);
   const double cp = std::cos(itsCamPitch);
   const double sp = std::sin(itsCamPitch);
-  const double rightX = cy,  rightY = sy_, rightZ = 0;
+  const double rightX = cy, rightY = sy_, rightZ = 0;
   const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
   const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
 
@@ -4365,15 +4778,15 @@ void App::draw3D(const Layout& layout)
   const double xscale = (subW / 2.0) / extent * itsCamZoom;
   const double yscale = xscale / aspect;
   const double depthScale = xscale;  // depth uses world metres; only the
-                                      // ordering matters for the z-buffer
+                                     // ordering matters for the z-buffer
 
   // Buffers. INT_MAX z = unpainted.
   std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH, Rgb{0, 0, 0, true});
   std::vector<float> zbuf(static_cast<std::size_t>(subW) * subH,
                           std::numeric_limits<float>::infinity());
 
-  auto project = [&](double wx, double wy, double wz,
-                     double& col, double& row, float& depth) {
+  auto project = [&](double wx, double wy, double wz, double& col, double& row, float& depth)
+  {
     const double sx = rightX * wx + rightY * wy + rightZ * wz;
     const double sy = upX * wx + upY * wy + upZ * wz;
     const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
@@ -4382,8 +4795,10 @@ void App::draw3D(const Layout& layout)
     depth = static_cast<float>(dp * depthScale);
   };
 
-  auto plot = [&](int c, int r, float depth, Rgb color) {
-    if (c < 0 || c >= subW || r < 0 || r >= subH) return;
+  auto plot = [&](int c, int r, float depth, Rgb color)
+  {
+    if (c < 0 || c >= subW || r < 0 || r >= subH)
+      return;
     const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
     if (depth < zbuf[idx])
     {
@@ -4394,8 +4809,9 @@ void App::draw3D(const Layout& layout)
 
   // DDA line in sub-pixel space with per-pixel z-buffer test. Used for
   // map polylines projected onto the ground plane.
-  auto drawLine = [&](double wx0, double wy0, double wz0,
-                      double wx1, double wy1, double wz1, Rgb color) {
+  auto drawLine =
+      [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
+  {
     double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
     float d0 = 0, d1 = 0;
     project(wx0, wy0, wz0, c0, r0, d0);
@@ -4424,7 +4840,8 @@ void App::draw3D(const Layout& layout)
   const auto [radarLat, radarLon] = pvol->radarLatLon();
   const double R_e = 6371000.0;
   const double cosLat0 = std::cos(radarLat * M_PI / 180.0);
-  auto latLonToXY = [&](double lat, double lon, double& x, double& y) {
+  auto latLonToXY = [&](double lat, double lon, double& x, double& y)
+  {
     x = (lon - radarLon) * (M_PI / 180.0) * R_e * cosLat0;
     y = (lat - radarLat) * (M_PI / 180.0) * R_e;
   };
@@ -4434,10 +4851,12 @@ void App::draw3D(const Layout& layout)
   // style is handled later as an overlay after the main render so it
   // can use the finer 2×4 sub-cell grid the renderer can't reach.
   // Z = -1 (one metre below ground) so radar bins at h=0 still paint over.
-  auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color) {
+  auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color)
+  {
     for (const auto& p : polys)
     {
-      if (p.lats.size() < 2) continue;
+      if (p.lats.size() < 2)
+        continue;
       double x0 = 0, y0 = 0;
       latLonToXY(p.lats[0], p.lons[0], x0, y0);
       for (std::size_t i = 1; i < p.lats.size(); ++i)
@@ -4462,7 +4881,8 @@ void App::draw3D(const Layout& layout)
     for (double r_km : {50.0, 100.0, 150.0, 200.0})
     {
       const double r_m = r_km * 1000.0;
-      if (r_m > extent) continue;
+      if (r_m > extent)
+        continue;
       double prevX = r_m, prevY = 0;
       for (int i = 1; i <= kSegs; ++i)
       {
@@ -4484,7 +4904,8 @@ void App::draw3D(const Layout& layout)
   for (std::size_t si = 0; si < nSweeps; ++si)
   {
     const auto s = pvol->sweepAt(si);
-    if (!s.raw) continue;
+    if (!s.raw)
+      continue;
     const double elRad = s.elangle * M_PI / 180.0;
     const double cosE = std::cos(elRad);
     const double sinE = std::sin(elRad);
@@ -4502,15 +4923,16 @@ void App::draw3D(const Layout& layout)
         const float raw = row[bin];
         if (raw == static_cast<float>(s.nodata) || raw == static_cast<float>(s.undetect))
           continue;
-        if (raw < rawThreshold) continue;
+        if (raw < rawThreshold)
+          continue;
         const float value = static_cast<float>(s.gain * raw + s.offset);
 
         const double R = s.rstart + (bin + 0.5) * s.rscale;
         // Bin's 3D position: ground projection R·cos(α) along the ray,
         // height R·sin(α) plus 4/3-Earth curvature lift.
         const double rg = R * cosE;
-        const double wx = rg * sinAz;     // east
-        const double wy = rg * cosAz;     // north
+        const double wx = rg * sinAz;  // east
+        const double wy = rg * cosAz;  // north
         // Vertical exaggeration: storms are ~30:1 wide:tall in true
         // geometry; this stretches Z so the volume's depth structure
         // is legible without changing horizontal positions.
@@ -4528,9 +4950,9 @@ void App::draw3D(const Layout& layout)
         const Rgb color = activePanel().palette.lookup(transform(value));
         const int c = static_cast<int>(col);
         const int r = static_cast<int>(rowSx);
-        plot(c,     r,     depth, color);
-        plot(c + 1, r,     depth, color);
-        plot(c,     r + 1, depth, color);
+        plot(c, r, depth, color);
+        plot(c + 1, r, depth, color);
+        plot(c, r + 1, depth, color);
         plot(c + 1, r + 1, depth, color);
       }
     }
@@ -4545,10 +4967,8 @@ void App::draw3D(const Layout& layout)
   // sub-cell mask than the renderer's quadrant grid, with the camera's
   // z-buffer (sampled at the nearest quadrant pixel) so radar bins
   // still occlude coastlines behind them.
-  const bool brailleCoast =
-      itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
-  const bool brailleBorder =
-      itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+  const bool brailleCoast = itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder = itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
   if (brailleCoast || brailleBorder)
   {
     const int bW = cellW * 2;
@@ -4559,7 +4979,8 @@ void App::draw3D(const Layout& layout)
     // Braille-grid projection: same x, but y scaled by 4/subRows so the
     // same world coords land on the right braille row.
     const double yFineScale = 4.0 / subRows;
-    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth) {
+    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth)
+    {
       const double sx = rightX * wx + rightY * wy + rightZ * wz;
       const double sy = upX * wx + upY * wy + upZ * wz;
       const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
@@ -4568,19 +4989,23 @@ void App::draw3D(const Layout& layout)
       depth = static_cast<float>(dp * depthScale);
     };
 
-    auto plotB = [&](int bx, int by, float depth, Rgb color) {
-      if (bx < 0 || bx >= bW || by < 0 || by >= bH) return;
+    auto plotB = [&](int bx, int by, float depth, Rgb color)
+    {
+      if (bx < 0 || bx >= bW || by < 0 || by >= bH)
+        return;
       // Z-test against the quadrant z-buffer at the nearest sub-pixel.
       const int qy = by * subRows / 4;
       const std::size_t qidx = static_cast<std::size_t>(qy) * subW + bx;
-      if (depth >= zbuf[qidx]) return;
+      if (depth >= zbuf[qidx])
+        return;
       const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
       dotMask[bidx] = 1;
       dotColor[bidx] = color;
     };
 
-    auto lineB = [&](double wx0, double wy0, double wz0,
-                     double wx1, double wy1, double wz1, Rgb color) {
+    auto lineB =
+        [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
+    {
       int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
       float d0 = 0, d1 = 0;
       projectB(wx0, wy0, wz0, x0, y0, d0);
@@ -4603,10 +5028,12 @@ void App::draw3D(const Layout& layout)
       }
     };
 
-    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color) {
+    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color)
+    {
       for (const auto& p : polys)
       {
-        if (p.lats.size() < 2) continue;
+        if (p.lats.size() < 2)
+          continue;
         double x0 = 0, y0 = 0;
         latLonToXY(p.lats[0], p.lons[0], x0, y0);
         for (std::size_t i = 1; i < p.lats.size(); ++i)
@@ -4620,8 +5047,10 @@ void App::draw3D(const Layout& layout)
       }
     };
 
-    if (brailleCoast) drawPolyB(itsCoastlines, Rgb{200, 200, 200});
-    if (brailleBorder) drawPolyB(itsBorders, Rgb{120, 120, 120});
+    if (brailleCoast)
+      drawPolyB(itsCoastlines, Rgb{200, 200, 200});
+    if (brailleBorder)
+      drawPolyB(itsBorders, Rgb{120, 120, 120});
 
     // Emit positioned braille glyphs. BG sampled from the underlying
     // quadrant pixel so radar volume colours still show through.
@@ -4646,7 +5075,8 @@ void App::draw3D(const Layout& layout)
             }
           }
         }
-        if (cellMask == 0U) continue;
+        if (cellMask == 0U)
+          continue;
         const int qy = cy * subRows;
         const Rgb bg = pixels[static_cast<std::size_t>(qy) * subW + cx * 2];
         brailleOut += "\x1b[";
@@ -4666,13 +5096,17 @@ void App::draw3D(const Layout& layout)
   }
 
   // Camera HUD bottom-right.
-  const std::string hud = fmt::format(
-      " 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}{} ",
-      itsCamYaw * 180.0 / M_PI, itsCamPitch * 180.0 / M_PI,
-      itsCamZoom, itsVexagger3D, itsThreshold3D, itsThreshold3DUnit);
+  const std::string hud =
+      fmt::format(" 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}{} ",
+                  itsCamYaw * 180.0 / M_PI,
+                  itsCamPitch * 180.0 / M_PI,
+                  itsCamZoom,
+                  itsVexagger3D,
+                  itsThreshold3D,
+                  itsThreshold3DUnit);
   const int hudRow = l.map.row + l.map.height - 1;
-  const int hudCol = std::max(l.map.col, l.map.col + l.map.width -
-                                              static_cast<int>(hud.size()) - 1);
+  const int hudCol =
+      std::max(l.map.col, l.map.col + l.map.width - static_cast<int>(hud.size()) - 1);
   os << "\x1b[" << (hudRow + 1) << ';' << (hudCol + 1) << "H"
      << "\x1b[48;5;235m\x1b[38;5;15m" << hud << "\x1b[0m";
 
@@ -4712,7 +5146,8 @@ void App::draw3DQueryData(const Layout& layout)
   }
 
   const auto& l = layout;
-  if (l.map.height < 4 || l.map.width < 4) return;
+  if (l.map.height < 4 || l.map.width < 4)
+    return;
 
   // Same coastline reload trick as draw3D — see comment there.
   loadCoastlines(l.map.width * 2, l.map.height * 4);
@@ -4729,7 +5164,7 @@ void App::draw3DQueryData(const Layout& layout)
   const double sy_ = std::sin(itsCamYaw);
   const double cp = std::cos(itsCamPitch);
   const double sp = std::sin(itsCamPitch);
-  const double rightX = cy,  rightY = sy_, rightZ = 0;
+  const double rightX = cy, rightY = sy_, rightZ = 0;
   const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
   const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
 
@@ -4742,11 +5177,11 @@ void App::draw3DQueryData(const Layout& layout)
   const double lon0 = (bb.minLon + bb.maxLon) * 0.5;
   constexpr double R_e = 6371000.0;
   const double cosLat0 = std::cos(lat0 * M_PI / 180.0);
-  const double extentX =
-      (bb.maxLon - bb.minLon) * (M_PI / 180.0) * R_e * cosLat0 * 0.5;
+  const double extentX = (bb.maxLon - bb.minLon) * (M_PI / 180.0) * R_e * cosLat0 * 0.5;
   const double extentY = (bb.maxLat - bb.minLat) * (M_PI / 180.0) * R_e * 0.5;
   const double extent = std::max(extentX, extentY);
-  if (extent <= 0.0) return;
+  if (extent <= 0.0)
+    return;
 
   const double xscale = (subW / 2.0) / extent * itsCamZoom;
   const double yscale = xscale / aspect;
@@ -4756,8 +5191,8 @@ void App::draw3DQueryData(const Layout& layout)
   std::vector<float> zbuf(static_cast<std::size_t>(subW) * subH,
                           std::numeric_limits<float>::infinity());
 
-  auto project = [&](double wx, double wy, double wz,
-                     double& col, double& row, float& depth) {
+  auto project = [&](double wx, double wy, double wz, double& col, double& row, float& depth)
+  {
     const double sx = rightX * wx + rightY * wy + rightZ * wz;
     const double sy = upX * wx + upY * wy + upZ * wz;
     const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
@@ -4766,8 +5201,10 @@ void App::draw3DQueryData(const Layout& layout)
     depth = static_cast<float>(dp * depthScale);
   };
 
-  auto plot = [&](int c, int r, float depth, Rgb color) {
-    if (c < 0 || c >= subW || r < 0 || r >= subH) return;
+  auto plot = [&](int c, int r, float depth, Rgb color)
+  {
+    if (c < 0 || c >= subW || r < 0 || r >= subH)
+      return;
     const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
     if (depth < zbuf[idx])
     {
@@ -4776,8 +5213,9 @@ void App::draw3DQueryData(const Layout& layout)
     }
   };
 
-  auto drawLine = [&](double wx0, double wy0, double wz0,
-                      double wx1, double wy1, double wz1, Rgb color) {
+  auto drawLine =
+      [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
+  {
     double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
     float d0 = 0, d1 = 0;
     project(wx0, wy0, wz0, c0, r0, d0);
@@ -4802,15 +5240,18 @@ void App::draw3DQueryData(const Layout& layout)
   };
 
   // Flat-Earth lat/lon → east/north metres, anchored at the bbox centre.
-  auto latLonToXY = [&](double lat, double lon, double& x, double& y) {
+  auto latLonToXY = [&](double lat, double lon, double& x, double& y)
+  {
     x = (lon - lon0) * (M_PI / 180.0) * R_e * cosLat0;
     y = (lat - lat0) * (M_PI / 180.0) * R_e;
   };
 
-  auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color) {
+  auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color)
+  {
     for (const auto& p : polys)
     {
-      if (p.lats.size() < 2) continue;
+      if (p.lats.size() < 2)
+        continue;
       double x0 = 0, y0 = 0;
       latLonToXY(p.lats[0], p.lons[0], x0, y0);
       for (std::size_t i = 1; i < p.lats.size(); ++i)
@@ -4834,22 +5275,25 @@ void App::draw3DQueryData(const Layout& layout)
   // we touch per-point work — keep it lean.
   const float threshold = itsThreshold3D;
   const double vexagger = itsVexagger3D;
-  qd->sampleVolume([&](const QueryDataSource::VolumeSample& s) {
-    if (!std::isfinite(s.value) || s.value < threshold) return;
-    double wx = 0, wy = 0;
-    latLonToXY(s.lat, s.lon, wx, wy);
-    const double wz = s.heightMeters * vexagger;
-    double col = 0, rowSx = 0;
-    float depth = 0;
-    project(wx, wy, wz, col, rowSx, depth);
-    const Rgb color = activePanel().palette.lookup(transform(s.value));
-    const int c = static_cast<int>(col);
-    const int r = static_cast<int>(rowSx);
-    plot(c,     r,     depth, color);
-    plot(c + 1, r,     depth, color);
-    plot(c,     r + 1, depth, color);
-    plot(c + 1, r + 1, depth, color);
-  });
+  qd->sampleVolume(
+      [&](const QueryDataSource::VolumeSample& s)
+      {
+        if (!std::isfinite(s.value) || s.value < threshold)
+          return;
+        double wx = 0, wy = 0;
+        latLonToXY(s.lat, s.lon, wx, wy);
+        const double wz = s.heightMeters * vexagger;
+        double col = 0, rowSx = 0;
+        float depth = 0;
+        project(wx, wy, wz, col, rowSx, depth);
+        const Rgb color = activePanel().palette.lookup(transform(s.value));
+        const int c = static_cast<int>(col);
+        const int r = static_cast<int>(rowSx);
+        plot(c, r, depth, color);
+        plot(c + 1, r, depth, color);
+        plot(c, r + 1, depth, color);
+        plot(c + 1, r + 1, depth, color);
+      });
 
   std::ostringstream os;
   cache3DRaster(pixels, subW, subH);
@@ -4857,10 +5301,8 @@ void App::draw3DQueryData(const Layout& layout)
 
   // Braille overlay for coastlines / borders — identical mechanics to
   // draw3D, just with the bbox-centred latLonToXY plugged in.
-  const bool brailleCoast =
-      itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
-  const bool brailleBorder =
-      itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+  const bool brailleCoast = itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder = itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
   if (brailleCoast || brailleBorder)
   {
     const int bW = cellW * 2;
@@ -4868,7 +5310,8 @@ void App::draw3DQueryData(const Layout& layout)
     std::vector<unsigned char> dotMask(static_cast<std::size_t>(bW) * bH, 0);
     std::vector<Rgb> dotColor(static_cast<std::size_t>(bW) * bH, Rgb{0, 0, 0});
     const double yFineScale = 4.0 / subRows;
-    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth) {
+    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth)
+    {
       const double sx = rightX * wx + rightY * wy + rightZ * wz;
       const double sy = upX * wx + upY * wy + upZ * wz;
       const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
@@ -4876,17 +5319,21 @@ void App::draw3DQueryData(const Layout& layout)
       by = static_cast<int>(std::round(bH / 2.0 - yscale * yFineScale * sy));
       depth = static_cast<float>(dp * depthScale);
     };
-    auto plotB = [&](int bx, int by, float depth, Rgb color) {
-      if (bx < 0 || bx >= bW || by < 0 || by >= bH) return;
+    auto plotB = [&](int bx, int by, float depth, Rgb color)
+    {
+      if (bx < 0 || bx >= bW || by < 0 || by >= bH)
+        return;
       const int qy = by * subRows / 4;
       const std::size_t qidx = static_cast<std::size_t>(qy) * subW + bx;
-      if (depth >= zbuf[qidx]) return;
+      if (depth >= zbuf[qidx])
+        return;
       const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
       dotMask[bidx] = 1;
       dotColor[bidx] = color;
     };
-    auto lineB = [&](double wx0, double wy0, double wz0,
-                     double wx1, double wy1, double wz1, Rgb color) {
+    auto lineB =
+        [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
+    {
       int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
       float d0 = 0, d1 = 0;
       projectB(wx0, wy0, wz0, x0, y0, d0);
@@ -4908,10 +5355,12 @@ void App::draw3DQueryData(const Layout& layout)
         plotB(cx, cy_, dt, color);
       }
     };
-    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color) {
+    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color)
+    {
       for (const auto& p : polys)
       {
-        if (p.lats.size() < 2) continue;
+        if (p.lats.size() < 2)
+          continue;
         double x0 = 0, y0 = 0;
         latLonToXY(p.lats[0], p.lons[0], x0, y0);
         for (std::size_t i = 1; i < p.lats.size(); ++i)
@@ -4924,8 +5373,10 @@ void App::draw3DQueryData(const Layout& layout)
         }
       }
     };
-    if (brailleCoast) drawPolyB(itsCoastlines, Rgb{200, 200, 200});
-    if (brailleBorder) drawPolyB(itsBorders, Rgb{120, 120, 120});
+    if (brailleCoast)
+      drawPolyB(itsCoastlines, Rgb{200, 200, 200});
+    if (brailleBorder)
+      drawPolyB(itsBorders, Rgb{120, 120, 120});
 
     std::string brailleOut;
     for (int cy_ = 0; cy_ < cellH; ++cy_)
@@ -4948,7 +5399,8 @@ void App::draw3DQueryData(const Layout& layout)
             }
           }
         }
-        if (cellMask == 0U) continue;
+        if (cellMask == 0U)
+          continue;
         const int qy = cy_ * subRows;
         const Rgb bg = pixels[static_cast<std::size_t>(qy) * subW + cx * 2];
         brailleOut += "\x1b[";
@@ -4961,16 +5413,21 @@ void App::draw3DQueryData(const Layout& layout)
         brailleOut += brailleGlyph(cellMask);
       }
     }
-    if (!brailleOut.empty()) os << brailleOut << "\x1b[0m";
+    if (!brailleOut.empty())
+      os << brailleOut << "\x1b[0m";
   }
 
-  const std::string hud = fmt::format(
-      " 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}{} ",
-      itsCamYaw * 180.0 / M_PI, itsCamPitch * 180.0 / M_PI,
-      itsCamZoom, itsVexagger3D, itsThreshold3D, itsThreshold3DUnit);
+  const std::string hud =
+      fmt::format(" 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}{} ",
+                  itsCamYaw * 180.0 / M_PI,
+                  itsCamPitch * 180.0 / M_PI,
+                  itsCamZoom,
+                  itsVexagger3D,
+                  itsThreshold3D,
+                  itsThreshold3DUnit);
   const int hudRow = l.map.row + l.map.height - 1;
-  const int hudCol = std::max(l.map.col, l.map.col + l.map.width -
-                                              static_cast<int>(hud.size()) - 1);
+  const int hudCol =
+      std::max(l.map.col, l.map.col + l.map.width - static_cast<int>(hud.size()) - 1);
   os << "\x1b[" << (hudRow + 1) << ';' << (hudCol + 1) << "H"
      << "\x1b[48;5;235m\x1b[38;5;15m" << hud << "\x1b[0m";
 
@@ -5005,7 +5462,8 @@ void App::draw3DSurfaceStack(const Layout& layout)
   }
 
   const auto& l = layout;
-  if (l.map.height < 4 || l.map.width < 4) return;
+  if (l.map.height < 4 || l.map.width < 4)
+    return;
   loadCoastlines(l.map.width * 2, l.map.height * 4);
 
   const int cellW = l.map.width;
@@ -5020,7 +5478,7 @@ void App::draw3DSurfaceStack(const Layout& layout)
   const double sy_ = std::sin(itsCamYaw);
   const double cp = std::cos(itsCamPitch);
   const double sp = std::sin(itsCamPitch);
-  const double rightX = cy,  rightY = sy_, rightZ = 0;
+  const double rightX = cy, rightY = sy_, rightZ = 0;
   const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
   const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
 
@@ -5029,11 +5487,11 @@ void App::draw3DSurfaceStack(const Layout& layout)
   const double lon0 = (bb.minLon + bb.maxLon) * 0.5;
   constexpr double R_e = 6371000.0;
   const double cosLat0 = std::cos(lat0 * M_PI / 180.0);
-  const double extentX =
-      (bb.maxLon - bb.minLon) * (M_PI / 180.0) * R_e * cosLat0 * 0.5;
+  const double extentX = (bb.maxLon - bb.minLon) * (M_PI / 180.0) * R_e * cosLat0 * 0.5;
   const double extentY = (bb.maxLat - bb.minLat) * (M_PI / 180.0) * R_e * 0.5;
   const double extent = std::max(extentX, extentY);
-  if (extent <= 0.0) return;
+  if (extent <= 0.0)
+    return;
 
   const double xscale = (subW / 2.0) / extent * itsCamZoom;
   const double yscale = xscale / aspect;
@@ -5043,8 +5501,8 @@ void App::draw3DSurfaceStack(const Layout& layout)
   std::vector<float> zbuf(static_cast<std::size_t>(subW) * subH,
                           std::numeric_limits<float>::infinity());
 
-  auto project = [&](double wx, double wy, double wz,
-                     double& col, double& row, float& depth) {
+  auto project = [&](double wx, double wy, double wz, double& col, double& row, float& depth)
+  {
     const double sx = rightX * wx + rightY * wy + rightZ * wz;
     const double sy = upX * wx + upY * wy + upZ * wz;
     const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
@@ -5052,8 +5510,10 @@ void App::draw3DSurfaceStack(const Layout& layout)
     row = subH / 2.0 - yscale * sy;
     depth = static_cast<float>(dp * depthScale);
   };
-  auto plot = [&](int c, int r, float depth, Rgb color) {
-    if (c < 0 || c >= subW || r < 0 || r >= subH) return;
+  auto plot = [&](int c, int r, float depth, Rgb color)
+  {
+    if (c < 0 || c >= subW || r < 0 || r >= subH)
+      return;
     const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
     if (depth < zbuf[idx])
     {
@@ -5061,20 +5521,19 @@ void App::draw3DSurfaceStack(const Layout& layout)
       pixels[idx] = color;
     }
   };
-  auto drawLine = [&](double wx0, double wy0, double wz0,
-                      double wx1, double wy1, double wz1, Rgb color) {
+  auto drawLine =
+      [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
+  {
     double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
     float d0 = 0, d1 = 0;
     project(wx0, wy0, wz0, c0, r0, d0);
     project(wx1, wy1, wz1, c1, r1, d1);
     const double dc = c1 - c0, dr = r1 - r0;
     const double dd = static_cast<double>(d1) - static_cast<double>(d0);
-    const int steps =
-        static_cast<int>(std::ceil(std::max(std::abs(dc), std::abs(dr))));
+    const int steps = static_cast<int>(std::ceil(std::max(std::abs(dc), std::abs(dr))));
     if (steps <= 0)
     {
-      plot(static_cast<int>(std::round(c0)), static_cast<int>(std::round(r0)),
-           d0, color);
+      plot(static_cast<int>(std::round(c0)), static_cast<int>(std::round(r0)), d0, color);
       return;
     }
     for (int i = 0; i <= steps; ++i)
@@ -5082,17 +5541,21 @@ void App::draw3DSurfaceStack(const Layout& layout)
       const double t = static_cast<double>(i) / steps;
       plot(static_cast<int>(std::round(c0 + t * dc)),
            static_cast<int>(std::round(r0 + t * dr)),
-           static_cast<float>(d0 + t * dd), color);
+           static_cast<float>(d0 + t * dd),
+           color);
     }
   };
-  auto latLonToXY = [&](double lat, double lon, double& x, double& y) {
+  auto latLonToXY = [&](double lat, double lon, double& x, double& y)
+  {
     x = (lon - lon0) * (M_PI / 180.0) * R_e * cosLat0;
     y = (lat - lat0) * (M_PI / 180.0) * R_e;
   };
-  auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color) {
+  auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color)
+  {
     for (const auto& p : polys)
     {
-      if (p.lats.size() < 2) continue;
+      if (p.lats.size() < 2)
+        continue;
       double x0 = 0, y0 = 0;
       latLonToXY(p.lats[0], p.lons[0], x0, y0);
       for (std::size_t i = 1; i < p.lats.size(); ++i)
@@ -5126,22 +5589,32 @@ void App::draw3DSurfaceStack(const Layout& layout)
     FmiParameterName paramId;
     const char* shortName;
     double heightKm;
-    float threshold;            // value below this is skipped
-    const char* paletteName;    // override for stack viewing
-    Rgb fallback;               // tint when palette can't be loaded
+    float threshold;          // value below this is skipped
+    const char* paletteName;  // override for stack viewing
+    Rgb fallback;             // tint when palette can't be loaded
   };
   const float cloudThreshold = itsThreshold3D;
   const std::array<Layer, 5> layers{{
-      {kFmiPrecipitation1h, "Precipitation1h",  0.0,  0.1F,
-       "precipitation1h",       Rgb{ 80, 120, 200}},
-      {kFmiFogIntensity,    "FogIntensity",     0.1,  0.5F,
-       "fog_intensity",         Rgb{200, 200, 100}},
-      {kFmiLowCloudCover,   "LowCloudCover",    1.5,  cloudThreshold,
-       "totalcloudcover_color", Rgb{220, 220, 220}},
-      {kFmiMediumCloudCover,"MediumCloudCover", 3.5,  cloudThreshold,
-       "totalcloudcover_color", Rgb{200, 200, 220}},
-      {kFmiHighCloudCover,  "HighCloudCover",   8.0,  cloudThreshold,
-       "totalcloudcover_color", Rgb{180, 200, 240}},
+      {kFmiPrecipitation1h, "Precipitation1h", 0.0, 0.1F, "precipitation1h", Rgb{80, 120, 200}},
+      {kFmiFogIntensity, "FogIntensity", 0.1, 0.5F, "fog_intensity", Rgb{200, 200, 100}},
+      {kFmiLowCloudCover,
+       "LowCloudCover",
+       1.5,
+       cloudThreshold,
+       "totalcloudcover_color",
+       Rgb{220, 220, 220}},
+      {kFmiMediumCloudCover,
+       "MediumCloudCover",
+       3.5,
+       cloudThreshold,
+       "totalcloudcover_color",
+       Rgb{200, 200, 220}},
+      {kFmiHighCloudCover,
+       "HighCloudCover",
+       8.0,
+       cloudThreshold,
+       "totalcloudcover_color",
+       Rgb{180, 200, 240}},
   }};
 
   const double vexagger = itsVexagger3D;
@@ -5151,21 +5624,24 @@ void App::draw3DSurfaceStack(const Layout& layout)
   {
     auto pal = loadPaletteByName(layer.paletteName);
     const double wz = layer.heightKm * 1000.0 * vexagger;
-    qd->sampleSlab(layer.paramId, [&](double lat, double lon, float v) {
-      if (!std::isfinite(v) || v < layer.threshold) return;
-      double wx = 0, wy = 0;
-      latLonToXY(lat, lon, wx, wy);
-      double col = 0, rowSx = 0;
-      float depth = 0;
-      project(wx, wy, wz, col, rowSx, depth);
-      const Rgb color = pal ? pal->lookup(v) : layer.fallback;
-      const int c = static_cast<int>(col);
-      const int r = static_cast<int>(rowSx);
-      plot(c,     r,     depth, color);
-      plot(c + 1, r,     depth, color);
-      plot(c,     r + 1, depth, color);
-      plot(c + 1, r + 1, depth, color);
-    });
+    qd->sampleSlab(layer.paramId,
+                   [&](double lat, double lon, float v)
+                   {
+                     if (!std::isfinite(v) || v < layer.threshold)
+                       return;
+                     double wx = 0, wy = 0;
+                     latLonToXY(lat, lon, wx, wy);
+                     double col = 0, rowSx = 0;
+                     float depth = 0;
+                     project(wx, wy, wz, col, rowSx, depth);
+                     const Rgb color = pal ? pal->lookup(v) : layer.fallback;
+                     const int c = static_cast<int>(col);
+                     const int r = static_cast<int>(rowSx);
+                     plot(c, r, depth, color);
+                     plot(c + 1, r, depth, color);
+                     plot(c, r + 1, depth, color);
+                     plot(c + 1, r + 1, depth, color);
+                   });
   }
 
   std::ostringstream os;
@@ -5175,10 +5651,8 @@ void App::draw3DSurfaceStack(const Layout& layout)
   // Coastline / border braille overlay — same shape as the other 3D
   // paths. Pulled out as a lambda over the per-renderer scaling so the
   // diff with draw3DQueryData stays obvious.
-  const bool brailleCoast =
-      itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
-  const bool brailleBorder =
-      itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+  const bool brailleCoast = itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder = itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
   if (brailleCoast || brailleBorder)
   {
     const int bW = cellW * 2;
@@ -5186,7 +5660,8 @@ void App::draw3DSurfaceStack(const Layout& layout)
     std::vector<unsigned char> dotMask(static_cast<std::size_t>(bW) * bH, 0);
     std::vector<Rgb> dotColor(static_cast<std::size_t>(bW) * bH, Rgb{0, 0, 0});
     const double yFineScale = 4.0 / subRows;
-    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth) {
+    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth)
+    {
       const double sx = rightX * wx + rightY * wy + rightZ * wz;
       const double sy = upX * wx + upY * wy + upZ * wz;
       const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
@@ -5194,17 +5669,21 @@ void App::draw3DSurfaceStack(const Layout& layout)
       by = static_cast<int>(std::round(bH / 2.0 - yscale * yFineScale * sy));
       depth = static_cast<float>(dp * depthScale);
     };
-    auto plotB = [&](int bx, int by, float depth, Rgb color) {
-      if (bx < 0 || bx >= bW || by < 0 || by >= bH) return;
+    auto plotB = [&](int bx, int by, float depth, Rgb color)
+    {
+      if (bx < 0 || bx >= bW || by < 0 || by >= bH)
+        return;
       const int qy = by * subRows / 4;
       const std::size_t qidx = static_cast<std::size_t>(qy) * subW + bx;
-      if (depth >= zbuf[qidx]) return;
+      if (depth >= zbuf[qidx])
+        return;
       const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
       dotMask[bidx] = 1;
       dotColor[bidx] = color;
     };
-    auto lineB = [&](double wx0, double wy0, double wz0,
-                     double wx1, double wy1, double wz1, Rgb color) {
+    auto lineB =
+        [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
+    {
       int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
       float d0 = 0, d1 = 0;
       projectB(wx0, wy0, wz0, x0, y0, d0);
@@ -5221,13 +5700,16 @@ void App::draw3DSurfaceStack(const Layout& layout)
         const double t = static_cast<double>(i) / steps;
         plotB(static_cast<int>(std::round(x0 + t * (x1 - x0))),
               static_cast<int>(std::round(y0 + t * (y1 - y0))),
-              static_cast<float>(d0 + t * (d1 - d0)), color);
+              static_cast<float>(d0 + t * (d1 - d0)),
+              color);
       }
     };
-    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color) {
+    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color)
+    {
       for (const auto& p : polys)
       {
-        if (p.lats.size() < 2) continue;
+        if (p.lats.size() < 2)
+          continue;
         double x0 = 0, y0 = 0;
         latLonToXY(p.lats[0], p.lons[0], x0, y0);
         for (std::size_t i = 1; i < p.lats.size(); ++i)
@@ -5240,8 +5722,10 @@ void App::draw3DSurfaceStack(const Layout& layout)
         }
       }
     };
-    if (brailleCoast) drawPolyB(itsCoastlines, Rgb{200, 200, 200});
-    if (brailleBorder) drawPolyB(itsBorders, Rgb{120, 120, 120});
+    if (brailleCoast)
+      drawPolyB(itsCoastlines, Rgb{200, 200, 200});
+    if (brailleBorder)
+      drawPolyB(itsBorders, Rgb{120, 120, 120});
 
     std::string brailleOut;
     for (int cy_ = 0; cy_ < cellH; ++cy_)
@@ -5262,7 +5746,8 @@ void App::draw3DSurfaceStack(const Layout& layout)
               cellFg = dotColor[bidx];
             }
           }
-        if (cellMask == 0U) continue;
+        if (cellMask == 0U)
+          continue;
         const int qy = cy_ * subRows;
         const Rgb bg = pixels[static_cast<std::size_t>(qy) * subW + cx * 2];
         brailleOut += "\x1b[";
@@ -5275,17 +5760,22 @@ void App::draw3DSurfaceStack(const Layout& layout)
         brailleOut += brailleGlyph(cellMask);
       }
     }
-    if (!brailleOut.empty()) os << brailleOut << "\x1b[0m";
+    if (!brailleOut.empty())
+      os << brailleOut << "\x1b[0m";
   }
 
   const std::string hud = fmt::format(
       " 3D stack  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  "
       "cloud≥{:.0f}{} ",
-      itsCamYaw * 180.0 / M_PI, itsCamPitch * 180.0 / M_PI,
-      itsCamZoom, itsVexagger3D, itsThreshold3D, itsThreshold3DUnit);
+      itsCamYaw * 180.0 / M_PI,
+      itsCamPitch * 180.0 / M_PI,
+      itsCamZoom,
+      itsVexagger3D,
+      itsThreshold3D,
+      itsThreshold3DUnit);
   const int hudRow = l.map.row + l.map.height - 1;
-  const int hudCol = std::max(l.map.col, l.map.col + l.map.width -
-                                              static_cast<int>(hud.size()) - 1);
+  const int hudCol =
+      std::max(l.map.col, l.map.col + l.map.width - static_cast<int>(hud.size()) - 1);
   os << "\x1b[" << (hudRow + 1) << ';' << (hudCol + 1) << "H"
      << "\x1b[48;5;235m\x1b[38;5;15m" << hud << "\x1b[0m";
 
@@ -5296,9 +5786,9 @@ void App::draw3DSurfaceStack(const Layout& layout)
 
 bool App::sourceSupports3D() const
 {
-  if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr) return true;
-  if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
-      qd != nullptr)
+  if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr)
+    return true;
+  if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get()); qd != nullptr)
     return qd->isVolumetric() || qd->isSurfaceStack();
   return false;
 }
@@ -5316,13 +5806,13 @@ void App::apply3DDefaultsForSource()
     // reads as cloud bodies and not a solid blob. , / . steps from here.
     // Surface-stack mode reads the same threshold as the cloud-cover
     // gate; precip and fog have their own fixed thresholds.
-    itsThreshold3D = 50.0F;       // %; mostly-cloudy or more
+    itsThreshold3D = 50.0F;  // %; mostly-cloudy or more
     itsThreshold3DUnit = "%";
-    itsVexagger3D = 50.0;         // 2000 km wide × ~30 km tall → ~70:1
+    itsVexagger3D = 50.0;  // 2000 km wide × ~30 km tall → ~70:1
   }
   else
   {
-    itsThreshold3D = -10.0F;      // dBZ; -10 captures most real echoes
+    itsThreshold3D = -10.0F;  // dBZ; -10 captures most real echoes
     itsThreshold3DUnit = "dBZ";
     itsVexagger3D = 8.0;
   }
@@ -5358,8 +5848,7 @@ int App::runOnce()
     {
       draw3D(layout);
     }
-    else if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
-             qd != nullptr)
+    else if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get()); qd != nullptr)
     {
       if (qd->isVolumetric())
         draw3DQueryData(layout);
@@ -5385,12 +5874,13 @@ int App::runOnce()
   const int id = itsSource->currentParamId();
   std::string shortName = itsSource->paramShortName(id);
   const std::string origLabel = originTimeLabel();
-  std::cout << "[qdless] " << itsOpts.filename << " | param: " << shortName << " | time: "
-            << currentTimeLabel() << " (" << (itsSource->currentTimeIndex() + 1) << "/"
-            << itsSource->timeCount() << ")";
-  if (!origLabel.empty()) std::cout << " | analysis: " << origLabel;
-  std::cout << " | level: " << itsSource->levelLabel(itsSource->currentLevelIndex())
-            << " (" << (itsSource->currentLevelIndex() + 1) << "/" << itsSource->levelCount()
+  std::cout << "[qdless] " << itsOpts.filename << " | param: " << shortName
+            << " | time: " << currentTimeLabel() << " (" << (itsSource->currentTimeIndex() + 1)
+            << "/" << itsSource->timeCount() << ")";
+  if (!origLabel.empty())
+    std::cout << " | analysis: " << origLabel;
+  std::cout << " | level: " << itsSource->levelLabel(itsSource->currentLevelIndex()) << " ("
+            << (itsSource->currentLevelIndex() + 1) << "/" << itsSource->levelCount()
             << ") | range: [" << dataMin << ", " << dataMax
             << "] | palette: " << activePanel().palette.name()
             << " | coast: " << itsCoastlines.size() << "+" << itsBorders.size() << " polylines\n";
@@ -5419,7 +5909,8 @@ void App::playExitEffect(int effectIndex, unsigned seed, const std::string& word
 {
   // The automatic quit path honours the opt-out; explicit previews / repeats /
   // menu picks (effectIndex >= 0) don't.
-  if (effectIndex < 0 && itsOpts.noExitEffect) return;
+  if (effectIndex < 0 && itsOpts.noExitEffect)
+    return;
 
   // Resolve the "choose for me" pick against the optional --exit-effect
   // allow-list (comma-separated names). One name pins it; several pick at
@@ -5428,15 +5919,19 @@ void App::playExitEffect(int effectIndex, unsigned seed, const std::string& word
   {
     std::vector<int> allowed;
     std::string tok;
-    auto add = [&]() {
+    auto add = [&]()
+    {
       const int idx = Qdless::exitEffectIndexByName(tok);
-      if (idx >= 0) allowed.push_back(idx);
+      if (idx >= 0)
+        allowed.push_back(idx);
       tok.clear();
     };
     for (char c : itsOpts.exitEffects)
     {
-      if (c == ',') add();
-      else tok.push_back(c);
+      if (c == ',')
+        add();
+      else
+        tok.push_back(c);
     }
     add();
     if (!allowed.empty())
@@ -5454,6 +5949,8 @@ void App::playExitEffect(int effectIndex, unsigned seed, const std::string& word
   std::vector<Rgb> frame;
   int subW = 0;
   int subH = 0;
+  std::vector<Rgb> utopiaLines;  // coastlines+borders on black (for the Utopia effect)
+  std::vector<char> swedenMask;  // 0/1 mask of pixels inside Sweden
   if (itsMode3D && !itsLast3DRaster.empty())
   {
     frame = itsLast3DRaster;
@@ -5465,19 +5962,29 @@ void App::playExitEffect(int effectIndex, unsigned seed, const std::string& word
     const auto ts = terminalSize();
     subW = ts.cols * 2;
     subH = ts.rows * subRowsForStyle(itsCornerStyle);
-    if (subW < 2 || subH < 2) return;
+    if (subW < 2 || subH < 2)
+      return;
     float dMin = 0;
     float dMax = 0;
     frame = sampleSlice(subW, subH, dMin, dMax);
     overlayCities(frame, subW, subH);
     overlayCrossSection(frame, subW, subH);
     overlayMarker(frame, subW, subH);
+    buildUtopiaGeo(subW, subH, utopiaLines, swedenMask);
   }
 
-  if (subW < 2 || subH < 2 || frame.empty()) return;
+  if (subW < 2 || subH < 2 || frame.empty())
+    return;
   const std::string& words = wordsOverride.empty() ? itsOpts.exitMessage : wordsOverride;
-  const auto played =
-      Qdless::playExitEffect(itsRenderer, std::move(frame), subW, subH, effectIndex, seed, words);
+  const auto played = Qdless::playExitEffect(itsRenderer,
+                                             std::move(frame),
+                                             subW,
+                                             subH,
+                                             effectIndex,
+                                             seed,
+                                             words,
+                                             utopiaLines.empty() ? nullptr : &utopiaLines,
+                                             swedenMask.empty() ? nullptr : &swedenMask);
   itsLastExitIndex = played.index;
   itsLastExitSeed = played.seed;
 }
@@ -5493,7 +6000,8 @@ int App::runInteractive()
   // the file path runs in the ctor.
   if (itsSource == nullptr && itsPgDataset != nullptr)
   {
-    if (!openPgPicker(ui)) return 0;  // user cancelled the picker
+    if (!openPgPicker(ui))
+      return 0;  // user cancelled the picker
     initFromSource();
   }
   // Deferred PNG-tree pick: same shape as the PG path. --dir on a tree
@@ -5501,7 +6009,8 @@ int App::runInteractive()
   // initFromSource on the picked leaf.
   if (itsSource == nullptr && !itsOpts.browseRoot.empty())
   {
-    if (!openBrowsePicker(ui)) return 0;
+    if (!openBrowsePicker(ui))
+      return 0;
     initFromSource();
   }
 

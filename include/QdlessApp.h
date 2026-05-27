@@ -55,17 +55,17 @@ struct Options
   // layout is picked from parameterOverrides.size(). When set, must hold
   // at least as many panels as parameterOverrides.
   std::string layoutOverride;
-  std::string paletteOverride;    // empty -> resolve via config / built-in
-  int timeIndex = 0;              // 0-based; -1 means last
-  int levelIndex = 0;             // 0-based; -1 means last
+  std::string paletteOverride;  // empty -> resolve via config / built-in
+  int timeIndex = 0;            // 0-based; -1 means last
+  int levelIndex = 0;           // 0-based; -1 means last
   bool noCoastline = false;
   bool noBorders = false;
-  double minLakeAreaKm2 = 3000.0;     // keep Ladoga, Vänern, Saimaa-by-area
-  double minLakeRoundness = 0.15;     // drop fractal shores (Saimaa ~0.05)
-  double minIslandAreaKm2 = 10.0;     // drop sub-10 km² islets (Åland noise)
-  bool dumpAndExit = false;       // print one frame to stdout and exit (no curses)
-  bool start3D = false;           // start in 3D point-cloud mode (e.g. --dump --3d)
-  bool noExitEffect = false;      // skip the random quit animation
+  double minLakeAreaKm2 = 3000.0;  // keep Ladoga, Vänern, Saimaa-by-area
+  double minLakeRoundness = 0.15;  // drop fractal shores (Saimaa ~0.05)
+  double minIslandAreaKm2 = 10.0;  // drop sub-10 km² islets (Åland noise)
+  bool dumpAndExit = false;        // print one frame to stdout and exit (no curses)
+  bool start3D = false;            // start in 3D point-cloud mode (e.g. --dump --3d)
+  bool noExitEffect = false;       // skip the random quit animation
   // Text spelled out by the word-reveal exit effect. Empty (the default) means
   // the effect draws a random closing line from its built-in anthology;
   // --exit-message overrides it with your own text.
@@ -129,7 +129,7 @@ struct Viewport
   float vMax = 1;
 
   void reset();
-  void zoom(float factor);  // <1 zooms in, >1 zooms out
+  void zoom(float factor);                                  // <1 zooms in, >1 zooms out
   void zoomAt(float factor, float anchorU, float anchorV);  // anchor stays fixed
   void pan(float duFrac, float dvFrac);
   void clamp();
@@ -160,7 +160,8 @@ class App
   // nonzero reproduces a prior run. wordsOverride, when non-empty, is the text
   // fed to the word-reveal effect; empty falls back to itsOpts.exitMessage.
   // Records what was played in itsLastExit{Index,Seed} for the repeat key.
-  void playExitEffect(int effectIndex = -1, unsigned seed = 0,
+  void playExitEffect(int effectIndex = -1,
+                      unsigned seed = 0,
                       const std::string& wordsOverride = {});
   int itsExitEffectPreview = 0;  // next effect the cycle key (F9) shows
   int itsExitWordPreview = 0;    // current word-reveal line for F11 / F12
@@ -188,10 +189,12 @@ class App
   // by the startup path before the UI has been laid out.
   void loadCoastlines(int subPixelsW = 0, int subPixelsH = 0);
 
-  std::vector<Rgb> sampleSlice(int subWidth, int subHeight, float& dataMin,
-                               float& dataMax) const;
-  void overlayPolylines(std::vector<Rgb>& pixels, int subWidth, int subHeight,
-                        const std::vector<Polyline>& polylines, Rgb color) const;
+  std::vector<Rgb> sampleSlice(int subWidth, int subHeight, float& dataMin, float& dataMax) const;
+  void overlayPolylines(std::vector<Rgb>& pixels,
+                        int subWidth,
+                        int subHeight,
+                        const std::vector<Polyline>& polylines,
+                        Rgb color) const;
   // Colour to draw the borders overlay in. Mid grey for GSHHS political
   // borders; black for shapefile outlines so they're visible against
   // the flat fill (which is itself a mid grey).
@@ -293,25 +296,25 @@ class App
   // height parameter (GeomHeight / GeopHeight) alongside multiple
   // levels; falls back to 2D for everything else.
   bool itsMode3D = false;
-  double itsCamYaw = 0.0;          // radians; 0 = looking north from south
-  double itsCamPitch = 0.6;        // radians; 0 = horizontal, π/2 = top-down
-  double itsCamZoom = 1.0;         // 1.0 = data extent fits the viewport
-  float itsThreshold3D = -10.0F;   // drop bins below this threshold. Units
-                                    // depend on the source: dBZ for PVOL
-                                    // (default −10), percent for QueryData
-                                    // cloud-cover-like fields, etc. , / .
-                                    // raise the bar interactively. Reset to
-                                    // a source-appropriate default each time
-                                    // 3D mode is toggled on.
-  double itsVexagger3D = 8.0;      // vertical exaggeration. Radar volumes
-                                    // are ~30:1 wide:tall in real geometry;
-                                    // at true scale the storm flattens to a
-                                    // disc. Default 8× makes the storm body
-                                    // visibly tall without distorting echo
-                                    // *positions* (only their heights stretch).
-                                    // NWP hybrid-level volumes are ~100:1
-                                    // wide:tall; default lifts to ~50× when
-                                    // entering 3D on a QueryData source.
+  double itsCamYaw = 0.0;         // radians; 0 = looking north from south
+  double itsCamPitch = 0.6;       // radians; 0 = horizontal, π/2 = top-down
+  double itsCamZoom = 1.0;        // 1.0 = data extent fits the viewport
+  float itsThreshold3D = -10.0F;  // drop bins below this threshold. Units
+                                  // depend on the source: dBZ for PVOL
+                                  // (default −10), percent for QueryData
+                                  // cloud-cover-like fields, etc. , / .
+                                  // raise the bar interactively. Reset to
+                                  // a source-appropriate default each time
+                                  // 3D mode is toggled on.
+  double itsVexagger3D = 8.0;     // vertical exaggeration. Radar volumes
+                                  // are ~30:1 wide:tall in real geometry;
+                                  // at true scale the storm flattens to a
+                                  // disc. Default 8× makes the storm body
+                                  // visibly tall without distorting echo
+                                  // *positions* (only their heights stretch).
+                                  // NWP hybrid-level volumes are ~100:1
+                                  // wide:tall; default lifts to ~50× when
+                                  // entering 3D on a QueryData source.
   // Label of the threshold unit currently in effect. Drives the HUD
   // ("thresh=10dBZ" vs "thresh=10%") so the same key handlers serve
   // both backends without leaking source-specific text into draw3D*.
@@ -416,8 +419,11 @@ class App
   // Braille variant: emits positioned braille glyphs to `os` on top of the
   // already-rendered cells. Mirrors appendPolylineBraille; uses pixels[] only
   // to sample the per-cell background colour for each emitted glyph.
-  void appendGraticuleBraille(std::ostringstream& os, const std::vector<Rgb>& pixels,
-                              int subWidth, int originRow, int originCol) const;
+  void appendGraticuleBraille(std::ostringstream& os,
+                              const std::vector<Rgb>& pixels,
+                              int subWidth,
+                              int originRow,
+                              int originCol) const;
   // Walk meridians + parallels at the resolution `bW × bH`, returning the
   // list of valid segments (round-trip filtered, antimeridian-guarded). Each
   // entry is {x0, y0, x1, y1} in sub-cell coords. Shared between the Thick
@@ -425,6 +431,15 @@ class App
   std::vector<std::array<int, 4>> traceGraticuleSegments(int bW, int bH) const;
   void overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
   void overlayCities(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;
+  // Build the geographic extras the "Utopia" exit effect needs: `lines` is a
+  // coastlines+borders raster on black; `swedenMask` is a 0/1 mask of the
+  // pixels inside an approximate Sweden polygon. Both left empty when the
+  // source isn't geographic / no coastlines are loaded / the viewport is
+  // degenerate, in which case Utopia falls back to a plain fade.
+  void buildUtopiaGeo(int subWidth,
+                      int subHeight,
+                      std::vector<Rgb>& lines,
+                      std::vector<char>& swedenMask) const;
   // Draw the active cross-section great-circle line, its endpoints, and
   // the mouse-tracked hover dot into the data pixel buffer. No-op when
   // itsCrossActive is false.
@@ -437,9 +452,12 @@ class App
   // pixel buffer, at the cost of replacing the data quadrant-block in
   // those cells with a single bg sample.
   void appendPolylineBraille(std::ostringstream& os,
-                             const std::vector<Polyline>& polylines, Rgb color,
-                             const std::vector<Rgb>& pixels, int subWidth,
-                             int originRow, int originCol) const;
+                             const std::vector<Polyline>& polylines,
+                             Rgb color,
+                             const std::vector<Rgb>& pixels,
+                             int subWidth,
+                             int originRow,
+                             int originCol) const;
   std::string buildWindArrows(int cellW, int cellH, int originRow, int originCol);
   std::string buildCityLabels(int cellW, int cellH, int originRow, int originCol);
   // 3D volume renderer. Active only when itsMode3D and the source is a

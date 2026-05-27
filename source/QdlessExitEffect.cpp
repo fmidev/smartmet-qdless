@@ -2990,9 +2990,2010 @@ void effectPythonWars(const Renderer& renderer, const std::vector<Rgb>& src, int
             });
 }
 
+// Flatland (after Abbott): the view rotates back in 3D about its horizontal
+// centre axis until it is edge-on — a single flat line. Then small dots crawl
+// to and fro along that line while the word "FLATLAND" fades in above it.
+void effectFlatland(
+    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+{
+  const float ya = yAspectFor(renderer);
+  const float cx = (w - 1) * 0.5F;
+  const float cy = (h - 1) * 0.5F;
+  const float halfU = (w - 1) * 0.5F;
+  const float halfV = (h - 1) * 0.5F;
+  const float dCam = static_cast<float>(h);  // camera distance == focal: identity at theta 0
+
+  // Inhabitants of the line: small dots that crawl along it at varied speeds.
+  constexpr int kDots = 8;
+  struct Dot
+  {
+    float x0;
+    float dir;
+    float spd;  // widths traversed over the flat phase
+    Rgb col;
+  };
+  std::uniform_real_distribution<float> u01(0.0F, 1.0F);
+  std::uniform_real_distribution<float> uspd(0.5F, 1.6F);
+  std::array<Dot, kDots> dots{};
+  for (auto& d : dots)
+  {
+    d.x0 = u01(rng) * w;
+    d.dir = u01(rng) < 0.5F ? -1.0F : 1.0F;
+    d.spd = uspd(rng);
+    d.col = Rgb{static_cast<std::uint8_t>(205 + static_cast<int>(u01(rng) * 50)),
+                static_cast<std::uint8_t>(205 + static_cast<int>(u01(rng) * 50)),
+                static_cast<std::uint8_t>(205 + static_cast<int>(u01(rng) * 50)),
+                false};
+  }
+
+  int tw = 0;
+  int th = 0;
+  const std::vector<char> title = buildTextBitmap({"FLATLAND"}, tw, th);
+
+  constexpr float kTiltEnd = 0.40F;
+  const float thetaMax = 1.52F;  // ~87 deg: thin enough to read as a line
+
+  runFrames(renderer,
+            w,
+            h,
+            3600,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});  // the flatland void
+
+              if (t < kTiltEnd)
+              {
+                // Tilt the image back about the horizontal centre axis. Inverse map:
+                // for each screen row solve the plane coord pv, then sample per column.
+                const float theta = (t / kTiltEnd) * thetaMax;
+                const float c = std::cos(theta);
+                const float s = std::sin(theta);
+                for (int y = 0; y < h; ++y)
+                {
+                  const float yPhys = (y - cy) * ya;
+                  const float denom = c * dCam - yPhys * s;
+                  if (std::fabs(denom) < 1e-3F)
+                    continue;
+                  const float pvPhys = yPhys * dCam / denom;
+                  const float pvRow = pvPhys / ya;
+                  if (std::fabs(pvRow) > halfV)
+                    continue;  // off the tilted card -> void
+                  const float depth = dCam + pvPhys * s;
+                  if (depth <= 1e-3F)
+                    continue;
+                  const float sy = cy + pvRow;
+                  for (int x = 0; x < w; ++x)
+                  {
+                    const float pu = (x - cx) * depth / dCam;
+                    if (std::fabs(pu) > halfU)
+                      continue;
+                    const Rgb px = sample(src, w, h, cx + pu, sy);
+                    if (!px.transparent)
+                      dst[static_cast<std::size_t>(y) * w + x] = px;
+                  }
+                }
+                return;
+              }
+
+              // Flat: a line (the collapsed world), crawling dots, and the title.
+              const float q = (t - kTiltEnd) / (1.0F - kTiltEnd);
+              const int lineY = static_cast<int>(std::lround(cy));
+              // The line keeps the original centre row's colours, brightened so it
+              // always reads as a lit edge.
+              for (int dy = 0; dy <= 1; ++dy)
+              {
+                const int yy = lineY + dy;
+                if (yy < 0 || yy >= h)
+                  continue;
+                for (int x = 0; x < w; ++x)
+                {
+                  Rgb c = sample(src, w, h, static_cast<float>(x), cy);
+                  if (c.transparent)
+                    c = Rgb{120, 120, 130, false};
+                  dst[static_cast<std::size_t>(yy) * w + x] =
+                      Rgb{static_cast<std::uint8_t>(c.r + (255 - c.r) * 0.4F),
+                          static_cast<std::uint8_t>(c.g + (255 - c.g) * 0.4F),
+                          static_cast<std::uint8_t>(c.b + (255 - c.b) * 0.4F),
+                          false};
+                }
+              }
+              // Dots crawl along the line (wrapping at the edges).
+              for (const auto& d : dots)
+              {
+                float dx = d.x0 + d.dir * d.spd * q * w;
+                dx = std::fmod(dx, static_cast<float>(w));
+                if (dx < 0)
+                  dx += w;
+                const int ix = static_cast<int>(dx);
+                for (int dy = -1; dy <= 1; ++dy)
+                  for (int ddx = 0; ddx <= 1; ++ddx)
+                  {
+                    const int xx = (ix + ddx) % w;
+                    const int yy = lineY + dy;
+                    if (yy >= 0 && yy < h)
+                      dst[static_cast<std::size_t>(yy) * w + xx] = d.col;
+                  }
+              }
+              // "FLATLAND" fades in and settles above the line.
+              const float appear = std::clamp((q - 0.10F) / 0.30F, 0.0F, 1.0F);
+              if (appear > 0.0F && tw > 0)
+              {
+                const int scale = std::max(
+                    1, std::min(static_cast<int>(w * 0.8F / tw), static_cast<int>(h * 0.18F / th)));
+                const int ox = static_cast<int>(std::lround((w - tw * scale) * 0.5F));
+                const int oyBase = static_cast<int>(std::lround(cy - h * 0.18F - th * scale));
+                const int oy = oyBase + static_cast<int>(std::lround((1.0F - appear) * h * 0.06F));
+                const auto b = static_cast<std::uint8_t>(std::lround(255.0F * appear));
+                const Rgb tcol{b, b, b, false};
+                for (int by = 0; by < th; ++by)
+                  for (int bx = 0; bx < tw; ++bx)
+                  {
+                    if (title[static_cast<std::size_t>(by) * tw + bx] == 0)
+                      continue;
+                    for (int sy = 0; sy < scale; ++sy)
+                      for (int sx = 0; sx < scale; ++sx)
+                      {
+                        const int xx = ox + bx * scale + sx;
+                        const int yy = oy + by * scale + sy;
+                        if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                          dst[static_cast<std::size_t>(yy) * w + xx] = tcol;
+                      }
+                  }
+              }
+            });
+}
+
+// The classic TV test card: a burst of static "tunes in" to 75% SMPTE colour
+// bars (with a reverse-bar strip and a PLUGE row), wobbling on a vertical hold
+// that settles, under faint CRT scanlines.
+void effectTestCard(
+    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+{
+  static const std::array<Rgb, 7> kTop = {Rgb{191, 191, 191, false},
+                                          Rgb{191, 191, 0, false},
+                                          Rgb{0, 191, 191, false},
+                                          Rgb{0, 191, 0, false},
+                                          Rgb{191, 0, 191, false},
+                                          Rgb{191, 0, 0, false},
+                                          Rgb{0, 0, 191, false}};
+  static const std::array<Rgb, 7> kMid = {Rgb{0, 0, 191, false},
+                                          Rgb{19, 19, 19, false},
+                                          Rgb{191, 0, 191, false},
+                                          Rgb{19, 19, 19, false},
+                                          Rgb{0, 191, 191, false},
+                                          Rgb{19, 19, 19, false},
+                                          Rgb{191, 191, 191, false}};
+  const Rgb darkBlue{0, 33, 76, false};
+  const Rgb white{255, 255, 255, false};
+  const Rgb purple{50, 0, 106, false};
+  const Rgb black{19, 19, 19, false};
+  const Rgb superBlack{7, 7, 7, false};
+  const Rgb lightBlack{31, 31, 31, false};
+
+  const int topEnd = static_cast<int>(h * 0.66F);
+  const int midEnd = static_cast<int>(h * 0.74F);
+  std::uniform_int_distribution<int> noise(0, 255);
+
+  // Colour of test-card row `r` at column `x`.
+  auto cardPixel = [&](int r, int x) -> Rgb
+  {
+    const int bar = std::min(6, x * 7 / w);
+    if (r < topEnd)
+      return kTop[static_cast<std::size_t>(bar)];
+    if (r < midEnd)
+      return kMid[static_cast<std::size_t>(bar)];
+    const float fx = static_cast<float>(x) / w;  // bottom strip
+    if (fx < 1.0F / 6.0F)
+      return darkBlue;
+    if (fx < 2.0F / 6.0F)
+      return white;
+    if (fx < 3.0F / 6.0F)
+      return purple;
+    if (fx >= 0.72F && fx < 0.76F)
+      return superBlack;  // PLUGE
+    if (fx >= 0.76F && fx < 0.80F)
+      return black;
+    if (fx >= 0.80F && fx < 0.84F)
+      return lightBlack;
+    return black;
+  };
+
+  runFrames(renderer,
+            w,
+            h,
+            3200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              if (t < 0.16F)
+              {
+                // Static snow: an untuned signal.
+                for (int y = 0; y < h; ++y)
+                  for (int x = 0; x < w; ++x)
+                  {
+                    const auto v = static_cast<std::uint8_t>(noise(rng));
+                    dst[static_cast<std::size_t>(y) * w + x] = Rgb{v, v, v, false};
+                  }
+                return;
+              }
+              // The card locks in: a decaying vertical-hold wobble plus scanlines.
+              const float q = (t - 0.16F) / 0.84F;
+              const float inst = std::max(0.0F, 1.0F - q / 0.22F);  // instability -> 0
+              const int roll = static_cast<int>(inst * h * 0.5F * std::sin(q * 26.0F));
+              for (int y = 0; y < h; ++y)
+              {
+                const int r = ((y + roll) % h + h) % h;
+                const bool scan = (y & 1) == 0;  // faint dark scanline on alternate rows
+                for (int x = 0; x < w; ++x)
+                {
+                  Rgb c = cardPixel(r, x);
+                  if (scan)
+                    c = Rgb{static_cast<std::uint8_t>(c.r * 0.86F),
+                            static_cast<std::uint8_t>(c.g * 0.86F),
+                            static_cast<std::uint8_t>(c.b * 0.86F),
+                            false};
+                  dst[static_cast<std::size_t>(y) * w + x] = c;
+                }
+              }
+            });
+}
+
+// Draw one dove: a flapping chevron (two wing-lines sweeping up and out from a
+// body apex at px,py), rotated by `ang` so it leans into its flight direction.
+// `rise` is the current wing height (modulated by the caller for the flap);
+// span is the half-wingspan. Shape is built in physical coords (ya-corrected).
+void drawDove(std::vector<Rgb>& dst,
+              int w,
+              int h,
+              float px,
+              float py,
+              float span,
+              float rise,
+              float ang,
+              float ya,
+              const Rgb& col)
+{
+  const float ca = std::cos(ang);
+  const float sa = std::sin(ang);
+  for (int sgn = -1; sgn <= 1; sgn += 2)
+    for (float u = 0.0F; u <= 1.0F; u += 0.1F)
+    {
+      const float lx = static_cast<float>(sgn) * span * u;  // local: out along the wing
+      // Curved (gull) wing: arcs up to a peak then eases the tip over, instead
+      // of a flat straight line.
+      const float ly = -rise * std::sin(u * 2.2F);
+      const float rx = lx * ca - ly * sa;
+      const float ryp = lx * sa + ly * ca;
+      plotDot(dst, w, h, px + rx, py + ryp / ya, 1.1F, ya, col);
+    }
+}
+
+// A large flock of doves: from the (fading) view, white doves lift off in a
+// staggered wave and climb away, fanning out in different upward directions
+// while their wings beat, until the screen empties.
+void effectDoves(
+    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+{
+  const float ya = yAspectFor(renderer);
+  constexpr int kN = 40;
+  struct Bird
+  {
+    float sx;
+    float sy;
+    float ang;       // heading, radians from straight up (+ = toward +x)
+    float spd;       // screen-heights travelled over the run
+    float phase;     // wingbeat phase
+    float span;      // half-wingspan
+    float baseRise;  // nominal wing height
+    float launch;    // take-off time in [0,1]
+  };
+  std::uniform_real_distribution<float> ux(0.05F, 0.95F);
+  std::uniform_real_distribution<float> uy(0.35F, 0.95F);
+  std::uniform_real_distribution<float> uang(-1.15F, 1.15F);  // up to ~66 deg either side
+  std::uniform_real_distribution<float> uspd(1.0F, 2.0F);
+  std::uniform_real_distribution<float> uph(0.0F, 6.2832F);
+  std::uniform_real_distribution<float> usz(0.7F, 1.3F);
+  std::uniform_real_distribution<float> ulaunch(0.0F, 0.35F);
+  const float baseSpan = std::max(4.0F, w * 0.045F);
+  std::array<Bird, kN> birds{};
+  for (auto& b : birds)
+  {
+    b.sx = ux(rng) * w;
+    b.sy = uy(rng) * h;
+    b.ang = uang(rng);
+    b.spd = uspd(rng);
+    b.phase = uph(rng);
+    b.span = baseSpan * usz(rng);
+    b.baseRise = b.span * 1.0F;  // tall chevron so the wingbeat reads clearly
+    b.launch = ulaunch(rng);
+  }
+  const Rgb perched{200, 200, 210, false};
+  const Rgb flying{240, 240, 248, false};
+  runFrames(renderer,
+            w,
+            h,
+            3000,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              // The view fades to black as the flock lifts off.
+              const float fade = std::clamp(1.0F - t * 1.3F, 0.0F, 1.0F);
+              for (std::size_t i = 0; i < dst.size(); ++i)
+              {
+                const Rgb& s0 = src[i];
+                dst[i] = s0.transparent ? Rgb{0, 0, 0, false}
+                                        : Rgb{static_cast<std::uint8_t>(s0.r * fade),
+                                              static_cast<std::uint8_t>(s0.g * fade),
+                                              static_cast<std::uint8_t>(s0.b * fade),
+                                              false};
+              }
+              for (const auto& b : birds)
+              {
+                if (t < b.launch)
+                {
+                  // Perched, wings folded, waiting to startle.
+                  drawDove(dst, w, h, b.sx, b.sy, b.span, b.baseRise * 0.35F, b.ang, ya, perched);
+                  continue;
+                }
+                const float tt = t - b.launch;
+                const float dist = b.spd * tt * h;
+                const float px = b.sx + std::sin(b.ang) * dist;
+                const float py = b.sy - std::cos(b.ang) * dist;  // climbs
+                // A big wingbeat: the wings sweep from nearly folded flat all the
+                // way up, like the lone dove in "tears in rain".
+                const float beat = std::sin(tt * 38.0F + b.phase);
+                const float rise = b.baseRise * (0.55F + 0.55F * beat);
+                drawDove(dst, w, h, px, py, b.span, rise, b.ang, ya, flying);
+              }
+            });
+}
+
+// Aurora borealis: the view fades to a deep-blue night sky with twinkling
+// stars while shimmering green/violet curtains of light wave and ripple
+// overhead, swelling and then fading away.
+void effectAurora(
+    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  constexpr int kC = 4;
+  struct Curtain
+  {
+    float base;
+    float ampX;
+    float ky;
+    float spd;
+    float phase;
+    float width;
+    Rgb col;
+  };
+  static const std::array<Rgb, kC> kHue = {Rgb{60, 255, 140, false},
+                                           Rgb{110, 255, 90, false},
+                                           Rgb{40, 230, 200, false},
+                                           Rgb{150, 110, 255, false}};
+  std::uniform_real_distribution<float> ubase(0.2F, 0.8F);
+  std::uniform_real_distribution<float> uamp(0.05F, 0.13F);
+  std::uniform_real_distribution<float> uky(2.5F, 5.5F);
+  std::uniform_real_distribution<float> uspd(0.5F, 1.3F);
+  std::uniform_real_distribution<float> uph(0.0F, 6.2832F);
+  std::uniform_real_distribution<float> uwid(0.05F, 0.10F);
+  std::array<Curtain, kC> cs{};
+  for (int i = 0; i < kC; ++i)
+    cs[i] = {ubase(rng), uamp(rng), uky(rng), uspd(rng), uph(rng), uwid(rng), kHue[i]};
+
+  constexpr int kStars = 50;
+  std::array<float, kStars> stx{};
+  std::array<float, kStars> sty{};
+  std::array<float, kStars> stp{};
+  std::uniform_real_distribution<float> u01(0.0F, 1.0F);
+  for (int i = 0; i < kStars; ++i)
+  {
+    stx[i] = u01(rng) * w;
+    sty[i] = u01(rng) * h * 0.7F;
+    stp[i] = uph(rng);
+  }
+
+  runFrames(
+      renderer,
+      w,
+      h,
+      3800,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float vf = std::clamp(1.0F - t * 2.4F, 0.0F, 1.0F);  // view -> night
+        const float night = 1.0F - vf;
+        const float env = std::sin(std::clamp(t, 0.0F, 1.0F) * 3.14159F);  // aurora swells/fades
+        for (int y = 0; y < h; ++y)
+        {
+          const float fy = static_cast<float>(y) / h;
+          const float vp = std::clamp((fy - 0.03F) / 0.18F, 0.0F, 1.0F) *
+                           std::clamp((0.9F - fy) / 0.55F, 0.0F, 1.0F);  // rays hang from the top
+          std::array<float, kC> cxw{};
+          for (int c = 0; c < kC; ++c)
+            cxw[c] = (cs[c].base + cs[c].ampX * std::sin(fy * cs[c].ky + t * 6.2832F * cs[c].spd +
+                                                         cs[c].phase)) *
+                     w;
+          for (int x = 0; x < w; ++x)
+          {
+            const std::size_t idx = static_cast<std::size_t>(y) * w + x;
+            const Rgb& s0 = src[idx];
+            float r = s0.transparent ? 0.0F : s0.r * vf;
+            float g = s0.transparent ? 0.0F : s0.g * vf;
+            float b = s0.transparent ? 0.0F : s0.b * vf;
+            r += 3.0F * night;
+            g += 5.0F * night;
+            b += 14.0F * night;  // deep-blue night sky
+            for (int c = 0; c < kC; ++c)
+            {
+              const float d = (x - cxw[c]) / (cs[c].width * w);
+              const float band = std::exp(-d * d);
+              const float ray =
+                  0.55F + 0.45F * std::sin(x * 0.5F + fy * 9.0F + t * 4.0F + cs[c].phase);
+              const float inten = band * vp * ray * env * 1.1F;
+              r += cs[c].col.r * inten;
+              g += cs[c].col.g * inten;
+              b += cs[c].col.b * inten;
+            }
+            dst[idx] = Rgb{u8(r), u8(g), u8(b), false};
+          }
+        }
+        for (int i = 0; i < kStars; ++i)
+        {
+          const float bri = 220.0F * (0.5F + 0.5F * std::sin(t * 9.0F + stp[i])) * night;
+          if (bri < 8.0F)
+            continue;
+          const int sx = static_cast<int>(stx[i]);
+          const int sy = static_cast<int>(sty[i]);
+          if (sx < 0 || sx >= w || sy < 0 || sy >= h)
+            continue;
+          const std::size_t idx = static_cast<std::size_t>(sy) * w + sx;
+          const Rgb cur = dst[idx];
+          dst[idx] = Rgb{u8(cur.r + bri), u8(cur.g + bri), u8(cur.b + bri), false};
+        }
+      });
+}
+
+// Thunderstorm: the view darkens under storm light and diagonal rain while
+// forked lightning bolts crack across with a white flash, then it fades out.
+void effectThunderstorm(
+    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  const float ya = yAspectFor(renderer);
+  constexpr int kRain = 150;
+  struct Drop
+  {
+    float x;
+    float y0;
+    float spd;
+    float len;
+  };
+  std::uniform_real_distribution<float> u01(0.0F, 1.0F);
+  std::array<Drop, kRain> drops{};
+  for (auto& d : drops)
+  {
+    d.x = u01(rng) * w;
+    d.y0 = u01(rng) * h;
+    d.spd = 0.8F + u01(rng) * 0.9F;
+    d.len = 3.0F + u01(rng) * 4.0F;
+  }
+  struct Strike
+  {
+    float t0;
+    std::vector<std::pair<float, float>> seg;  // a polyline (main bolt or a fork)
+  };
+  std::vector<Strike> strikes;
+  auto buildBolt = [&](float t0)
+  {
+    float x = (0.2F + u01(rng) * 0.6F) * w;
+    float y = 0.0F;
+    const float endY = h * (0.6F + u01(rng) * 0.25F);
+    const int steps = 14;
+    std::vector<std::pair<float, float>> main;
+    for (int i = 0; i <= steps; ++i)
+    {
+      main.emplace_back(x, y);
+      y += endY / steps;
+      x = std::clamp(x + (u01(rng) - 0.5F) * w * 0.10F, 0.0F, static_cast<float>(w - 1));
+    }
+    strikes.push_back({t0, main});
+    if (u01(rng) < 0.8F)  // a branching fork
+    {
+      const int mi = steps / 3 + static_cast<int>(u01(rng) * steps / 3);
+      float fx = main[static_cast<std::size_t>(mi)].first;
+      float fy = main[static_cast<std::size_t>(mi)].second;
+      std::vector<std::pair<float, float>> fork;
+      const int fsteps = 6;
+      for (int i = 0; i <= fsteps; ++i)
+      {
+        fork.emplace_back(fx, fy);
+        fy += (h * 0.25F) / fsteps;
+        fx = std::clamp(fx + (u01(rng) - 0.3F) * w * 0.12F, 0.0F, static_cast<float>(w - 1));
+      }
+      strikes.push_back({t0, fork});
+    }
+  };
+  buildBolt(0.18F);
+  buildBolt(0.45F + u01(rng) * 0.10F);
+  buildBolt(0.76F);
+  const Rgb rainCol{120, 140, 180, false};
+
+  runFrames(renderer,
+            w,
+            h,
+            3200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float vf = std::clamp(1.0F - t * 1.7F, 0.0F, 1.0F);
+              for (std::size_t i = 0; i < dst.size(); ++i)
+              {
+                const Rgb& s0 = src[i];
+                float r = s0.transparent ? 0.0F : s0.r * vf * 0.7F;
+                float g = s0.transparent ? 0.0F : s0.g * vf * 0.7F;
+                float b = s0.transparent ? 0.0F : s0.b * vf * 0.7F;
+                r += 8.0F * (1.0F - vf);
+                g += 10.0F * (1.0F - vf);
+                b += 18.0F * (1.0F - vf);  // storm tint
+                dst[i] = Rgb{u8(r), u8(g), u8(b), false};
+              }
+              for (const auto& d : drops)  // diagonal rain
+              {
+                const float y = std::fmod(d.y0 + d.spd * t * h * 1.5F, static_cast<float>(h));
+                const int n = static_cast<int>(d.len);
+                for (int k = 0; k < n; ++k)
+                {
+                  const int xx = static_cast<int>(d.x - k * 0.3F);
+                  const int yy = static_cast<int>(y - k);
+                  if (xx < 0 || xx >= w || yy < 0 || yy >= h)
+                    continue;
+                  const std::size_t idx = static_cast<std::size_t>(yy) * w + xx;
+                  const Rgb cur = dst[idx];
+                  const float a = 0.5F * (1.0F - static_cast<float>(k) / n);
+                  dst[idx] = Rgb{u8(cur.r + rainCol.r * a),
+                                 u8(cur.g + rainCol.g * a),
+                                 u8(cur.b + rainCol.b * a),
+                                 false};
+                }
+              }
+              for (const auto& s : strikes)
+              {
+                const float age = t - s.t0;
+                if (age < 0.0F || age > 0.22F)
+                  continue;
+                const float k = 1.0F - age / 0.22F;
+                if (age < 0.06F)  // full-screen flash
+                {
+                  const float fk = (1.0F - age / 0.06F) * 0.7F;
+                  for (std::size_t i = 0; i < dst.size(); ++i)
+                  {
+                    const Rgb c = dst[i];
+                    dst[i] = Rgb{
+                        u8(c.r + 255.0F * fk), u8(c.g + 255.0F * fk), u8(c.b + 255.0F * fk), false};
+                  }
+                }
+                const Rgb bolt{u8(200.0F + 55.0F * k), u8(220.0F + 35.0F * k), 255, false};
+                for (std::size_t i = 0; i + 1 < s.seg.size(); ++i)
+                {
+                  const auto& p0 = s.seg[i];
+                  const auto& p1 = s.seg[i + 1];
+                  const int steps = static_cast<int>(
+                      std::max(2.0F, std::hypot(p1.first - p0.first, p1.second - p0.second)));
+                  for (int j = 0; j <= steps; ++j)
+                  {
+                    const float f = static_cast<float>(j) / steps;
+                    plotDot(dst,
+                            w,
+                            h,
+                            p0.first + (p1.first - p0.first) * f,
+                            p0.second + (p1.second - p0.second) * f,
+                            1.4F,
+                            ya,
+                            bolt);
+                  }
+                }
+              }
+            });
+}
+
+// Conway's Game of Life: the view's bright pixels seed a (toroidal) Life grid
+// that evolves generation by generation — each living cell painted in the
+// colour the image holds at that spot — then fades to an empty grid.
+void effectGameOfLife(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const int csz = 2;
+  const int gw = std::max(8, w / csz);
+  const int gh = std::max(8, h / csz);
+  std::vector<char> cur(static_cast<std::size_t>(gw) * gh, 0);
+  std::vector<char> nxt(cur.size(), 0);
+  std::vector<Rgb> col(cur.size());
+  auto luma = [](const Rgb& c) { return 0.30F * c.r + 0.59F * c.g + 0.11F * c.b; };
+  for (int gy = 0; gy < gh; ++gy)
+    for (int gx = 0; gx < gw; ++gx)
+    {
+      const Rgb c = sample(src, w, h, (gx + 0.5F) * w / gw, (gy + 0.5F) * h / gh);
+      const std::size_t i = static_cast<std::size_t>(gy) * gw + gx;
+      col[i] = c.transparent ? Rgb{120, 220, 140, false} : c;
+      cur[i] = (!c.transparent && luma(c) > 135.0F) ? 1 : 0;
+    }
+  auto step = [&]()
+  {
+    for (int gy = 0; gy < gh; ++gy)
+      for (int gx = 0; gx < gw; ++gx)
+      {
+        int n = 0;
+        for (int dy = -1; dy <= 1; ++dy)
+          for (int dx = -1; dx <= 1; ++dx)
+          {
+            if (dx == 0 && dy == 0)
+              continue;
+            n += cur[static_cast<std::size_t>((gy + dy + gh) % gh) * gw + (gx + dx + gw) % gw];
+          }
+        const std::size_t i = static_cast<std::size_t>(gy) * gw + gx;
+        const bool alive = cur[i] != 0 ? (n == 2 || n == 3) : (n == 3);
+        nxt[i] = alive ? 1 : 0;
+      }
+    cur.swap(nxt);
+  };
+  int lastGen = -1;
+  constexpr int kGens = 70;
+  runFrames(renderer,
+            w,
+            h,
+            3600,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const int target = static_cast<int>(t * kGens);
+              while (lastGen < target)
+              {
+                step();
+                ++lastGen;
+              }
+              const float fade = std::clamp(1.0F - (t - 0.85F) / 0.15F, 0.0F, 1.0F);
+              std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+              for (int gy = 0; gy < gh; ++gy)
+                for (int gx = 0; gx < gw; ++gx)
+                {
+                  const std::size_t i = static_cast<std::size_t>(gy) * gw + gx;
+                  if (cur[i] == 0)
+                    continue;
+                  const Rgb c = col[i];
+                  const Rgb lit{static_cast<std::uint8_t>(c.r * fade),
+                                static_cast<std::uint8_t>(c.g * fade),
+                                static_cast<std::uint8_t>(c.b * fade),
+                                false};
+                  for (int dy = 0; dy < csz; ++dy)
+                    for (int dx = 0; dx < csz; ++dx)
+                    {
+                      const int xx = gx * csz + dx;
+                      const int yy = gy * csz + dy;
+                      if (xx < w && yy < h)
+                        dst[static_cast<std::size_t>(yy) * w + xx] = lit;
+                    }
+                }
+            });
+}
+
+// Thanos snap: the view disintegrates into ash. A diagonal sweep (with random
+// per-pixel jitter) turns each pixel to a drifting, greying mote that blows up
+// and to the right and fades, until nothing is left.
+void effectThanos(
+    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  std::vector<float> td(static_cast<std::size_t>(w) * h);
+  std::vector<float> jt(td.size());
+  std::uniform_real_distribution<float> u01(0.0F, 1.0F);
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x)
+    {
+      const std::size_t i = static_cast<std::size_t>(y) * w + x;
+      const float sweep = (static_cast<float>(x) / w + static_cast<float>(y) / h) * 0.5F;
+      td[i] = sweep * 0.55F + u01(rng) * 0.18F;  // dissolve start
+      jt[i] = u01(rng);
+    }
+  constexpr float life = 0.30F;
+  runFrames(renderer,
+            w,
+            h,
+            3000,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const std::size_t i = static_cast<std::size_t>(y) * w + x;
+                  const Rgb& s0 = src[i];
+                  if (s0.transparent)
+                    continue;
+                  const float age = t - td[i];
+                  if (age < 0.0F)
+                  {
+                    dst[i] = s0;  // not yet dust
+                    continue;
+                  }
+                  if (age >= life)
+                    continue;  // gone
+                  const float k = age / life;
+                  const float drift = k * k;
+                  const float nx = x + 0.30F * w * drift + (jt[i] - 0.5F) * 0.12F * w * drift;
+                  const float ny = y - 0.16F * h * drift +
+                                   std::sin(jt[i] * 6.2832F + t * 5.0F) * 0.04F * h * drift;
+                  const int ix = static_cast<int>(std::lround(nx));
+                  const int iy = static_cast<int>(std::lround(ny));
+                  if (ix < 0 || ix >= w || iy < 0 || iy >= h)
+                    continue;
+                  const float fade = 1.0F - k;
+                  const Rgb c{u8((s0.r + (150 - s0.r) * k) * fade),
+                              u8((s0.g + (150 - s0.g) * k) * fade),
+                              u8((s0.b + (155 - s0.b) * k) * fade),
+                              false};
+                  dst[static_cast<std::size_t>(iy) * w + ix] = c;
+                }
+            });
+}
+
+// "Utopia": the weather data fades to reveal just the coastlines and borders,
+// and then Sweden quietly eats itself out — its outline dissolving from within
+// into a growing, ragged void — leaving empty space between Norway and Finland.
+// Falls back to a plain fade when the geography isn't available (no coastlines,
+// an image source, or Sweden simply isn't in view). `linesFrame` is a w*h
+// raster of the coastlines/borders on black; `swedenMask` marks the pixels
+// inside Sweden.
+void effectUtopia(const Renderer& renderer,
+                  const std::vector<Rgb>& src,
+                  int w,
+                  int h,
+                  std::mt19937& rng,
+                  const std::vector<Rgb>* linesFrame,
+                  const std::vector<char>* swedenMask)
+{
+  const std::size_t n = static_cast<std::size_t>(w) * h;
+  long cnt = 0;
+  double sumX = 0;
+  double sumY = 0;
+  const bool haveGeo = linesFrame != nullptr && swedenMask != nullptr && linesFrame->size() == n &&
+                       swedenMask->size() == n;
+  if (haveGeo)
+    for (int y = 0; y < h; ++y)
+      for (int x = 0; x < w; ++x)
+        if ((*swedenMask)[static_cast<std::size_t>(y) * w + x] != 0)
+        {
+          ++cnt;
+          sumX += x;
+          sumY += y;
+        }
+  if (cnt < 25)  // nothing recognisable to erase -> ordinary fade
+  {
+    effectFade(renderer, src, w, h);
+    return;
+  }
+  const float cxm = static_cast<float>(sumX / cnt);
+  const float cym = static_cast<float>(sumY / cnt);
+  float maxR = 1.0F;
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x)
+      if ((*swedenMask)[static_cast<std::size_t>(y) * w + x] != 0)
+      {
+        const float dx = x - cxm;
+        const float dy = y - cym;
+        maxR = std::max(maxR, std::sqrt(dx * dx + dy * dy));
+      }
+  std::uniform_real_distribution<float> u01(0.0F, 1.0F);
+  std::vector<float> jit(n);  // per-pixel jitter for a ragged "eaten" frontier
+  for (auto& j : jit)
+    j = u01(rng);
+
+  const std::vector<Rgb>& lines = *linesFrame;
+  const std::vector<char>& mask = *swedenMask;
+  const float frontier = maxR * 0.10F + 1.0F;
+  runFrames(renderer,
+            w,
+            h,
+            4000,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float reveal = std::clamp(t / 0.32F, 0.0F, 1.0F);       // data -> lines
+              const float q = std::clamp((t - 0.32F) / 0.58F, 0.0F, 1.0F);  // Sweden erosion
+              const float eraseR = q * (maxR + frontier);
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const std::size_t i = static_cast<std::size_t>(y) * w + x;
+                  const Rgb& d0 = src[i];
+                  const Rgb& l0 = lines[i];
+                  // The data dims out while the line map fades in (they barely
+                  // overlap, so a simple additive blend over black reads cleanly).
+                  float r = (d0.transparent ? 0.0F : d0.r * (1.0F - reveal)) + l0.r * reveal;
+                  float g = (d0.transparent ? 0.0F : d0.g * (1.0F - reveal)) + l0.g * reveal;
+                  float b = (d0.transparent ? 0.0F : d0.b * (1.0F - reveal)) + l0.b * reveal;
+                  if (q > 0.0F && mask[i] != 0)
+                  {
+                    const float dx = x - cxm;
+                    const float dy = y - cym;
+                    const float rad = std::sqrt(dx * dx + dy * dy);
+                    if (rad < eraseR + (jit[i] - 0.5F) * frontier)  // eaten away -> void
+                    {
+                      r = 0.0F;
+                      g = 0.0F;
+                      b = 0.0F;
+                    }
+                  }
+                  dst[i] = Rgb{static_cast<std::uint8_t>(std::clamp(r, 0.0F, 255.0F)),
+                               static_cast<std::uint8_t>(std::clamp(g, 0.0F, 255.0F)),
+                               static_cast<std::uint8_t>(std::clamp(b, 0.0F, 255.0F)),
+                               false};
+                }
+            });
+}
+
+// Bouncing soft ball: the view collapses into a sphere-shaded ball textured
+// with itself, then bounces around the terminal under gravity — losing energy
+// on each bounce, squashing and stretching on impact, drifting and rolling —
+// reasonably close to real ball physics.
+void effectBall(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float hx = h * ya;  // screen height in x-units
+  const float R = std::max(4.0F, 0.13F * std::min(static_cast<float>(w), hx));  // ball x-radius
+  const float Ry = R / ya;  // ball y-radius (rows), for round look
+
+  // Texture + sphere shading of the ball: an ellipse (rxE x ryE) at (cx,cy)
+  // sampled from the view, shaded as a lit sphere; `shade` ramps the 3D look
+  // in during the collapse (0 = flat image, 1 = full sphere).
+  auto drawBall = [&](std::vector<Rgb>& dst, float cx, float cy, float rxE, float ryE, float shade)
+  {
+    const int x0 = std::max(0, static_cast<int>(std::floor(cx - rxE)));
+    const int x1 = std::min(w - 1, static_cast<int>(std::ceil(cx + rxE)));
+    const int y0 = std::max(0, static_cast<int>(std::floor(cy - ryE)));
+    const int y1 = std::min(h - 1, static_cast<int>(std::ceil(cy + ryE)));
+    constexpr float lxd = -0.40F;
+    constexpr float lyd = -0.55F;
+    constexpr float lzd = 0.73F;  // light from upper-left, toward viewer
+    auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+    for (int y = y0; y <= y1; ++y)
+      for (int x = x0; x <= x1; ++x)
+      {
+        const float nx = (x - cx) / rxE;
+        const float ny = (y - cy) / ryE;
+        const float r2 = nx * nx + ny * ny;
+        if (r2 > 1.0F)
+          continue;
+        const float z = std::sqrt(1.0F - r2);
+        const Rgb tex =
+            sample(src, w, h, (nx * 0.5F + 0.5F) * (w - 1), (ny * 0.5F + 0.5F) * (h - 1));
+        const float tr = tex.transparent ? 70.0F : tex.r;
+        const float tg = tex.transparent ? 72.0F : tex.g;
+        const float tb = tex.transparent ? 82.0F : tex.b;
+        const float ndotl = std::max(0.0F, nx * lxd + ny * lyd + z * lzd);
+        const float lit = (1.0F - shade) + shade * (0.32F + 0.68F * ndotl);
+        const float spec = shade * std::pow(ndotl, 22.0F) * 200.0F;
+        dst[static_cast<std::size_t>(y) * w + x] =
+            Rgb{u8(tr * lit + spec), u8(tg * lit + spec), u8(tb * lit + spec), false};
+      }
+  };
+
+  // Physics state (sub-pixel units; +y is down).
+  const float ccx = w * 0.5F;
+  const float ccy = h * 0.32F;  // collapse / launch point, up in the frame
+  float bx = ccx;
+  float by = ccy;
+  float vx = 0.0F;
+  float vy = 0.0F;
+  float cV = 0.0F;  // vertical squash spring (floor impacts): +ve = flatter
+  float cVv = 0.0F;
+  float cH = 0.0F;  // horizontal squash spring (wall impacts)
+  float cHv = 0.0F;
+  bool launched = false;
+  const float dt = kFrameMs / 1000.0F;
+  const float grav = 1.9F * h;  // gravity, rows/s^2
+  const float eFloor = 0.78F;   // restitution
+  const float eWall = 0.82F;
+  const float springK = 240.0F;  // squash spring stiffness / damping
+  const float springD = 12.0F;
+  constexpr float kCollapse = 0.16F;
+
+  runFrames(renderer,
+            w,
+            h,
+            5600,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+              float cx = ccx;
+              float cy = ccy;
+              float rxE = R;
+              float ryE = Ry;
+              float shade = 1.0F;
+              if (t < kCollapse)
+              {
+                // Collapse: a big circle of the view shrinks to the ball, gaining its
+                // 3D shading. (No physics yet.)
+                const float p = t / kCollapse;
+                const float rx = (w * 0.5F) + (R - w * 0.5F) * p;
+                rxE = rx;
+                ryE = rx / ya;
+                shade = p;
+              }
+              else
+              {
+                if (!launched)
+                {
+                  launched = true;
+                  vx = 0.42F * w;  // drift right
+                  vy = 0.0F;       // released from rest -> falls
+                }
+                // Integrate.
+                vy += grav * dt;
+                vx *= 0.998F;  // gentle air drag
+                vy *= 0.999F;
+                bx += vx * dt;
+                by += vy * dt;
+                // Floor / ceiling.
+                if (by + Ry > h)
+                {
+                  by = h - Ry;
+                  cV = std::min(0.5F, std::fabs(vy) / (1.6F * h));  // squash on impact
+                  cVv = 0.0F;
+                  vy = -vy * eFloor;
+                  vx *= 0.96F;  // rolling friction at the floor
+                }
+                else if (by - Ry < 0)
+                {
+                  by = Ry;
+                  vy = -vy * eFloor;
+                }
+                // Side walls.
+                if (bx - R < 0)
+                {
+                  bx = R;
+                  cH = std::min(0.5F, std::fabs(vx) / (1.6F * w));
+                  cHv = 0.0F;
+                  vx = -vx * eWall;
+                }
+                else if (bx + R > w)
+                {
+                  bx = w - R;
+                  cH = std::min(0.5F, std::fabs(vx) / (1.6F * w));
+                  cHv = 0.0F;
+                  vx = -vx * eWall;
+                }
+                // Squash springs relax back to round (damped).
+                cVv += (-springK * cV - springD * cVv) * dt;
+                cV += cVv * dt;
+                cHv += (-springK * cH - springD * cHv) * dt;
+                cH += cHv * dt;
+                cx = bx;
+                cy = by;
+                // Soft deformation conserves bulk: flatter -> wider, and vice versa.
+                rxE = R * (1.0F + 0.6F * cV - 0.6F * cH);
+                ryE = Ry * (1.0F - 0.6F * cV + 0.6F * cH);
+              }
+              drawBall(dst, cx, cy, std::max(1.0F, rxE), std::max(1.0F, ryE), shade);
+            });
+}
+
+// Draw a sphere textured with the view: a globe-mapped, lit ball (longitude
+// `lon0` spins it). rx/ry are the screen radii; `shade` ramps the 3D shading in
+// (0 flat, 1 full sphere); (tr,tg,tb) tint the surface (1,1,1 = untinted).
+void drawSphere(std::vector<Rgb>& dst,
+                int w,
+                int h,
+                const std::vector<Rgb>& src,
+                float cx,
+                float cy,
+                float rx,
+                float ry,
+                float shade,
+                float lon0,
+                float tr,
+                float tg,
+                float tb)
+{
+  if (rx < 0.5F || ry < 0.5F)
+    return;
+  const int x0 = std::max(0, static_cast<int>(std::floor(cx - rx)));
+  const int x1 = std::min(w - 1, static_cast<int>(std::ceil(cx + rx)));
+  const int y0 = std::max(0, static_cast<int>(std::floor(cy - ry)));
+  const int y1 = std::min(h - 1, static_cast<int>(std::ceil(cy + ry)));
+  constexpr float kLx = -0.42F;
+  constexpr float kLy = -0.50F;
+  constexpr float kLz = 0.76F;
+  constexpr float kTwoPi = 6.2831853F;
+  constexpr float kPi = 3.14159265F;
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  for (int y = y0; y <= y1; ++y)
+    for (int x = x0; x <= x1; ++x)
+    {
+      const float nx = (x - cx) / rx;
+      const float ny = (y - cy) / ry;
+      const float r2 = nx * nx + ny * ny;
+      if (r2 > 1.0F)
+        continue;
+      const float z = std::sqrt(1.0F - r2);
+      float u = 0.5F + (std::atan2(nx, z) + lon0) / kTwoPi;
+      u -= std::floor(u);
+      const float v = 0.5F + std::asin(std::clamp(ny, -1.0F, 1.0F)) / kPi;
+      const Rgb tex = sample(src, w, h, u * (w - 1), v * (h - 1));
+      const float cr = tex.transparent ? 60.0F : tex.r;
+      const float cg = tex.transparent ? 62.0F : tex.g;
+      const float cb = tex.transparent ? 72.0F : tex.b;
+      const float ndotl = std::max(0.0F, nx * kLx + ny * kLy + z * kLz);
+      const float lit = (1.0F - shade) + shade * (0.30F + 0.70F * ndotl);
+      const float spec = shade * std::pow(ndotl, 22.0F) * 200.0F;
+      dst[static_cast<std::size_t>(y) * w + x] =
+          Rgb{u8(cr * lit * tr + spec), u8(cg * lit * tg + spec), u8(cb * lit * tb + spec), false};
+    }
+}
+
+// Solar system: the view collapses into a (warm, glowing) sun and then buds off
+// several different-sized planets that fly out and orbit it on a tilted
+// ecliptic — inner ones faster (Kepler-ish), passing in front of and behind the
+// sun, over faint orbit rings.
+void effectSolarSystem(
+    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+{
+  const float ya = yAspectFor(renderer);
+  const float cx = (w - 1) * 0.5F;
+  const float cy = (h - 1) * 0.5F;
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float rSun = 0.11F * mn;
+  const float tiltY = 0.34F;
+  constexpr int kN = 6;
+  struct Planet
+  {
+    float orbit;
+    float size;
+    float spd;
+    float phase;
+    float spin;
+  };
+  std::uniform_real_distribution<float> usz(0.22F, 0.5F);
+  std::uniform_real_distribution<float> uph(0.0F, 6.2832F);
+  std::uniform_real_distribution<float> uspin(0.5F, 2.5F);
+  std::array<Planet, kN> p{};
+  for (int i = 0; i < kN; ++i)
+  {
+    p[i].orbit = rSun * 2.0F + (mn * 0.5F - rSun * 2.0F) * ((i + 1.0F) / kN);
+    p[i].size = rSun * usz(rng);
+    p[i].spd = 1.0F / std::pow(p[i].orbit / rSun, 1.5F);  // Kepler: outer = slower
+    p[i].phase = uph(rng);
+    p[i].spin = uspin(rng);
+  }
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+
+  runFrames(
+      renderer,
+      w,
+      h,
+      7000,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+        const float collapse = std::clamp(t / 0.14F, 0.0F, 1.0F);
+        const float spawn = std::clamp((t - 0.14F) / 0.16F, 0.0F, 1.0F);
+        const float orbT = std::max(0.0F, t - 0.14F);
+        const float sunR = collapse < 1.0F ? (0.5F * w) + (rSun - 0.5F * w) * collapse : rSun;
+        auto angle = [&](int i) { return p[i].phase + p[i].spd * orbT * 8.0F; };
+
+        if (spawn > 0.05F)  // faint orbit rings
+        {
+          const Rgb orb{38, 40, 54, false};
+          for (int i = 0; i < kN; ++i)
+            for (float a = 0.0F; a < 6.2832F; a += 0.05F)
+            {
+              const int ox = static_cast<int>(cx + p[i].orbit * spawn * std::cos(a));
+              const int oy = static_cast<int>(cy + p[i].orbit * spawn * std::sin(a) * tiltY);
+              if (ox >= 0 && ox < w && oy >= 0 && oy < h)
+                dst[static_cast<std::size_t>(oy) * w + ox] = orb;
+            }
+        }
+        if (collapse > 0.5F)  // warm corona glow behind the sun
+        {
+          const float gR = sunR * 2.1F;
+          const int gy0 = std::max(0, static_cast<int>(cy - gR / ya));
+          const int gy1 = std::min(h - 1, static_cast<int>(cy + gR / ya));
+          const int gx0 = std::max(0, static_cast<int>(cx - gR));
+          const int gx1 = std::min(w - 1, static_cast<int>(cx + gR));
+          for (int y = gy0; y <= gy1; ++y)
+            for (int x = gx0; x <= gx1; ++x)
+            {
+              const float dx = x - cx;
+              const float dy = (y - cy) * ya;
+              const float d = std::sqrt(dx * dx + dy * dy);
+              if (d > gR)
+                continue;
+              const float k = (1.0F - d / gR) * (1.0F - d / gR) * 0.6F * collapse;
+              const std::size_t idx = static_cast<std::size_t>(y) * w + x;
+              const Rgb c = dst[idx];
+              dst[idx] =
+                  Rgb{u8(c.r + 255.0F * k), u8(c.g + 200.0F * k), u8(c.b + 90.0F * k), false};
+            }
+        }
+        auto drawPlanet = [&](int i)
+        {
+          const float th = angle(i);
+          const float orb = p[i].orbit * spawn;
+          const float px = cx + orb * std::cos(th);
+          const float py = cy + orb * std::sin(th) * tiltY;
+          const float sz = p[i].size * spawn;
+          drawSphere(dst, w, h, src, px, py, sz, sz / ya, 1.0F, t * p[i].spin, 1.0F, 1.0F, 1.0F);
+        };
+        if (spawn > 0.0F)
+          for (int i = 0; i < kN; ++i)
+            if (std::sin(angle(i)) < 0.0F)  // behind the sun
+              drawPlanet(i);
+        drawSphere(
+            dst, w, h, src, cx, cy, sunR, sunR / ya, 0.5F * collapse, t * 0.4F, 1.0F, 0.82F, 0.55F);
+        if (spawn > 0.0F)
+          for (int i = 0; i < kN; ++i)
+            if (std::sin(angle(i)) >= 0.0F)  // in front of the sun
+              drawPlanet(i);
+      });
+}
+
+// Saturn: the view collapses into a spinning tan globe wrapped by tilted,
+// slowly-rotating rings (with a Cassini gap) that pass in front of and behind
+// the planet.
+void effectSaturn(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float cx = (w - 1) * 0.5F;
+  const float cy = (h - 1) * 0.5F;
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float rp = 0.15F * mn;
+  const float rIn = 1.3F * rp;
+  const float rOut = 2.4F * rp;
+  const float gapC = 1.85F * rp;
+  const float gapW = 0.08F * rp;
+  const float tiltY = 0.42F;
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+
+  runFrames(
+      renderer,
+      w,
+      h,
+      6000,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+        const float reveal = std::clamp(t / 0.18F, 0.0F, 1.0F);
+        const float spin = t * 6.0F;
+        const float ringSpin = t * 2.5F;
+
+        auto drawRing = [&](bool front)
+        {
+          const int rx = static_cast<int>(rOut);
+          const int ry = static_cast<int>(rOut * tiltY / ya) + 1;
+          for (int y = std::max(0, static_cast<int>(cy) - ry);
+               y <= std::min(h - 1, static_cast<int>(cy) + ry);
+               ++y)
+            for (int x = std::max(0, static_cast<int>(cx) - rx);
+                 x <= std::min(w - 1, static_cast<int>(cx) + rx);
+                 ++x)
+            {
+              const float dyX = (y - cy) * ya;
+              if (front ? (dyX < 0.0F) : (dyX >= 0.0F))
+                continue;
+              const float dxX = x - cx;
+              const float planeZ = dyX / tiltY;
+              const float rho = std::sqrt(dxX * dxX + planeZ * planeZ);
+              if (rho < rIn || rho > rOut || std::fabs(rho - gapC) < gapW)
+                continue;
+              float az = (std::atan2(planeZ, dxX) + ringSpin) / 6.2831853F;
+              az -= std::floor(az);
+              const float rho01 = (rho - rIn) / (rOut - rIn);
+              const Rgb tex = sample(src, w, h, az * (w - 1), rho01 * (h - 1));
+              const float cr = tex.transparent ? 120.0F : tex.r;
+              const float cg = tex.transparent ? 120.0F : tex.g;
+              const float cb = tex.transparent ? 130.0F : tex.b;
+              const float band = (0.5F + 0.5F * std::sin(rho * 0.55F)) * reveal;
+              dst[static_cast<std::size_t>(y) * w + x] =
+                  Rgb{u8(cr * band * 0.95F), u8(cg * band * 0.86F), u8(cb * band * 0.62F), false};
+            }
+        };
+
+        if (reveal < 1.0F)  // collapse: the view shrinks into the planet
+        {
+          const float rdraw = (0.5F * w) + (rp - 0.5F * w) * reveal;
+          drawSphere(dst, w, h, src, cx, cy, rdraw, rdraw / ya, reveal, spin, 0.95F, 0.85F, 0.62F);
+          return;
+        }
+        drawRing(false);  // far half of the rings, behind the planet
+        drawSphere(dst, w, h, src, cx, cy, rp, rp / ya, 1.0F, spin, 0.95F, 0.85F, 0.62F);
+        drawRing(true);  // near half, in front
+      });
+}
+
+// Black hole: everything spirals into a central singularity. The view shrinks
+// inward and swirls (faster nearer the centre, like infalling matter), dimming
+// with gravitational redshift, behind a growing event horizon rimmed by a
+// blue-white accretion glow, until all is swallowed.
+void effectBlackHole(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float cx = (w - 1) * 0.5F;
+  const float cy = (h - 1) * 0.5F;
+  const float maxR = std::sqrt(cx * cx + (cy * ya) * (cy * ya));
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(
+      renderer,
+      w,
+      h,
+      4200,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float rh = t * t * maxR * 0.55F;                          // event horizon grows
+        const float shrink = 0.06F + 0.94F * std::pow(1.0F - t, 1.5F);  // 1 -> 0.06: view falls in
+        const float ringW = maxR * 0.035F + 1.0F;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const std::size_t i = static_cast<std::size_t>(y) * w + x;
+            const float dx = x - cx;
+            const float dy = (y - cy) * ya;
+            const float r = std::sqrt(dx * dx + dy * dy);
+            if (r < rh)
+            {
+              dst[i] = Rgb{0, 0, 0, false};  // past the event horizon
+              continue;
+            }
+            const float ang = std::atan2(dy, dx);
+            const float srcR = r / shrink;
+            const float swirl = t * 5.0F * (1.0F + 1.8F / (srcR / maxR + 0.12F));  // inner faster
+            const float a = ang - swirl;
+            const Rgb c = sample(src, w, h, cx + srcR * std::cos(a), cy + srcR * std::sin(a) / ya);
+            float cr = c.transparent ? 0.0F : c.r;
+            float cg = c.transparent ? 0.0F : c.g;
+            float cb = c.transparent ? 0.0F : c.b;
+            float dim = std::clamp((r - rh) / (0.3F * maxR), 0.0F, 1.0F);  // redshift near horizon
+            dim = 1.0F - (1.0F - dim) * t;
+            const float e = (r - rh * 1.12F) / ringW;
+            const float ring = std::exp(-e * e);  // accretion rim just outside the horizon
+            dst[i] = Rgb{u8(cr * dim + 180.0F * ring),
+                         u8(cg * dim + 200.0F * ring),
+                         u8(cb * dim + 255.0F * ring),
+                         false};
+          }
+      });
+}
+
+// Interstellar's Gargantua: a static, gravitationally-lensed black hole formed
+// from the view. The background (the view) bends around the shadow; a thin
+// photon ring outlines it; and a tilted, rotating accretion disk — Doppler-
+// brightened on its approaching side — wraps the shadow, its near half crossing
+// in front while a warm halo arcs over the top and under the bottom.
+void effectInterstellar(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float cx = (w - 1) * 0.5F;
+  const float cy = (h - 1) * 0.5F;
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float rs = 0.15F * mn;   // shadow radius
+  const float diskTilt = 0.20F;  // near edge-on
+  const float rDin = 1.35F * rs;
+  const float rDout = 2.9F * rs;
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(
+      renderer,
+      w,
+      h,
+      5200,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float appear = std::clamp(t / 0.22F, 0.0F, 1.0F);  // the hole forms from the view
+        const float spin = t * 1.4F;
+        const float rsN = rs * appear;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const std::size_t i = static_cast<std::size_t>(y) * w + x;
+            const float dx = x - cx;
+            const float dy = (y - cy) * ya;
+            const float r = std::sqrt(dx * dx + dy * dy);
+            const float ang = std::atan2(dy, dx);
+            // Lensed background: deflect inward near the hole, then dim to space.
+            const float defl = appear * 0.85F * rs * rs / std::max(r, 0.4F * rs);
+            const float sr = r + defl;
+            const Rgb bg = sample(src, w, h, cx + sr * std::cos(ang), cy + sr * std::sin(ang) / ya);
+            const float sky = 1.0F - 0.7F * appear;
+            float gr = (bg.transparent ? 0.0F : bg.r) * sky;
+            float gg = (bg.transparent ? 0.0F : bg.g) * sky;
+            float gb = (bg.transparent ? 0.0F : bg.b) * sky;
+            const bool inShadow = r < rsN;
+            // Tilted edge-on accretion disk.
+            float diskAmt = 0.0F;
+            float dopp = 1.0F;
+            const float planeZ = dy / diskTilt;
+            const float rhoD = std::sqrt(dx * dx + planeZ * planeZ);
+            if (rhoD > rDin && rhoD < rDout)
+            {
+              const float edge = std::min(1.0F, std::min(rhoD - rDin, rDout - rhoD) / (0.5F * rs));
+              const float az = std::atan2(planeZ, dx) + spin;
+              diskAmt = edge * (0.55F + 0.45F * std::sin(rhoD * 0.7F));
+              dopp = 0.55F + 0.65F * std::cos(az);  // approaching side brighter
+            }
+            const bool frontDisk = diskAmt > 0.05F && dy > 0.0F;
+            // Warm lensed halo hugging the shadow.
+            const float he = (r - 1.5F * rs) / (0.5F * rs);
+            const float halo = std::exp(-he * he);
+            constexpr float wr = 255.0F;
+            constexpr float wg = 176.0F;
+            constexpr float wb = 92.0F;
+            if (inShadow && !frontDisk)
+            {
+              gr = gg = gb = 0.0F;  // the shadow
+            }
+            if (!inShadow)
+            {
+              const float hh = halo * appear * 0.9F;
+              gr += wr * hh;
+              gg += wg * hh;
+              gb += wb * hh;
+            }
+            if (frontDisk || (diskAmt > 0.05F && !inShadow))
+            {
+              const float dd = diskAmt * appear * dopp * 1.1F;
+              gr += wr * dd;
+              gg += wg * dd * 0.95F;
+              gb += wb * dd * 0.85F;
+            }
+            const float pe = (r - rsN * 1.04F) / (0.07F * rs + 1.0F);
+            const float pr = std::exp(-pe * pe) * appear;  // photon ring
+            gr += 255.0F * pr;
+            gg += 235.0F * pr;
+            gb += 210.0F * pr;
+            dst[i] = Rgb{u8(gr), u8(gg), u8(gb), false};
+          }
+      });
+}
+
+// Outline of a stingray seen from above (bx lateral, by longitudinal; by=+1
+// nose, wings reach bx=±1, trailing edge sweeps back to the tail base near
+// by=-0.6). The whip tail is added separately.
+const std::array<std::pair<float, float>, 13> kRay = {{{0.00F, 1.00F},
+                                                       {0.35F, 0.72F},
+                                                       {0.72F, 0.42F},
+                                                       {1.00F, 0.04F},
+                                                       {0.74F, -0.34F},
+                                                       {0.34F, -0.54F},
+                                                       {0.12F, -0.60F},
+                                                       {-0.12F, -0.60F},
+                                                       {-0.34F, -0.54F},
+                                                       {-0.74F, -0.34F},
+                                                       {-1.00F, 0.04F},
+                                                       {-0.72F, 0.42F},
+                                                       {-0.35F, 0.72F}}};
+
+// Stingray: the view collapses into a ray textured with itself, which then
+// swims away along a curving path — its heading turning, its body shrinking and
+// foreshortening into the distance, wings undulating and tail swaying.
+void effectStingray(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float cx0 = (w - 1) * 0.5F;
+  const float cy0 = (h - 1) * 0.5F;
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+
+  auto inRay = [&](float bx, float by)
+  {
+    bool inside = false;
+    for (std::size_t i = 0, j = kRay.size() - 1; i < kRay.size(); j = i++)
+    {
+      const float xi = kRay[i].first;
+      const float yi = kRay[i].second;
+      const float xj = kRay[j].first;
+      const float yj = kRay[j].second;
+      if (((yi > by) != (yj > by)) && (bx < (xj - xi) * (by - yi) / (yj - yi + 1e-9F) + xi))
+        inside = !inside;
+    }
+    return inside;
+  };
+
+  auto drawRay = [&](std::vector<Rgb>& dst,
+                     float cx,
+                     float cy,
+                     float scaleX,
+                     float scaleY,
+                     float rot,
+                     float flapPhase,
+                     float tailPhase,
+                     float dim)
+  {
+    const float cr = std::cos(rot);
+    const float sr = std::sin(rot);
+    const float ext = std::max(scaleX * 1.05F, scaleY * 1.85F);  // wings vs tail reach
+    const int x0 = std::max(0, static_cast<int>(cx - ext));
+    const int x1 = std::min(w - 1, static_cast<int>(cx + ext));
+    const int y0 = std::max(0, static_cast<int>(cy - ext / ya));
+    const int y1 = std::min(h - 1, static_cast<int>(cy + ext / ya));
+    for (int y = y0; y <= y1; ++y)
+      for (int x = x0; x <= x1; ++x)
+      {
+        const float dx = x - cx;
+        const float dyp = (y - cy) * ya;
+        const float bx = (dx * cr + dyp * sr) / scaleX;                           // lateral
+        const float by = (dx * sr - dyp * cr) / scaleY;                           // longitudinal
+        const bool body = inRay(bx, by - 0.12F * bx * bx * std::sin(flapPhase));  // flap bend
+        bool tail = false;
+        if (!body && by < -0.55F && by > -1.8F)
+        {
+          const float c0 = 0.42F * std::sin(by * 2.4F + tailPhase);  // sway
+          const float wtail = 0.012F + 0.05F * std::clamp((by + 1.8F) / 1.25F, 0.0F, 1.0F);
+          tail = std::fabs(bx - c0) < wtail;
+        }
+        if (!body && !tail)
+          continue;
+        const float tu = std::clamp((bx + 1.0F) * 0.5F, 0.0F, 1.0F);
+        const float tv = std::clamp((1.0F - by) * 0.5F, 0.0F, 1.0F);
+        const Rgb tex = sample(src, w, h, tu * (w - 1), tv * (h - 1));
+        const float tr = tex.transparent ? 70.0F : tex.r;
+        const float tg = tex.transparent ? 80.0F : tex.g;
+        const float tb = tex.transparent ? 95.0F : tex.b;
+        const float edge = 1.0F - 0.35F * std::clamp(std::fabs(bx) - 0.25F, 0.0F, 1.0F);
+        const float flap = 1.0F + 0.30F * std::sin(std::fabs(bx) * 5.0F - flapPhase);
+        const float sh = (tail ? 0.45F : edge * flap) * dim;
+        dst[static_cast<std::size_t>(y) * w + x] =
+            Rgb{u8(tr * sh), u8(tg * sh), u8(tb * sh), false};
+      }
+  };
+
+  const float sBig = w / 2.3F;     // collapse: wings fill the screen
+  const float sSwim = 0.18F * mn;  // size as it sets off
+  constexpr float kCollapse = 0.16F;
+  // Curved swim path: up first, then bending to the right (so the ray turns).
+  const float p0x = cx0;
+  const float p0y = cy0;
+  const float p1x = w * 0.5F;
+  const float p1y = h * 0.30F;
+  const float p2x = w * 0.76F;
+  const float p2y = h * 0.18F;
+
+  runFrames(
+      renderer,
+      w,
+      h,
+      5200,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+        const float flapPhase = t * 26.0F;
+        const float tailPhase = t * 14.0F;
+        if (t < kCollapse)  // the view gathers into the ray
+        {
+          const float p = t / kCollapse;
+          const float s = sBig + (sSwim - sBig) * p;
+          drawRay(dst, cx0, cy0, s * 1.15F, s, 0.0F, flapPhase, tailPhase, 1.0F);
+          return;
+        }
+        const float tau = (t - kCollapse) / (1.0F - kCollapse);
+        const float om = 1.0F - tau;
+        const float px = om * om * p0x + 2.0F * om * tau * p1x + tau * tau * p2x;
+        const float py = om * om * p0y + 2.0F * om * tau * p1y + tau * tau * p2y;
+        const float vx = 2.0F * om * (p1x - p0x) + 2.0F * tau * (p2x - p1x);
+        const float vy = (2.0F * om * (p1y - p0y) + 2.0F * tau * (p2y - p1y)) * ya;
+        const float rot = std::atan2(vx, -vy);         // nose follows the path
+        const float s = sSwim * (1.0F - 0.85F * tau);  // recede
+        const float foreLong = 1.0F - 0.5F * tau;      // foreshorten away
+        drawRay(
+            dst, px, py, s * 1.15F, s * foreLong, rot, flapPhase, tailPhase, 1.0F - 0.65F * tau);
+      });
+}
+
+// Point-in-triangle test (used for the butterfly's pointed wing spikes).
+bool inTri(float px, float py, float ax, float ay, float bx, float by, float cx, float cy)
+{
+  auto cross = [](float px, float py, float ax, float ay, float bx, float by)
+  { return (px - bx) * (ay - by) - (ax - bx) * (py - by); };
+  const float d1 = cross(px, py, ax, ay, bx, by);
+  const float d2 = cross(px, py, bx, by, cx, cy);
+  const float d3 = cross(px, py, cx, cy, ax, ay);
+  const bool neg = d1 < 0 || d2 < 0 || d3 < 0;
+  const bool pos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(neg && pos);
+}
+
+// Draw a thick segment (a limb / tentacle / tail) as a row of aspect-correct
+// dots from (ax,ay) to (bxe,bye).
+void drawSeg(std::vector<Rgb>& dst,
+             int w,
+             int h,
+             float ax,
+             float ay,
+             float bxe,
+             float bye,
+             float rad,
+             float ya,
+             const Rgb& c)
+{
+  const float dx = bxe - ax;
+  const float dy = bye - ay;
+  const int n = std::max(1, static_cast<int>(std::hypot(dx, dy * ya) / std::max(0.6F, rad * 0.7F)));
+  for (int i = 0; i <= n; ++i)
+  {
+    const float f = static_cast<float>(i) / n;
+    plotDot(dst, w, h, ax + dx * f, ay + dy * f, rad, ya, c);
+  }
+}
+
+// Jellyfish: the view collapses into a translucent bell that rhythmically
+// pulses (contract = taller+narrower, with a little jet upward) as it drifts up
+// and out of frame, trailing long wavy tentacles.
+void effectJellyfish(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float cx0 = (w - 1) * 0.5F;
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float s0 = 0.16F * mn;
+  const float sBig = w / 2.4F;
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer,
+            w,
+            h,
+            5200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+              const float collapse = std::clamp(t / 0.15F, 0.0F, 1.0F);
+              const float pulse = 0.5F + 0.5F * std::sin(t * 7.0F);
+              float bellW = 0;
+              float bellH = 0;
+              float cx = cx0;
+              float cy = (h - 1) * 0.5F;
+              float dim = 1.0F;
+              if (collapse < 1.0F)
+              {
+                const float s = sBig + (s0 - sBig) * collapse;
+                bellW = s;
+                bellH = s * 0.85F;
+              }
+              else
+              {
+                const float tau = (t - 0.15F) / 0.85F;
+                bellW = s0 * (1.0F - 0.22F * pulse);
+                bellH = s0 * (0.78F + 0.34F * pulse);
+                cx = cx0 + 0.05F * w * std::sin(t * 1.3F);
+                cy = (h - 1) * 0.55F - tau * (h * 0.95F);  // drift up and out
+                dim = 1.0F - 0.45F * tau;
+              }
+              const Rgb ctr = sample(src, w, h, cx0, (h - 1) * 0.5F);
+              const Rgb tcol{u8((ctr.transparent ? 80 : ctr.r) * 0.5F),
+                             u8((ctr.transparent ? 90 : ctr.g) * 0.5F),
+                             u8((ctr.transparent ? 120 : ctr.b) * 0.6F),
+                             false};
+              const int nT = 7;
+              for (int i = 0; i < nT; ++i)
+              {
+                const float base = (static_cast<float>(i) / (nT - 1) * 2.0F - 1.0F) * bellW * 0.7F;
+                const float ph = i * 0.9F;
+                const float maxd = bellH * 2.6F;
+                for (float dd = 0.0F; dd < maxd; dd += 2.0F)
+                {
+                  const float fade = (1.0F - dd / maxd) * dim;
+                  const float xx = cx + base + bellW * 0.16F * std::sin(dd * 0.05F + ph + t * 5.0F);
+                  const Rgb cc{u8(tcol.r * fade), u8(tcol.g * fade), u8(tcol.b * fade), false};
+                  plotDot(dst, w, h, xx, cy + dd / ya, std::max(1.0F, bellW * 0.035F), ya, cc);
+                }
+              }
+              const int x0 = std::max(0, static_cast<int>(cx - bellW));
+              const int x1 = std::min(w - 1, static_cast<int>(cx + bellW));
+              const int y0 = std::max(0, static_cast<int>(cy - bellH / ya));
+              const int y1 = std::min(h - 1, static_cast<int>(cy + bellH * 0.3F / ya));
+              for (int y = y0; y <= y1; ++y)
+                for (int x = x0; x <= x1; ++x)
+                {
+                  const float bx = (x - cx) / bellW;
+                  const float by = -(y - cy) * ya / bellH;
+                  if (by < -0.05F || bx * bx + by * by > 1.0F)
+                    continue;
+                  const Rgb tex =
+                      sample(src, w, h, (bx + 1) * 0.5F * (w - 1), (1.0F - by) * 0.5F * (h - 1));
+                  const float r = tex.transparent ? 90.0F : tex.r;
+                  const float g = tex.transparent ? 120.0F : tex.g;
+                  const float b = tex.transparent ? 170.0F : tex.b;
+                  const float sh = (0.55F + 0.45F * by) * dim;  // brighter toward the dome's top
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(r * sh), u8(g * sh), u8(b * sh), false};
+                }
+            });
+}
+
+// Butterfly: the view collapses into a butterfly whose wings open and close
+// (flapping = foreshortening their span) as it flutters along a looping path,
+// banking with each turn, and off the screen.
+void effectButterfly(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float s0 = 0.17F * mn;
+  const float sBig = w / 2.6F;
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer,
+            w,
+            h,
+            5000,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+              const float collapse = std::clamp(t / 0.14F, 0.0F, 1.0F);
+              const float open = 0.12F + 0.88F * (0.5F + 0.5F * std::sin(t * 42.0F));  // fast flap
+              float s = s0;
+              float cx = (w - 1) * 0.5F;
+              float cy = (h - 1) * 0.5F;
+              float rot = 0.0F;
+              if (collapse < 1.0F)
+              {
+                s = sBig + (s0 - sBig) * collapse;
+              }
+              else
+              {
+                const float tau = (t - 0.14F) / 0.86F;
+                s = s0 * (1.0F - 0.2F * tau);
+                cx = (w - 1) * 0.5F + std::sin(t * 2.3F) * w * 0.24F + tau * w * 0.12F;
+                cy = (h - 1) * 0.55F - tau * h * 0.5F + std::sin(t * 3.1F) * h * 0.10F;
+                rot = std::sin(t * 2.3F) * 0.4F;  // bank into the turns
+              }
+              const float cr = std::cos(rot);
+              const float sr = std::sin(rot);
+              const float ext = s * 1.25F;
+              const int x0 = std::max(0, static_cast<int>(cx - ext));
+              const int x1 = std::min(w - 1, static_cast<int>(cx + ext));
+              const int y0 = std::max(0, static_cast<int>(cy - ext / ya));
+              const int y1 = std::min(h - 1, static_cast<int>(cy + ext / ya));
+              for (int y = y0; y <= y1; ++y)
+                for (int x = x0; x <= x1; ++x)
+                {
+                  const float dx = x - cx;
+                  const float dyp = (y - cy) * ya;
+                  const float lx = (dx * cr + dyp * sr) / s;  // lateral
+                  const float ly = (dx * sr - dyp * cr) / s;  // up = +ly
+                  const float bxw = std::fabs(lx) / open;     // wings flap shut
+                  bool draw = false;
+                  if (std::fabs(lx) < 0.05F && ly > -0.55F && ly < 0.66F)
+                    draw = true;  // slim body
+                  else
+                  {
+                    // Wing lobes sit well outboard of the body (clear thin-body
+                    // gap), with pointed spikes at the fore- and hind-wing tips.
+                    const float fe = (bxw - 0.66F) / 0.44F;
+                    const float ff = (ly - 0.30F) / 0.50F;
+                    const float he = (bxw - 0.60F) / 0.40F;
+                    const float hf = (ly + 0.32F) / 0.38F;
+                    if (fe * fe + ff * ff <= 1.0F || he * he + hf * hf <= 1.0F ||
+                        inTri(bxw, ly, 0.88F, 0.52F, 0.98F, 0.26F, 1.32F, 0.66F) ||
+                        inTri(bxw, ly, 0.72F, -0.50F, 0.94F, -0.60F, 1.20F, -1.00F))
+                      draw = true;  // fore / hind wing + tip spikes
+                  }
+                  if (!draw)
+                    continue;
+                  const Rgb tex =
+                      sample(src, w, h, (lx * 0.5F + 0.5F) * (w - 1), (0.5F - ly * 0.5F) * (h - 1));
+                  const float r = tex.transparent ? 200.0F : tex.r;
+                  const float g = tex.transparent ? 120.0F : tex.g;
+                  const float b = tex.transparent ? 60.0F : tex.b;
+                  const float sh = 0.55F + 0.45F * std::clamp(1.0F - std::fabs(lx), 0.0F, 1.0F);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(r * sh), u8(g * sh), u8(b * sh), false};
+                }
+            });
+}
+
+// Fish: the view collapses into a side-profile fish that swims off along a
+// curving path (turning as it goes), its body undulating and tail sweeping,
+// shrinking into the distance.
+void effectFish(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float s0 = 0.18F * mn;
+  const float sBig = w / 2.3F;
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  const float p0x = (w - 1) * 0.55F;
+  const float p0y = (h - 1) * 0.5F;
+  const float p1x = w * 0.36F;
+  const float p1y = h * 0.46F;
+  const float p2x = w * 0.12F;
+  const float p2y = h * 0.28F;
+  const float head0 = std::atan2(p1x - p0x, -(p1y - p0y) * ya);  // initial heading
+
+  auto drawFish = [&](std::vector<Rgb>& dst,
+                      float cx,
+                      float cy,
+                      float scaleLong,
+                      float scaleH,
+                      float rot,
+                      float wag,
+                      float dim)
+  {
+    const float cr = std::cos(rot);
+    const float sr = std::sin(rot);
+    const float ext = std::max(scaleLong * 1.15F, scaleH * 1.2F);
+    const int x0 = std::max(0, static_cast<int>(cx - ext));
+    const int x1 = std::min(w - 1, static_cast<int>(cx + ext));
+    const int y0 = std::max(0, static_cast<int>(cy - ext / ya));
+    const int y1 = std::min(h - 1, static_cast<int>(cy + ext / ya));
+    for (int y = y0; y <= y1; ++y)
+      for (int x = x0; x <= x1; ++x)
+      {
+        const float dx = x - cx;
+        const float dyp = (y - cy) * ya;
+        const float by = (dx * sr - dyp * cr) / scaleLong;  // along body, +nose
+        const float bv = (dx * cr + dyp * sr) / scaleH;     // vertical
+        const float vc =
+            0.5F * std::sin(by * 3.2F - wag) * std::clamp(0.5F - by * 0.5F, 0.0F, 1.0F);
+        bool body = false;
+        bool tail = false;
+        if (by <= 1.0F && by >= -0.58F)
+        {
+          const float e = (by - 0.15F) / 0.85F;
+          const float vv = 1.0F - e * e;
+          const float hh = vv > 0 ? 0.95F * std::sqrt(vv) : 0.0F;
+          body = std::fabs(bv - vc) <= hh;
+        }
+        else if (by < -0.58F && by > -1.08F)
+        {
+          tail = std::fabs(bv - vc) <= 0.95F * ((-0.58F - by) / 0.5F);
+        }
+        if (!body && !tail)
+          continue;
+        const bool eye = body && by > 0.6F && by < 0.78F && std::fabs(bv - vc + 0.2F) < 0.13F;
+        const Rgb tex =
+            sample(src, w, h, (by * 0.5F + 0.5F) * (w - 1), (bv * 0.5F + 0.5F) * (h - 1));
+        float r = tex.transparent ? 150.0F : tex.r;
+        float g = tex.transparent ? 170.0F : tex.g;
+        float b = tex.transparent ? 200.0F : tex.b;
+        float sh = (tail ? 0.6F : 1.0F) * dim;
+        if (eye)
+        {
+          r = g = b = 18.0F;
+          sh = 1.0F;
+        }
+        dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(r * sh), u8(g * sh), u8(b * sh), false};
+      }
+  };
+
+  runFrames(renderer,
+            w,
+            h,
+            5000,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+              const float wag = t * 22.0F;
+              if (t < 0.15F)
+              {
+                const float s = sBig + (s0 - sBig) * (t / 0.15F);
+                drawFish(dst, (w - 1) * 0.5F, (h - 1) * 0.5F, s, s * 0.45F, head0, wag, 1.0F);
+                return;
+              }
+              const float tau = (t - 0.15F) / 0.85F;
+              const float om = 1.0F - tau;
+              const float px = om * om * p0x + 2.0F * om * tau * p1x + tau * tau * p2x;
+              const float py = om * om * p0y + 2.0F * om * tau * p1y + tau * tau * p2y;
+              const float vx = 2.0F * om * (p1x - p0x) + 2.0F * tau * (p2x - p1x);
+              const float vy = (2.0F * om * (p1y - p0y) + 2.0F * tau * (p2y - p1y)) * ya;
+              const float rot = std::atan2(vx, -vy);
+              const float s = s0 * (1.0F - 0.8F * tau);
+              drawFish(dst, px, py, s, s * 0.45F, rot, wag, 1.0F - 0.6F * tau);
+            });
+}
+
+// Crab: the view collapses into a crab — a wide textured shell on eight jointed
+// legs (a walking gait), eyestalks, and two raised, waving claws — that
+// scuttles sideways across and off the screen.
+void effectCrab(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float s0 = 0.15F * mn;
+  const float sBig = w / 2.7F;
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(
+      renderer,
+      w,
+      h,
+      5000,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+        const float collapse = std::clamp(t / 0.14F, 0.0F, 1.0F);
+        const float dir = -1.0F;  // scuttle left
+        float s = s0;
+        float cx = (w - 1) * 0.5F;
+        float cy = (h - 1) * 0.6F;
+        if (collapse < 1.0F)
+          s = sBig + (s0 - sBig) * collapse;
+        else
+        {
+          const float tau = (t - 0.14F) / 0.86F;
+          cx = (w - 1) * 0.5F + dir * tau * w * 0.95F;
+          cy = (h - 1) * 0.62F + std::sin(t * 9.0F) * s * 0.10F / ya;
+        }
+        const float shW = s * 1.3F;
+        const float shH = s * 0.78F;
+        const Rgb ctr = sample(src, w, h, (w - 1) * 0.5F, (h - 1) * 0.55F);
+        const Rgb leg{u8((ctr.transparent ? 150 : ctr.r) * 0.55F),
+                      u8((ctr.transparent ? 80 : ctr.g) * 0.4F),
+                      u8((ctr.transparent ? 60 : ctr.b) * 0.35F),
+                      false};
+        const float gait = t * 11.0F;
+        for (int sgn = -1; sgn <= 1; sgn += 2)
+          for (int j = 0; j < 4; ++j)
+          {
+            // Each leg traces a walking ellipse: the foot swings fore/aft while
+            // lifting 90 deg out of phase; neighbouring legs and the two sides
+            // are offset so the gait reads as stepping.
+            const float phase = gait + j * 1.6F + (sgn > 0 ? 3.14159F : 0.0F);
+            const float swing = std::sin(phase);
+            const float lift = std::max(0.0F, std::cos(phase));
+            const float basex = cx + (-0.6F + j * 0.4F) * shW * 0.7F;
+            const float basey = cy + shH * 0.35F / ya;
+            const float kneex = basex + sgn * shW * 0.4F + swing * shW * 0.12F;
+            const float kneey = basey + shH * 0.45F / ya - lift * s * 0.12F / ya;
+            const float footx = kneex + sgn * shW * 0.30F + swing * shW * 0.34F;
+            const float footy = basey + shH * 1.2F / ya - lift * s * 0.55F / ya;
+            drawSeg(dst, w, h, basex, basey, kneex, kneey, std::max(1.0F, s * 0.05F), ya, leg);
+            drawSeg(dst, w, h, kneex, kneey, footx, footy, std::max(1.0F, s * 0.045F), ya, leg);
+          }
+        // Shell.
+        const int x0 = std::max(0, static_cast<int>(cx - shW));
+        const int x1 = std::min(w - 1, static_cast<int>(cx + shW));
+        const int y0 = std::max(0, static_cast<int>(cy - shH / ya));
+        const int y1 = std::min(h - 1, static_cast<int>(cy + shH / ya));
+        for (int y = y0; y <= y1; ++y)
+          for (int x = x0; x <= x1; ++x)
+          {
+            const float bx = (x - cx) / shW;
+            const float by = (y - cy) * ya / shH;
+            if (bx * bx + by * by > 1.0F)
+              continue;
+            const Rgb tex = sample(src, w, h, (bx + 1) * 0.5F * (w - 1), (by + 1) * 0.5F * (h - 1));
+            const float r = tex.transparent ? 170.0F : tex.r;
+            const float g = tex.transparent ? 90.0F : tex.g;
+            const float b = tex.transparent ? 70.0F : tex.b;
+            const float sh = 0.7F + 0.3F * std::clamp(1.0F - (bx * bx + by * by), 0.0F, 1.0F);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(r * sh), u8(g * sh), u8(b * sh), false};
+          }
+        // Eyestalks.
+        for (int c = -1; c <= 1; c += 2)
+        {
+          const float ex = cx + c * shW * 0.28F;
+          const float ey = cy - shH * 0.9F / ya;
+          drawSeg(dst,
+                  w,
+                  h,
+                  cx + c * shW * 0.28F,
+                  cy - shH * 0.3F / ya,
+                  ex,
+                  ey,
+                  std::max(1.0F, s * 0.04F),
+                  ya,
+                  leg);
+          plotDot(dst, w, h, ex, ey, std::max(1.0F, s * 0.07F), ya, Rgb{20, 20, 26, false});
+        }
+        // Two raised, waving claws on the leading edge.
+        for (int c = -1; c <= 1; c += 2)
+        {
+          const float ax = cx + dir * shW * 0.5F + c * shW * 0.12F;
+          const float ex = ax + dir * shW * 0.45F;
+          const float ey = cy - shH * 0.7F / ya;
+          const float wave = std::sin(t * 5.0F + c) * 0.3F;
+          drawSeg(dst, w, h, ax, cy, ex, ey, std::max(1.0F, s * 0.09F), ya, leg);
+          drawSeg(dst,
+                  w,
+                  h,
+                  ex,
+                  ey,
+                  ex + dir * shW * 0.18F,
+                  ey - shH * (0.25F + wave) / ya,
+                  std::max(1.0F, s * 0.06F),
+                  ya,
+                  leg);
+          drawSeg(dst,
+                  w,
+                  h,
+                  ex,
+                  ey,
+                  ex + dir * shW * 0.18F,
+                  ey + shH * 0.12F / ya,
+                  std::max(1.0F, s * 0.06F),
+                  ya,
+                  leg);
+        }
+      });
+}
+
+// Spider: the view collapses into a round textured body that descends from the
+// top of the frame on a silk thread, its eight bent legs wiggling.
+void effectSpider(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float s0 = 0.12F * mn;
+  const float sBig = w / 3.0F;
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(
+      renderer,
+      w,
+      h,
+      5200,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+        const float collapse = std::clamp(t / 0.14F, 0.0F, 1.0F);
+        float s = s0;
+        float cx = (w - 1) * 0.5F;
+        float cy = (h - 1) * 0.30F;
+        if (collapse < 1.0F)
+        {
+          s = sBig + (s0 - sBig) * collapse;
+          cy = (h - 1) * 0.5F + ((h - 1) * 0.18F - (h - 1) * 0.5F) * collapse;
+        }
+        else
+        {
+          const float tau = (t - 0.14F) / 0.86F;
+          cx = (w - 1) * 0.5F + std::sin(t * 1.5F) * s * 0.4F;
+          cy = (h - 1) * 0.18F + tau * h * 0.7F;  // drop on the thread
+        }
+        // Silk thread from the top down to the body.
+        for (int yy = 0; yy < static_cast<int>(cy - s * 0.7F / ya); ++yy)
+        {
+          const int xx = static_cast<int>(cx + std::sin(yy * 0.05F) * 1.0F);
+          if (xx >= 0 && xx < w)
+            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{150, 150, 165, false};
+        }
+        const Rgb ctr = sample(src, w, h, (w - 1) * 0.5F, (h - 1) * 0.3F);
+        const Rgb leg{u8((ctr.transparent ? 60 : ctr.r) * 0.45F),
+                      u8((ctr.transparent ? 60 : ctr.g) * 0.45F),
+                      u8((ctr.transparent ? 70 : ctr.b) * 0.5F),
+                      false};
+        const float wig = t * 7.0F;
+        for (int sgn = -1; sgn <= 1; sgn += 2)
+          for (int j = 0; j < 4; ++j)
+          {
+            const float basex = cx + sgn * s * 0.5F;
+            const float basey = cy + (j - 1.5F) * s * 0.22F / ya;
+            const float wj = std::sin(wig + j * 1.1F + (sgn > 0 ? 2.0F : 0.0F)) * 0.2F;
+            const float reach = s * 1.3F;
+            const float kneex = basex + sgn * reach * 0.5F;
+            const float kneey = basey - s * 0.65F / ya * (0.6F + wj);  // knee bent up
+            const float footx = basex + sgn * reach * 0.95F;
+            const float footy = basey + s * 0.55F / ya * (1.0F + wj);  // foot down-out
+            drawSeg(dst, w, h, basex, basey, kneex, kneey, std::max(1.0F, s * 0.05F), ya, leg);
+            drawSeg(dst, w, h, kneex, kneey, footx, footy, std::max(1.0F, s * 0.045F), ya, leg);
+          }
+        // Body: abdomen + smaller cephalothorax, both textured.
+        auto blob = [&](float bcx, float bcy, float rx, float ry)
+        {
+          const int x0 = std::max(0, static_cast<int>(bcx - rx));
+          const int x1 = std::min(w - 1, static_cast<int>(bcx + rx));
+          const int y0 = std::max(0, static_cast<int>(bcy - ry / ya));
+          const int y1 = std::min(h - 1, static_cast<int>(bcy + ry / ya));
+          for (int y = y0; y <= y1; ++y)
+            for (int x = x0; x <= x1; ++x)
+            {
+              const float ex = (x - bcx) / rx;
+              const float ey = (y - bcy) * ya / ry;
+              const float rr = ex * ex + ey * ey;
+              if (rr > 1.0F)
+                continue;
+              const Rgb tex =
+                  sample(src, w, h, (ex + 1) * 0.5F * (w - 1), (ey + 1) * 0.5F * (h - 1));
+              const float r = tex.transparent ? 70.0F : tex.r;
+              const float g = tex.transparent ? 70.0F : tex.g;
+              const float b = tex.transparent ? 80.0F : tex.b;
+              const float sh = 0.6F + 0.4F * std::clamp(1.0F - rr, 0.0F, 1.0F);
+              dst[static_cast<std::size_t>(y) * w + x] =
+                  Rgb{u8(r * sh), u8(g * sh), u8(b * sh), false};
+            }
+        };
+        blob(cx, cy + s * 0.35F / ya, s * 0.85F, s * 1.0F);  // abdomen
+        blob(cx, cy - s * 0.4F / ya, s * 0.55F, s * 0.5F);   // cephalothorax
+      });
+}
+
 // Effect roster. Keep in sync with the dispatch switch below and with the
 // names in exitEffectName().
-constexpr int kEffectCount = 31;
+constexpr int kEffectCount = 50;
 }  // namespace
 
 int exitEffectCount()
@@ -3003,13 +5004,16 @@ int exitEffectCount()
 const char* exitEffectName(int effectIndex)
 {
   static const char* const kNames[kEffectCount] = {
-      "explode",    "implode + ring", "spiral",      "matrix drop",   "dissolve",
-      "CRT off",    "fade",           "fire",        "fireworks",     "Pac-Man",
-      "train",      "The End",        "eye wink",    "submarine",     "Bond barrel",
-      "teardrop",   "tears in rain",  "word reveal", "koyaanisqatsi", "rosebud",
-      "shiver",     "HAL 9000",       "Rubik",       "foot stomp",    "Monty Python",
-      "tunnel",     "gunshot",        "snowfall",    "gotcha",        "Star Wars",
-      "Python wars"};
+      "explode",      "implode + ring", "spiral",      "matrix drop",   "dissolve",
+      "CRT off",      "fade",           "fire",        "fireworks",     "Pac-Man",
+      "train",        "The End",        "eye wink",    "submarine",     "Bond barrel",
+      "teardrop",     "tears in rain",  "word reveal", "koyaanisqatsi", "rosebud",
+      "shiver",       "HAL 9000",       "Rubik",       "foot stomp",    "Monty Python",
+      "tunnel",       "gunshot",        "snowfall",    "gotcha",        "Star Wars",
+      "Python wars",  "Flatland",       "test card",   "doves",         "aurora",
+      "thunderstorm", "game of life",   "Thanos snap", "Utopia",        "bouncing ball",
+      "solar system", "Saturn",         "black hole",  "Interstellar",  "stingray",
+      "jellyfish",    "butterfly",      "fish",        "crab",          "spider"};
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return "random";
   return kNames[effectIndex];
@@ -3052,7 +5056,9 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
                               int subH,
                               int effectIndex,
                               unsigned seed,
-                              std::string words)
+                              std::string words,
+                              const std::vector<Rgb>* linesFrame,
+                              const std::vector<char>* swedenMask)
 {
   // A nonzero seed always survives the round-trip, so a stored {index, seed}
   // can be replayed verbatim by the repeat key. 0 means "pick a fresh one".
@@ -3194,6 +5200,63 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
       break;
     case 30:
       effectPythonWars(renderer, frame, subW, subH);
+      break;
+    case 31:
+      effectFlatland(renderer, frame, subW, subH, rng);
+      break;
+    case 32:
+      effectTestCard(renderer, frame, subW, subH, rng);
+      break;
+    case 33:
+      effectDoves(renderer, frame, subW, subH, rng);
+      break;
+    case 34:
+      effectAurora(renderer, frame, subW, subH, rng);
+      break;
+    case 35:
+      effectThunderstorm(renderer, frame, subW, subH, rng);
+      break;
+    case 36:
+      effectGameOfLife(renderer, frame, subW, subH);
+      break;
+    case 37:
+      effectThanos(renderer, frame, subW, subH, rng);
+      break;
+    case 38:
+      effectUtopia(renderer, frame, subW, subH, rng, linesFrame, swedenMask);
+      break;
+    case 39:
+      effectBall(renderer, frame, subW, subH);
+      break;
+    case 40:
+      effectSolarSystem(renderer, frame, subW, subH, rng);
+      break;
+    case 41:
+      effectSaturn(renderer, frame, subW, subH);
+      break;
+    case 42:
+      effectBlackHole(renderer, frame, subW, subH);
+      break;
+    case 43:
+      effectInterstellar(renderer, frame, subW, subH);
+      break;
+    case 44:
+      effectStingray(renderer, frame, subW, subH);
+      break;
+    case 45:
+      effectJellyfish(renderer, frame, subW, subH);
+      break;
+    case 46:
+      effectButterfly(renderer, frame, subW, subH);
+      break;
+    case 47:
+      effectFish(renderer, frame, subW, subH);
+      break;
+    case 48:
+      effectCrab(renderer, frame, subW, subH);
+      break;
+    case 49:
+      effectSpider(renderer, frame, subW, subH);
       break;
     default:
       effectFade(renderer, frame, subW, subH);

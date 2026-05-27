@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.27
-Release: 4%{?dist}.fmi
+Release: 5%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Wed May 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.27-5.fmi
+- Added more 3D animations
+
 * Wed May 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.27-4.fmi
 - Improved Gilliam algorithm
 
