@@ -40,9 +40,9 @@ BuildRequires: netcdf-cxx4-devel
 BuildRequires: netcdf-devel >= 4.3.3.1
 BuildRequires: rpm-build
 BuildRequires: smartmet-library-calculator-devel >= 26.4.13
-BuildRequires: smartmet-library-gis-devel >= 26.4.13
-BuildRequires: smartmet-library-grid-files-devel >= 26.4.22
-BuildRequires: smartmet-library-macgyver-devel >= 26.4.13
+BuildRequires: smartmet-library-gis-devel >= 26.5.21
+BuildRequires: smartmet-library-grid-files-devel >= 26.5.26
+BuildRequires: smartmet-library-macgyver-devel >= 26.5.21
 BuildRequires: smartmet-library-newbase-devel >= 26.2.4
 BuildRequires: smartmet-library-smarttools-devel >= 26.4.13
 BuildRequires: smartmet-timezones
@@ -70,9 +70,9 @@ Requires: ncurses-libs
 Requires: netcdf >= 4.3.3.1
 Requires: netcdf-cxx4
 Requires: smartmet-library-calculator >= 26.4.13
-Requires: smartmet-library-gis >= 26.4.13
-Requires: smartmet-library-grid-files >= 26.4.22
-Requires: smartmet-library-macgyver >= 26.4.13
+Requires: smartmet-library-gis >= 26.5.21
+Requires: smartmet-library-grid-files >= 26.5.26
+Requires: smartmet-library-macgyver >= 26.5.21
 Requires: smartmet-library-newbase >= 26.2.4
 Requires: smartmet-library-smarttools >= 26.4.13
 Requires: smartmet-timezones >= 24.5.27
