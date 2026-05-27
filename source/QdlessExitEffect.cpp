@@ -82,6 +82,16 @@ bool exitKeyPressed()
   return false;
 }
 
+// Surprise-stomp interrupt. One exit in ten can be cut short by the Monty
+// Python foot: playExitEffect arms this before running the chosen effect, and
+// runFrames watches the wall clock — once past the trigger it snapshots the
+// frame on screen and bails out, leaving playExitEffect to stomp that snapshot.
+bool g_stompArmed = false;
+bool g_stompFired = false;
+double g_stompTriggerMs = 0.0;
+std::chrono::steady_clock::time_point g_stompArmStart;
+std::vector<Rgb> g_stompCapture;
+
 // Runs an effect for `durationMs` wall-clock milliseconds at ~kFps. For frame
 // i it calls fill(t, dst) with t = i / nframes (so t ends at 1.0) after
 // blanking dst, then presents and sleeps until the frame's deadline. Effects
@@ -92,6 +102,8 @@ bool exitKeyPressed()
 template <typename Fill>
 void runFrames(const Renderer& renderer, int w, int h, int durationMs, Fill&& fill)
 {
+  if (g_stompFired)
+    return;  // a surprise stomp already preempted this exit
   const int nframes = std::max(8, durationMs / kFrameMs);
   std::vector<Rgb> dst(static_cast<std::size_t>(w) * h, kBlank);
   const auto start = std::chrono::steady_clock::now();
@@ -104,6 +116,18 @@ void runFrames(const Renderer& renderer, int w, int h, int durationMs, Fill&& fi
     present(renderer, dst, w, h);
     if (exitKeyPressed())
       return;  // any key aborts -> caller clears the screen and exits/returns
+    if (g_stompArmed)
+    {
+      const double elapsed = std::chrono::duration<double, std::milli>(
+                                 std::chrono::steady_clock::now() - g_stompArmStart)
+                                 .count();
+      if (elapsed >= g_stompTriggerMs)
+      {
+        g_stompCapture = dst;  // snapshot the view the foot will crush
+        g_stompFired = true;
+        return;
+      }
+    }
     std::this_thread::sleep_until(start + frame * i);
   }
 }
@@ -184,6 +208,8 @@ std::array<const char*, 7> glyph5x7(char c)
       return {"00000", "00000", "00000", "00000", "00000", "00000", "00100"};
     case '-':
       return {"00000", "00000", "00000", "01110", "00000", "00000", "00000"};
+    case ',':
+      return {"00000", "00000", "00000", "00000", "00100", "00100", "01000"};
     default:
       return {"00000", "00000", "00000", "00000", "00000", "00000", "00000"};
   }
@@ -2197,6 +2223,35 @@ std::unique_ptr<ImageSource> loadFootImage(std::size_t& fw, std::size_t& fh)
   }
 }
 
+// One frame of the Monty Python stomp: the foot's sole sits at contactY =
+// p^2*h; the whole `view` is squashed into the strip below it, and the foot
+// painting (sampled by footPixel over [0,1]^2, with v=1 the sole) fills the
+// screen above. p in [0,1]; p=1 is the full slam — screen all foot, view gone.
+template <typename FootFn>
+void stompFrame(
+    std::vector<Rgb>& dst, const std::vector<Rgb>& view, int w, int h, float p, FootFn&& footPixel)
+{
+  const float contactY = p * p * static_cast<float>(h);  // sole row
+  // Below the sole: the entire view squashed into [contactY, h).
+  for (int y = static_cast<int>(std::ceil(contactY)); y < h; ++y)
+  {
+    const float frac = (y - contactY) / std::max(1.0F, static_cast<float>(h) - contactY);
+    const int row = std::min(h - 1, static_cast<int>(frac * (h - 1)));
+    for (int x = 0; x < w; ++x)
+      dst[static_cast<std::size_t>(y) * w + x] = view[static_cast<std::size_t>(row) * w + x];
+  }
+  // Above the sole: the painting, sole (v=1) pinned to the contact line,
+  // scaled so it exactly fills the screen at full slam.
+  const int contactRow = static_cast<int>(std::ceil(contactY));
+  for (int y = 0; y < contactRow && y < h; ++y)
+  {
+    const float fv =
+        (static_cast<float>(y) - (contactY - static_cast<float>(h))) / static_cast<float>(h);
+    for (int x = 0; x < w; ++x)
+      dst[static_cast<std::size_t>(y) * w + x] = footPixel((x + 0.5F) / w, fv);
+  }
+}
+
 void effectMontyPythonProcedural(const Renderer& renderer,
                                  const std::vector<Rgb>& src,
                                  int w,
@@ -2227,39 +2282,15 @@ void effectMontyPython(const Renderer& renderer, const std::vector<Rgb>& src, in
   auto footPixel = [&](float u, float v) -> Rgb
   { return foot->pixelAtUV(std::clamp(u, 0.0F, 0.999F), std::clamp(v, 0.0F, 0.999F)); };
 
-  runFrames(
-      renderer,
-      w,
-      h,
-      1100,
-      [&](float t, std::vector<Rgb>& dst)
-      {
-        // The sole accelerates down from the top (gravity: p^2) to the floor,
-        // compressing the whole view into the shrinking strip beneath it; the
-        // painting fills the screen above so a full slam blacks out the data.
-        // The slam lands at 40% of the run; the foot then stays planted and
-        // fully visible for the remaining 60%.
-        const float p = std::min(1.0F, t / 0.4F);
-        const float contactY = p * p * static_cast<float>(h);  // sole row
-        // Below the sole: the entire view squashed into [contactY, h).
-        for (int y = static_cast<int>(std::ceil(contactY)); y < h; ++y)
-        {
-          const float frac = (y - contactY) / std::max(1.0F, static_cast<float>(h) - contactY);
-          const int row = std::min(h - 1, static_cast<int>(frac * (h - 1)));
-          for (int x = 0; x < w; ++x)
-            dst[static_cast<std::size_t>(y) * w + x] = src[static_cast<std::size_t>(row) * w + x];
-        }
-        // Above the sole: the painting, sole (v=1) pinned to the contact line,
-        // scaled so it exactly fills the screen at full slam.
-        const int contactRow = static_cast<int>(std::ceil(contactY));
-        for (int y = 0; y < contactRow && y < h; ++y)
-        {
-          const float fv =
-              (static_cast<float>(y) - (contactY - static_cast<float>(h))) / static_cast<float>(h);
-          for (int x = 0; x < w; ++x)
-            dst[static_cast<std::size_t>(y) * w + x] = footPixel((x + 0.5F) / w, fv);
-        }
-      });
+  // The sole accelerates down from the top (gravity: p^2) and slams in the
+  // first third of the run (~3x faster than a full-length drop); the foot then
+  // stays planted for a brief hold before the effect exits.
+  runFrames(renderer,
+            w,
+            h,
+            450,
+            [&](float t, std::vector<Rgb>& dst)
+            { stompFrame(dst, src, w, h, std::min(1.0F, t / 0.33F), footPixel); });
 }
 
 // Fallback for effectMontyPython when data/foot.png can't be loaded: a
@@ -2470,9 +2501,498 @@ void effectTunnel(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
             });
 }
 
+// Stamp a bullet hole at (cx,cy): a near-black puncture with a scorched ring,
+// a torn dark-red rim and a scatter of blood specks. `r` is the bore radius in
+// x-units; ya keeps it round.
+void drawBulletHole(std::vector<Rgb>& dst, int w, int h, float cx, float cy, float r, float ya)
+{
+  const Rgb blood{86, 12, 12, false};
+  const Rgb scorch{34, 16, 14, false};
+  const Rgb hole{10, 8, 9, false};
+  for (int k = 0; k < 6; ++k)  // blood spatter around the entry
+  {
+    const float a = static_cast<float>(k) * 1.0472F + cx * 0.13F;  // 60deg apart, jittered
+    const float d = r * 2.4F;
+    plotDot(dst,
+            w,
+            h,
+            cx + std::cos(a) * d,
+            cy + std::sin(a) * d / ya,
+            std::max(1.0F, r * 0.2F),
+            ya,
+            blood);
+  }
+  plotDot(dst, w, h, cx, cy, r * 1.7F, ya, blood);
+  plotDot(dst, w, h, cx, cy, r * 1.25F, ya, scorch);
+  plotDot(dst, w, h, cx, cy, r, ya, hole);
+}
+
+// True if (dx, dyPx) lies inside a six-armed snowflake of radius R (x-units;
+// ya corrects the vertical): a hex core, six tapering primary arms, six shorter
+// secondary arms offset 30deg, and little branch tufts on the primary arms.
+bool inSnowflake(float dx, float dyPx, float R, float ya)
+{
+  const float dy = dyPx * ya;
+  const float r = std::hypot(dx, dy);
+  if (r > R)
+    return false;
+  if (r < R * 0.14F)
+    return true;  // hex core
+  const float rr = r / R;
+  const float ang = std::atan2(dy, dx);
+  constexpr float s60 = 1.0471976F;
+  constexpr float s30 = 0.5235988F;
+  const float a1 = ang - s60 * std::round(ang / s60);  // angle to nearest primary axis
+  if (std::fabs(a1) < 0.16F * (1.0F - 0.7F * rr))
+    return true;  // primary arm, tapering outward
+  if (rr < 0.55F)
+  {
+    const float a2 = (ang - s30) - s60 * std::round((ang - s30) / s60);
+    if (std::fabs(a2) < 0.13F * (1.0F - rr))
+      return true;  // shorter secondary arm
+  }
+  if ((std::fabs(rr - 0.50F) < 0.06F || std::fabs(rr - 0.74F) < 0.06F) &&
+      std::fabs(std::fabs(a1) - 0.40F) < 0.16F)
+    return true;  // branch tufts
+  return false;
+}
+
+// Stamp centred multi-line text (5x7 font) in `color`, scaled to fit
+// widthFrac x heightFrac of the screen. Each line is centred horizontally.
+void drawLines(std::vector<Rgb>& dst,
+               int w,
+               int h,
+               const std::vector<std::string>& lines,
+               const Rgb& color,
+               float widthFrac,
+               float heightFrac)
+{
+  constexpr int kFW = 5;
+  constexpr int kFH = 7;
+  constexpr int kGap = 1;
+  constexpr int kLineGap = 3;
+  int maxCols = 1;
+  for (const auto& s : lines)
+    maxCols = std::max(maxCols, static_cast<int>(s.size()));
+  const int totalFx = maxCols * kFW + (maxCols - 1) * kGap;
+  const int nLines = static_cast<int>(lines.size());
+  const int totalFy = nLines * kFH + (nLines - 1) * kLineGap;
+  const int scale =
+      std::max(1, static_cast<int>(std::min(widthFrac * w / totalFx, heightFrac * h / totalFy)));
+  const float oy = (h - static_cast<float>(totalFy) * scale) * 0.5F;
+  for (int li = 0; li < nLines; ++li)
+  {
+    const std::string& s = lines[li];
+    const int cols = static_cast<int>(s.size());
+    const int lineFx = std::max(1, cols * kFW + (cols - 1) * kGap);
+    const float ox = (w - static_cast<float>(lineFx) * scale) * 0.5F;
+    const float ly = oy + static_cast<float>(li * (kFH + kLineGap) * scale);
+    for (int ci = 0; ci < cols; ++ci)
+    {
+      const auto g = glyph5x7(static_cast<char>(std::toupper(static_cast<unsigned char>(s[ci]))));
+      const int charOx = ci * (kFW + kGap);
+      for (int fy = 0; fy < kFH; ++fy)
+        for (int fx = 0; fx < kFW; ++fx)
+        {
+          if (g[fy][fx] != '1')
+            continue;
+          for (int sy = 0; sy < scale; ++sy)
+            for (int sx = 0; sx < scale; ++sx)
+            {
+              const int x = static_cast<int>(std::lround(ox + (charOx + fx) * scale + sx));
+              const int y = static_cast<int>(std::lround(ly + fy * scale + sy));
+              if (x >= 0 && x < w && y >= 0 && y < h)
+                dst[static_cast<std::size_t>(y) * w + x] = color;
+            }
+        }
+    }
+  }
+}
+
+// Build a lit/unlit bitmap for one or more centred text lines at native 5x7
+// font resolution. Sets bw/bh to the bitmap size.
+std::vector<char> buildTextBitmap(const std::vector<std::string>& lines, int& bw, int& bh)
+{
+  constexpr int kFW = 5;
+  constexpr int kFH = 7;
+  constexpr int kGap = 1;
+  constexpr int kLineGap = 2;
+  int maxCols = 1;
+  for (const auto& s : lines)
+    maxCols = std::max(maxCols, static_cast<int>(s.size()));
+  const int nLines = static_cast<int>(lines.size());
+  bw = std::max(1, maxCols * kFW + (maxCols - 1) * kGap);
+  bh = std::max(1, nLines * kFH + (nLines - 1) * kLineGap);
+  std::vector<char> grid(static_cast<std::size_t>(bw) * bh, 0);
+  for (int li = 0; li < nLines; ++li)
+  {
+    const std::string& s = lines[li];
+    const int cols = static_cast<int>(s.size());
+    const int lineFx = cols * kFW + (cols - 1) * kGap;
+    const int ox0 = (bw - lineFx) / 2;  // centre each line in the bitmap
+    const int oy = li * (kFH + kLineGap);
+    for (int ci = 0; ci < cols; ++ci)
+    {
+      const auto g = glyph5x7(static_cast<char>(std::toupper(static_cast<unsigned char>(s[ci]))));
+      const int ox = ox0 + ci * (kFW + kGap);
+      for (int fy = 0; fy < kFH; ++fy)
+        for (int fx = 0; fx < kFW; ++fx)
+          if (g[fy][fx] == '1')
+            grid[static_cast<std::size_t>(oy + fy) * bw + ox + fx] = 1;
+    }
+  }
+  return grid;
+}
+
+// Overlay a Star Wars-style crawl onto `dst`: the text bitmap (bw*bh) laid on a
+// ground plane that recedes to a vanishing point at row h*0.30 (Mode-7
+// perspective). scrollFront sets how far the text's near edge has receded
+// (larger = farther); gFade dims the whole crawl. nearWidthFrac is the text
+// width (as a fraction of the screen) at the near edge — values > 1 make the
+// text overflow the sides when close and shrink to fit as it recedes. Sampling
+// is coverage-based (a screen cell lights if ANY text texel it covers is lit),
+// so thin strokes — e.g. the bottom bar that tells 'E' from 'F' — never drop
+// out under minification.
+void drawCrawl(std::vector<Rgb>& dst,
+               int w,
+               int h,
+               const std::vector<char>& text,
+               int bw,
+               int bh,
+               float scrollFront,
+               const Rgb& color,
+               float gFade,
+               float nearWidthFrac)
+{
+  const float cx = (w - 1) * 0.5F;
+  const float vy = h * 0.30F;                 // horizon / vanishing row
+  const float camH = h - vy;                  // so depth == 1 at the bottom row
+  const float textDepth = 0.9F;               // depth band the text occupies
+  const float kx = bw / (nearWidthFrac * w);  // horizontal world scale
+  for (int y = static_cast<int>(std::ceil(vy)) + 1; y < h; ++y)
+  {
+    // This screen row spans depths [depthNear, depthFar]; find the text rows
+    // it covers and OR over them.
+    const float depthFar = camH / (static_cast<float>(y) - vy);
+    const float depthNear = camH / (static_cast<float>(y + 1) - vy);
+    float tvfA = bh * (scrollFront + textDepth - depthFar) / textDepth;
+    float tvfB = bh * (scrollFront + textDepth - depthNear) / textDepth;
+    if (tvfA > tvfB)
+      std::swap(tvfA, tvfB);
+    if (tvfB < 0.0F || tvfA >= static_cast<float>(bh))
+      continue;
+    const int rLo = std::max(0, static_cast<int>(std::floor(tvfA)));
+    const int rHi = std::min(bh - 1, static_cast<int>(std::floor(tvfB)));
+    const float depthMid = camH / (static_cast<float>(y) - vy + 0.5F);
+    const float bright = std::clamp(1.15F - depthMid * 0.12F, 0.30F, 1.0F) * gFade;
+    if (bright <= 0.0F)
+      continue;
+    const Rgb c{static_cast<std::uint8_t>(color.r * bright),
+                static_cast<std::uint8_t>(color.g * bright),
+                static_cast<std::uint8_t>(color.b * bright),
+                false};
+    const float colStep = depthMid * kx;  // text columns spanned per screen cell
+    for (int x = 0; x < w; ++x)
+    {
+      const float tu = (x - cx) * depthMid * kx + bw * 0.5F;
+      const int cLo = std::max(0, static_cast<int>(std::floor(tu)));
+      const int cHi = std::min(bw - 1, static_cast<int>(std::floor(tu + colStep)));
+      bool lit = false;
+      for (int r = rLo; r <= rHi && !lit; ++r)
+        for (int c2 = cLo; c2 <= cHi; ++c2)
+          if (text[static_cast<std::size_t>(r) * bw + c2] != 0)
+          {
+            lit = true;
+            break;
+          }
+      if (lit)
+        dst[static_cast<std::size_t>(y) * w + x] = c;
+    }
+  }
+}
+
+// Death by gunshot: three bullet holes punch into the view in quick succession
+// (each with an impact spark), a brief pause, a single eyelid blink, a beat,
+// then the holed view topples to the left and drops away as vision fades.
+void effectGunshot(
+    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+{
+  const float ya = yAspectFor(renderer);
+  const float r = std::max(2.0F, h * 0.06F);  // bore radius
+  std::uniform_real_distribution<float> jx(0.30F, 0.70F);
+  std::uniform_real_distribution<float> jy(0.28F, 0.62F);
+  struct Hole
+  {
+    float x;
+    float y;
+    float t;  // when it appears
+  };
+  const float popT[3] = {0.03F, 0.08F, 0.13F};
+  std::array<Hole, 3> holes{};
+  for (int i = 0; i < 3; ++i)
+    holes[i] = {jx(rng) * w, jy(rng) * h, popT[i]};
+
+  // Pre-build the fully-holed view for the pause / blink / fall phases.
+  std::vector<Rgb> holed = src;
+  for (const auto& hl : holes)
+    drawBulletHole(holed, w, h, hl.x, hl.y, r, ya);
+
+  const Rgb lid{18, 9, 8, false};  // closed eyelid
+
+  runFrames(renderer,
+            w,
+            h,
+            3200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              if (t < 0.16F)
+              {
+                // Shots: holes punch in one after another, each with a quick spark.
+                std::copy(src.begin(), src.end(), dst.begin());
+                for (const auto& hl : holes)
+                {
+                  if (t < hl.t)
+                    continue;
+                  if (t - hl.t < 0.025F)  // bright spark the hole then punches through
+                    plotDot(dst, w, h, hl.x, hl.y, r * 3.0F, ya, Rgb{255, 238, 178, false});
+                  drawBulletHole(dst, w, h, hl.x, hl.y, r, ya);
+                }
+                return;
+              }
+              if (t < 0.30F)  // brief pause: the holed view, held
+              {
+                std::copy(holed.begin(), holed.end(), dst.begin());
+                return;
+              }
+              if (t < 0.42F)
+              {
+                // A single blink: the eyelids close from top and bottom, then reopen.
+                std::copy(holed.begin(), holed.end(), dst.begin());
+                const float local = (t - 0.30F) / 0.12F;                    // 0..1
+                const float close = 1.0F - std::fabs(2.0F * local - 1.0F);  // 0->1->0
+                const int lidH = static_cast<int>(close * (h * 0.5F));
+                for (int y = 0; y < lidH; ++y)
+                  for (int x = 0; x < w; ++x)
+                  {
+                    dst[static_cast<std::size_t>(y) * w + x] = lid;
+                    dst[static_cast<std::size_t>(h - 1 - y) * w + x] = lid;
+                  }
+                return;
+              }
+              if (t < 0.50F)  // a beat after the blink, before keeling over
+              {
+                std::copy(holed.begin(), holed.end(), dst.begin());
+                return;
+              }
+              // Collapse: the holed view topples to the left (top tilts left) about a
+              // low-left pivot and drops away, dimming as vision fades to black.
+              const float fp = (t - 0.50F) / 0.50F;
+              const float e = fp * fp;  // accelerating fall
+              const float ang = e * 1.45F;
+              const float c = std::cos(ang);
+              const float s = std::sin(ang);
+              const float pivx = w * 0.30F;
+              const float pivy = h * 0.82F;
+              const float dropX = -e * w * 0.18F;
+              const float dropY = e * h * 0.85F;
+              const float dim = 1.0F - 0.75F * fp;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const float dxp = x - pivx - dropX;
+                  const float dyp = (y - pivy - dropY) * ya;
+                  const float relX = c * dxp - s * dyp;  // inverse rotation
+                  const float relY = s * dxp + c * dyp;
+                  Rgb px = sample(holed, w, h, pivx + relX, pivy + relY / ya);
+                  if (!px.transparent)
+                    px = Rgb{static_cast<std::uint8_t>(px.r * dim),
+                             static_cast<std::uint8_t>(px.g * dim),
+                             static_cast<std::uint8_t>(px.b * dim),
+                             false};
+                  dst[static_cast<std::size_t>(y) * w + x] = px;
+                }
+            });
+}
+
+// The view turns into a flurry of giant six-armed snowflakes (each tinted with
+// the colour it covers) that drift down, sway, and shrink away to nothing.
+void effectSnowflakes(
+    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+{
+  const float ya = yAspectFor(renderer);
+  constexpr int kN = 16;
+  struct Flake
+  {
+    float x0;
+    float y0;
+    float r0;
+    float drift;
+    float phase;
+    float fall;
+    Rgb col;
+  };
+  std::uniform_real_distribution<float> ux(0.05F, 0.95F);
+  std::uniform_real_distribution<float> uy(0.05F, 0.60F);
+  std::uniform_real_distribution<float> ur(0.30F, 0.55F);
+  std::uniform_real_distribution<float> ud(-1.0F, 1.0F);
+  std::uniform_real_distribution<float> up(0.0F, 6.2832F);
+  std::uniform_real_distribution<float> uf(0.8F, 1.4F);
+  std::array<Flake, kN> flakes{};
+  for (auto& f : flakes)
+  {
+    f.x0 = ux(rng) * w;
+    f.y0 = uy(rng) * h;
+    f.r0 = ur(rng) * h;  // giant: a big fraction of the screen height
+    f.drift = ud(rng);
+    f.phase = up(rng);
+    f.fall = uf(rng);
+    Rgb b = sample(src, w, h, f.x0, f.y0);
+    if (b.transparent)
+      b = Rgb{120, 150, 200, false};
+    f.col = Rgb{static_cast<std::uint8_t>(b.r + (255 - b.r) * 0.55F),
+                static_cast<std::uint8_t>(b.g + (255 - b.g) * 0.55F),
+                static_cast<std::uint8_t>(b.b + (255 - b.b) * 0.62F),
+                false};
+  }
+  runFrames(renderer,
+            w,
+            h,
+            3200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (const auto& f : flakes)
+              {
+                const float R = f.r0 * (1.0F - t);  // shrink to nothing
+                if (R < 1.0F)
+                  continue;
+                const float fx =
+                    f.x0 + f.drift * w * 0.15F * t + std::sin(f.phase + t * 6.0F) * w * 0.02F;
+                const float fy = f.y0 + f.fall * (t * t) * h * 1.2F;  // accelerating fall
+                const int x0 = std::max(0, static_cast<int>(fx - R));
+                const int x1 = std::min(w - 1, static_cast<int>(fx + R));
+                const int y0 = std::max(0, static_cast<int>(fy - R / ya));
+                const int y1 = std::min(h - 1, static_cast<int>(fy + R / ya));
+                for (int y = y0; y <= y1; ++y)
+                  for (int x = x0; x <= x1; ++x)
+                    if (inSnowflake(x - fx, y - fy, R, ya))
+                      dst[static_cast<std::size_t>(y) * w + x] = f.col;
+              }
+            });
+}
+
+// Anticlimax: nothing happens for a long beat, then the punchline cuts in.
+void effectGotcha(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  static const std::vector<std::string> kLines = {
+      "NOT THE EFFECT", "YOU WERE", "HOPING FOR,", "WAS IT?"};
+  const Rgb white{235, 235, 235, false};
+  runFrames(renderer,
+            w,
+            h,
+            4200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              if (t < 0.5F)  // nothing happens: the frozen view
+              {
+                std::copy(src.begin(), src.end(), dst.begin());
+                return;
+              }
+              std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});  // ...then, suddenly:
+              drawLines(dst, w, h, kLines, white, 0.82F, 0.6F);
+            });
+}
+
+// End-credits crawl: "THE END" recedes up a ground plane toward a vanishing
+// point (Mode-7 perspective) while the coloured view fades to black behind it.
+void effectStarWars(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  int bw = 0;
+  int bh = 0;
+  const std::vector<char> text = buildTextBitmap({"THE END"}, bw, bh);
+  const Rgb yellow{255, 213, 60, false};
+  runFrames(renderer,
+            w,
+            h,
+            4200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              // Background: the coloured view fading to black.
+              const float fade = std::max(0.0F, 1.0F - t * 1.1F);
+              for (std::size_t i = 0; i < dst.size(); ++i)
+              {
+                const Rgb& s0 = src[i];
+                dst[i] = s0.transparent ? Rgb{0, 0, 0, false}
+                                        : Rgb{static_cast<std::uint8_t>(s0.r * fade),
+                                              static_cast<std::uint8_t>(s0.g * fade),
+                                              static_cast<std::uint8_t>(s0.b * fade),
+                                              false};
+              }
+              // "THE END" recedes from just below the screen to far away, dimming
+              // as it goes and fading out entirely over the last sixth.
+              const float scrollFront = 0.5F + t * 7.0F;
+              const float gFade = std::clamp(1.0F - (t - 0.84F) / 0.16F, 0.0F, 1.0F);
+              drawCrawl(dst, w, h, text, bw, bh, scrollFront, yellow, gFade, 0.75F);
+            });
+}
+
+// Star Wars prologue meets Monty Python: the blue two-line crawl recedes into
+// the distance, and then the foot drops in and STOMPS it flat.
+void effectPythonWars(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  int bw = 0;
+  int bh = 0;
+  const std::vector<char> text =
+      buildTextBitmap({"A LONG TIME AGO IN A GALAXY FAR,", "FAR AWAY..."}, bw, bh);
+  const Rgb blue{90, 140, 255, false};
+
+  // The crawl's near edge recedes from 0.5 to ~2.4 over the build-up; freeze the
+  // frame at that final position as the view the foot then stomps. The recede
+  // speed (kFrontSpan / build-up time) matches the slower, readable pace, but
+  // the build-up is ~1 s shorter than the full recede would be so the foot
+  // stomps before the text drifts off into dead air.
+  constexpr float kRecede = 0.753F;  // the build-up ends here (fraction of t)
+  constexpr float kFrontStart = 0.5F;
+  constexpr float kFrontSpan = 1.87F;
+  std::vector<Rgb> view(static_cast<std::size_t>(w) * h, Rgb{0, 0, 0, false});
+  drawCrawl(view, w, h, text, bw, bh, kFrontStart + kFrontSpan, blue, 1.0F, 1.5F);
+
+  [[maybe_unused]] std::size_t fw = 0;
+  [[maybe_unused]] std::size_t fh = 0;
+  std::unique_ptr<ImageSource> foot = loadFootImage(fw, fh);
+  if (!foot)
+  {
+    // No foot art: let the hand-drawn foot stomp the receded prologue instead.
+    effectMontyPythonProcedural(renderer, view, w, h);
+    return;
+  }
+  auto footPixel = [&](float u, float v) -> Rgb
+  { return foot->pixelAtUV(std::clamp(u, 0.0F, 0.999F), std::clamp(v, 0.0F, 0.999F)); };
+
+  runFrames(renderer,
+            w,
+            h,
+            2200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              if (t < kRecede)
+              {
+                // The prologue appears and recedes toward the vanishing point.
+                std::fill(dst.begin(), dst.end(), Rgb{0, 0, 0, false});
+                const float tA = t / kRecede;
+                const float gFade = std::min(1.0F, tA / 0.2F);  // quick fade-in
+                drawCrawl(
+                    dst, w, h, text, bw, bh, kFrontStart + tA * kFrontSpan, blue, gFade, 1.5F);
+                return;
+              }
+              // ...then the foot slams in fast and stays planted briefly.
+              const float p = std::min(1.0F, ((t - kRecede) / (1.0F - kRecede)) / 0.30F);
+              stompFrame(dst, view, w, h, p, footPixel);
+            });
+}
+
 // Effect roster. Keep in sync with the dispatch switch below and with the
 // names in exitEffectName().
-constexpr int kEffectCount = 26;
+constexpr int kEffectCount = 31;
 }  // namespace
 
 int exitEffectCount()
@@ -2483,12 +3003,13 @@ int exitEffectCount()
 const char* exitEffectName(int effectIndex)
 {
   static const char* const kNames[kEffectCount] = {
-      "explode",  "implode + ring", "spiral",      "matrix drop",   "dissolve",
-      "CRT off",  "fade",           "fire",        "fireworks",     "Pac-Man",
-      "train",    "The End",        "eye wink",    "submarine",     "Bond barrel",
-      "teardrop", "tears in rain",  "word reveal", "koyaanisqatsi", "rosebud",
-      "shiver",   "HAL 9000",       "Rubik",       "foot stomp",    "Monty Python",
-      "tunnel"};
+      "explode",    "implode + ring", "spiral",      "matrix drop",   "dissolve",
+      "CRT off",    "fade",           "fire",        "fireworks",     "Pac-Man",
+      "train",      "The End",        "eye wink",    "submarine",     "Bond barrel",
+      "teardrop",   "tears in rain",  "word reveal", "koyaanisqatsi", "rosebud",
+      "shiver",     "HAL 9000",       "Rubik",       "foot stomp",    "Monty Python",
+      "tunnel",     "gunshot",        "snowfall",    "gotcha",        "Star Wars",
+      "Python wars"};
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return "random";
   return kNames[effectIndex];
@@ -2552,6 +3073,28 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
   // or forced — that's what makes a replayed seed reproduce the exact frame.
   const int pick = static_cast<int>(rng() % static_cast<unsigned>(kEffectCount));
   const int e = (effectIndex < 0) ? pick : (effectIndex % kEffectCount);
+
+  // Reset any leftover interrupt state, then roll for a surprise Monty Python
+  // stomp. Both draws happen unconditionally so the rng stream the effect then
+  // consumes stays identical for a replayed seed. One exit in five is cut short
+  // — except the stomp-based effects, which already end on a foot.
+  g_stompArmed = false;
+  g_stompFired = false;
+  const bool stompRoll = (rng() % 5U) == 0U;
+  const double stompDelayMs = 350.0 + static_cast<double>(rng() % 700U);
+  std::unique_ptr<ImageSource> stompFoot;
+  if (stompRoll && e != 23 && e != 24 && e != 30)
+  {
+    std::size_t sfw = 0;
+    std::size_t sfh = 0;
+    stompFoot = loadFootImage(sfw, sfh);
+    if (stompFoot)
+    {
+      g_stompArmed = true;
+      g_stompTriggerMs = stompDelayMs;
+      g_stompArmStart = std::chrono::steady_clock::now();
+    }
+  }
 
   // Disable autowrap so the bottom-right cell can be painted without
   // scrolling the screen.
@@ -2637,9 +3180,42 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
     case 25:
       effectTunnel(renderer, frame, subW, subH);
       break;
+    case 26:
+      effectGunshot(renderer, frame, subW, subH, rng);
+      break;
+    case 27:
+      effectSnowflakes(renderer, frame, subW, subH, rng);
+      break;
+    case 28:
+      effectGotcha(renderer, frame, subW, subH);
+      break;
+    case 29:
+      effectStarWars(renderer, frame, subW, subH);
+      break;
+    case 30:
+      effectPythonWars(renderer, frame, subW, subH);
+      break;
     default:
       effectFade(renderer, frame, subW, subH);
       break;
+  }
+
+  // If a surprise stomp fired mid-effect, crush the snapshot under the foot —
+  // even faster than the usual stomp (slam in ~75 ms), then hold the planted
+  // foot a beat so the gag registers before the program exits.
+  g_stompArmed = false;
+  if (stompFoot && g_stompFired)
+  {
+    g_stompFired = false;  // let the stomp's own runFrames run to completion
+    auto footPixel = [&](float u, float v) -> Rgb
+    { return stompFoot->pixelAtUV(std::clamp(u, 0.0F, 0.999F), std::clamp(v, 0.0F, 0.999F)); };
+    std::vector<Rgb> view = std::move(g_stompCapture);
+    runFrames(renderer,
+              subW,
+              subH,
+              500,
+              [&](float t, std::vector<Rgb>& dst)
+              { stompFrame(dst, view, subW, subH, std::min(1.0F, t / 0.15F), footPixel); });
   }
 
   // Guaranteed clean end state: restore autowrap, reset attributes, clear.
