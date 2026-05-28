@@ -6172,15 +6172,35 @@ void effectTruman(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
                  ++x)
               dst[static_cast<std::size_t>(y) * w + x] = c;
         };
-        for (int i = 0; i < kSteps; ++i)  // staircase
+        auto fillRectData = [&](float x0, float y0, float x1, float y1, const Rgb& base, float kBase)
+        {
+          for (int yy = std::max(0, static_cast<int>(y0));
+               yy <= std::min(h - 1, static_cast<int>(y1));
+               ++yy)
+            for (int xx = std::max(0, static_cast<int>(x0));
+                 xx <= std::min(w - 1, static_cast<int>(x1));
+                 ++xx)
+            {
+              const Rgb d = sample(src, w, h, xx, yy);
+              const float dr = d.transparent ? 120.0F : d.r;
+              const float dg = d.transparent ? 120.0F : d.g;
+              const float db = d.transparent ? 120.0F : d.b;
+              dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(base.r * kBase + dr * (1 - kBase)),
+                                                               u8(base.g * kBase + dg * (1 - kBase)),
+                                                               u8(base.b * kBase + db * (1 - kBase)),
+                                                               false};
+            }
+        };
+        for (int i = 0; i < kSteps; ++i)  // staircase — risers + treads wear the data
         {
           const float f0 = static_cast<float>(i) / kSteps;
           const float f1 = static_cast<float>(i + 1) / kSteps;
           const float sx = stairX0 + (stairX1 - stairX0) * f0;
           const float sx2 = stairX0 + (stairX1 - stairX0) * f1;
           const float sy = stairY0 + (doorSill - stairY0) * f1;
-          fillRect(sx, sy, sx2 + 1, stairY0, Rgb{150, 146, 140, false});
-          fillRect(sx, sy, sx2 + 1, sy + std::max(1.0F, h * 0.012F), Rgb{212, 208, 198, false});
+          fillRectData(sx, sy, sx2 + 1, stairY0, Rgb{150, 146, 140, false}, 0.62F);
+          fillRectData(
+              sx, sy, sx2 + 1, sy + std::max(1.0F, h * 0.012F), Rgb{212, 208, 198, false}, 0.72F);
         }
         const float open = std::clamp((t - 0.58F) / 0.16F, 0.0F, 1.0F);
         const float dl = doorCx - doorW * 0.5F, dr = doorCx + doorW * 0.5F;
@@ -6936,13 +6956,48 @@ void effectUp(const Renderer& renderer, const std::vector<Rgb>& src, int w, int 
               dst[static_cast<std::size_t>(y) * w + x] = c;
         };
         const float bwd = hw * s, bht = hh * s;
-        fillRect(hx - bwd, hy - bht, hx + bwd, hy, Rgb{225, 210, 175, false});
+        // Walls and roof carry the data: each pixel samples the underlying
+        // view and modulates the tan/red tint, so as the house rises into the
+        // air it visibly wears the weather instead of a flat fill.
+        {
+          const int wx0 = std::max(0, static_cast<int>(hx - bwd));
+          const int wx1 = std::min(w - 1, static_cast<int>(hx + bwd));
+          const int wy0 = std::max(0, static_cast<int>(hy - bht));
+          const int wy1 = std::min(h - 1, static_cast<int>(hy));
+          for (int y = wy0; y <= wy1; ++y)
+            for (int x = wx0; x <= wx1; ++x)
+            {
+              const Rgb d = sample(src, w, h, x, y);
+              const float dr = d.transparent ? 120.0F : d.r;
+              const float dg = d.transparent ? 120.0F : d.g;
+              const float db = d.transparent ? 120.0F : d.b;
+              dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(225 * 0.62F + dr * 0.30F),
+                                                             u8(210 * 0.62F + dg * 0.30F),
+                                                             u8(175 * 0.62F + db * 0.28F),
+                                                             false};
+            }
+        }
         for (int y = 0; y <= static_cast<int>(bht * 0.9F); ++y)  // roof triangle
         {
           const float frac = 1.0F - y / (bht * 0.9F);
           const float rwd = bwd * 1.15F * frac;
           const float ry = hy - bht - y;
-          fillRect(hx - rwd, ry, hx + rwd, ry + 1, Rgb{170, 70, 55, false});
+          const int ryi = static_cast<int>(ry);
+          if (ryi < 0 || ryi >= h)
+            continue;
+          const int rx0 = std::max(0, static_cast<int>(hx - rwd));
+          const int rx1 = std::min(w - 1, static_cast<int>(hx + rwd));
+          for (int x = rx0; x <= rx1; ++x)
+          {
+            const Rgb d = sample(src, w, h, x, ry);
+            const float dr = d.transparent ? 100.0F : d.r;
+            const float dg = d.transparent ? 100.0F : d.g;
+            const float db = d.transparent ? 100.0F : d.b;
+            dst[static_cast<std::size_t>(ryi) * w + x] = Rgb{u8(170 * 0.65F + dr * 0.32F),
+                                                             u8(70 * 0.65F + dg * 0.25F),
+                                                             u8(55 * 0.65F + db * 0.22F),
+                                                             false};
+          }
         }
         if (s > 0.5F)
         {
@@ -7241,12 +7296,20 @@ void effectStandoff(const Renderer& renderer, const std::vector<Rgb>& src, int w
         const int who = cut % 3;
         const float zoom = 1.0F + t * 1.7F;
         const Rgb skin = kSkin[who];
+        // The whole-screen close-up: skin tone modulated by the data so the
+        // weather rides the cheek instead of a flat fill — soft enough that
+        // the face still reads.
         for (int y = 0; y < h; ++y)
           for (int x = 0; x < w; ++x)
           {
             const float vg = 1.0F - 0.4F * std::hypot((x - w * 0.5F) / w, (y - h * 0.5F) / h);
-            dst[static_cast<std::size_t>(y) * w + x] =
-                Rgb{u8(skin.r * vg), u8(skin.g * vg), u8(skin.b * vg), false};
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 80.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            const float k = (l - 128.0F) / 255.0F;  // -0.5..+0.5
+            dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(skin.r * vg + k * 60.0F),
+                                                           u8(skin.g * vg + k * 50.0F),
+                                                           u8(skin.b * vg + k * 30.0F),
+                                                           false};
           }
         const float browY = h * (0.34F - 0.05F * t);
         const float eyeY = h * 0.54F;
@@ -7841,9 +7904,9 @@ void effectFeather(const Renderer& renderer, const std::vector<Rgb>& src, int w,
                               db = d.transparent ? 220 : d.b;
                   dst[static_cast<std::size_t>(py) * w + static_cast<std::size_t>(px)] =
                       rachis ? Rgb{205, 200, 188, false}
-                             : Rgb{u8(250 * 0.86F + dr * 0.14F),
-                                   u8(250 * 0.86F + dg * 0.14F),
-                                   u8(252 * 0.86F + db * 0.14F),
+                             : Rgb{u8(248 * 0.68F + dr * 0.32F),
+                                   u8(248 * 0.68F + dg * 0.32F),
+                                   u8(250 * 0.68F + db * 0.30F),
                                    false};
                 }
               }
@@ -9242,7 +9305,17 @@ void effectDialM(const Renderer& renderer, const std::vector<Rgb>& src, int w, i
                                                   std::exp(-std::pow((t - 0.92F) / 0.04F, 2.0F))
                                             : 0.0F;
         plotDot(dst, w, h, cx, cy, ringR, ya, Rgb{42, 36, 32, false});
-        plotDot(dst, w, h, cx, cy, R + holeR * 0.2F, ya, Rgb{215, 208, 195, false});
+        drawDataDisk(dst,
+                     w,
+                     h,
+                     src,
+                     cx,
+                     cy,
+                     R + holeR * 0.2F,
+                     ya,
+                     0.55F,
+                     0.0F,
+                     Rgb{215, 208, 195, false});  // bakelite face wraps the data
         plotDot(dst, w, h, cx, cy, R * 0.32F, ya, Rgb{40, 32, 28, false});
         for (int k = 0; k < 10; ++k)
         {
@@ -10741,23 +10814,33 @@ void effectBigKeyboard(const Renderer& renderer, const std::vector<Rgb>& src, in
                     ? Rgb{u8(34 + l * 0.18F), u8(28 + l * 0.16F), u8(40 + l * 0.20F), false}
                     : Rgb{6, 6, 10, false};
           }
-        // the white-key floor (12 keys across)
+        // the white-key floor (12 keys across) — each key's ivory carries the
+        // data, so the dance floor is the weather you've been looking at
         const float keyW = static_cast<float>(w) / kKeys;
         const float lit = std::fmod(t * 5.0F, kKeys);
         const int litI = static_cast<int>(lit) % kKeys;
         for (int k = 0; k < kKeys; ++k)
         {
           const float x0 = k * keyW + 1.0F, x1 = (k + 1) * keyW - 1.0F;
-          Rgb col = Rgb{235, 230, 220, false};
-          if (k == litI)
-          {
-            const float k_lit = 1.0F - (lit - litI);  // brightest right as it lights
-            col = Rgb{u8(235 + 20 * k_lit), u8(220 + 30 * k_lit), u8(110 + 90 * k_lit), false};
-          }
+          const bool litKey = (k == litI);
+          const float k_lit = litKey ? (1.0F - (lit - litI)) : 0.0F;
           for (int y = static_cast<int>(keysTop); y <= static_cast<int>(keysBot); ++y)
             for (int x = static_cast<int>(x0); x <= static_cast<int>(x1); ++x)
-              if (x >= 0 && x < w && y >= 0 && y < h)
-                dst[static_cast<std::size_t>(y) * w + x] = col;
+            {
+              if (x < 0 || x >= w || y < 0 || y >= h)
+                continue;
+              const Rgb d = sample(src, w, h, x, y);
+              const float dr = d.transparent ? 130.0F : d.r;
+              const float dg = d.transparent ? 130.0F : d.g;
+              const float db = d.transparent ? 130.0F : d.b;
+              const float baseR = litKey ? (235.0F + 20.0F * k_lit) : 235.0F;
+              const float baseG = litKey ? (220.0F + 30.0F * k_lit) : 230.0F;
+              const float baseB = litKey ? (110.0F + 90.0F * k_lit) : 220.0F;
+              const float ivR = baseR * 0.68F + dr * 0.28F;
+              const float ivG = baseG * 0.68F + dg * 0.28F;
+              const float ivB = baseB * 0.68F + db * 0.25F;
+              dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(ivR), u8(ivG), u8(ivB), false};
+            }
         }
         // black keys (groups of 2 and 3 between whites)
         for (int k = 0; k < kKeys - 1; ++k)
@@ -10825,123 +10908,126 @@ int exitEffectCount()
 
 const char* exitEffectName(int effectIndex)
 {
-  static const char* const kNames[kEffectCount] = {"explode",
-                                                   "implode + ring",
-                                                   "spiral",
-                                                   "matrix drop",
-                                                   "dissolve",
-                                                   "CRT off",
-                                                   "fade",
-                                                   "fire",
-                                                   "fireworks",
-                                                   "Pac-Man",
-                                                   "train",
-                                                   "The End",
-                                                   "eye wink",
-                                                   "submarine",
-                                                   "Bond barrel",
-                                                   "teardrop",
-                                                   "tears in rain",
-                                                   "word reveal",
-                                                   "koyaanisqatsi",
-                                                   "rosebud",
-                                                   "shiver",
-                                                   "HAL 9000",
-                                                   "Rubik",
-                                                   "foot stomp",
-                                                   "Monty Python",
-                                                   "tunnel",
-                                                   "gunshot",
-                                                   "snowfall",
-                                                   "gotcha",
-                                                   "Star Wars",
-                                                   "Python wars",
-                                                   "Flatland",
-                                                   "test card",
-                                                   "doves",
-                                                   "aurora",
-                                                   "thunderstorm",
-                                                   "game of life",
-                                                   "Thanos snap",
-                                                   "Utopia",
-                                                   "bouncing ball",
-                                                   "solar system",
-                                                   "Saturn",
-                                                   "black hole",
-                                                   "Interstellar",
-                                                   "stingray",
-                                                   "jellyfish",
-                                                   "butterfly",
-                                                   "fish",
-                                                   "crab",
-                                                   "spider",
-                                                   "riverdance",
-                                                   "Pac-Man duel",
-                                                   "tornado",
-                                                   "Thriller",
-                                                   "YMCA",
-                                                   "skeleton wave",
-                                                   "Greek dance",
-                                                   "Russian dance",
-                                                   "ballet",
-                                                   "fall to pieces",
-                                                   "Macarena",
-                                                   "Neo",
-                                                   "Truman",
-                                                   "moon rocket",
-                                                   "film burn",
-                                                   "E.T.",
-                                                   "Thelma & Louise",
-                                                   "DeLorean",
-                                                   "Up",
-                                                   "countdown",
-                                                   "iris out",
-                                                   "Lawrence",
-                                                   "Jurassic",
-                                                   "standoff",
-                                                   "Jaws",
-                                                   "Star Gate",
-                                                   "Close Encounters",
-                                                   "Titanic",
-                                                   "Inception",
-                                                   "Vertigo",
-                                                   "Psycho",
-                                                   "feather",
-                                                   "red balloon",
-                                                   "Mary Poppins",
-                                                   "warp",
-                                                   "monolith",
-                                                   "Tron",
-                                                   "boulder",
+  // Alphabetical roster (movie/book title case: short prepositions/articles
+  // lowercased mid-string; acronyms preserved). The switch in playExitEffect
+  // is dispatched by this index, so the two lists must stay in lockstep.
+  static const char* const kNames[kEffectCount] = {"Akira",
                                                    "Apocalypse",
-                                                   "King Kong",
-                                                   "Wizard of Oz",
-                                                   "Nosferatu",
-                                                   "the Birds",
-                                                   "Pulp Fiction",
-                                                   "Strangelove",
-                                                   "Akira",
+                                                   "Aurora",
+                                                   "Ballet",
+                                                   "Bass Spiral",
+                                                   "Big Keyboard",
+                                                   "Black Hole",
+                                                   "Bond Barrel",
+                                                   "Bone Cut",
+                                                   "Bouncing Ball",
+                                                   "Boulder",
+                                                   "Butterfly",
                                                    "Clockwork",
-                                                   "newspaper",
-                                                   "end card",
-                                                   "Shining",
+                                                   "Close Encounters",
+                                                   "Countdown",
+                                                   "Crab",
+                                                   "CRT Off",
+                                                   "DeLorean",
                                                    "Dial M",
-                                                   "Bass spiral",
+                                                   "Dictator Globe",
+                                                   "Dissolve",
+                                                   "Doves",
+                                                   "E.T.",
+                                                   "End Card",
+                                                   "Explode",
+                                                   "Eye Wink",
+                                                   "Fade",
+                                                   "Fall to Pieces",
+                                                   "Feather",
+                                                   "Film Burn",
+                                                   "Fire",
+                                                   "Fireworks",
+                                                   "Fish",
+                                                   "Flatland",
+                                                   "Foot Stomp",
+                                                   "Game of Life",
+                                                   "Gotcha",
+                                                   "Greek Dance",
+                                                   "Gunshot",
+                                                   "HAL 9000",
+                                                   "Implode + Ring",
+                                                   "Inception",
+                                                   "Interstellar",
+                                                   "Iris Out",
+                                                   "Jaws",
+                                                   "Jellyfish",
+                                                   "Jurassic",
+                                                   "King Kong",
+                                                   "Koyaanisqatsi",
+                                                   "Lawrence",
                                                    "Lebowski",
-                                                   "Singin'",
-                                                   "Rocky",
-                                                   "bone cut",
-                                                   "Pride Rock",
-                                                   "Pleasantville",
-                                                   "Tatooine",
+                                                   "Macarena",
+                                                   "Mary Poppins",
+                                                   "Matrix Drop",
                                                    "Memento",
-                                                   "tracks",
+                                                   "Monolith",
+                                                   "Monty Python",
+                                                   "Moon Rocket",
+                                                   "Neo",
+                                                   "Newspaper",
+                                                   "Nosferatu",
+                                                   "Pac-Man",
+                                                   "Pac-Man Duel",
+                                                   "Pleasantville",
+                                                   "Pride Rock",
+                                                   "Psycho",
+                                                   "Pulp Fiction",
+                                                   "Python Wars",
+                                                   "Red Balloon",
+                                                   "Riverdance",
+                                                   "Rocky",
+                                                   "Rosebud",
+                                                   "Rubik",
+                                                   "Russian Dance",
+                                                   "Saturn",
                                                    "Shawshank",
+                                                   "Shining",
+                                                   "Shiver",
+                                                   "Singin'",
+                                                   "Skeleton Wave",
+                                                   "Snowfall",
+                                                   "Solar System",
                                                    "Sound of Music",
-                                                   "Dictator globe",
-                                                   "Spirited train",
+                                                   "Spider",
+                                                   "Spiral",
+                                                   "Spirited Train",
+                                                   "Standoff",
+                                                   "Star Gate",
+                                                   "Star Wars",
+                                                   "Stingray",
+                                                   "Strangelove",
+                                                   "Submarine",
+                                                   "Tatooine",
+                                                   "Teardrop",
+                                                   "Tears in Rain",
+                                                   "Test Card",
+                                                   "Thanos Snap",
+                                                   "The Birds",
+                                                   "The End",
+                                                   "Thelma & Louise",
+                                                   "Thriller",
+                                                   "Thunderstorm",
+                                                   "Titanic",
+                                                   "Tornado",
                                                    "Totoro",
-                                                   "Big keyboard"};
+                                                   "Tracks",
+                                                   "Train",
+                                                   "Tron",
+                                                   "Truman",
+                                                   "Tunnel",
+                                                   "Up",
+                                                   "Utopia",
+                                                   "Vertigo",
+                                                   "Warp",
+                                                   "Wizard of Oz",
+                                                   "Word Reveal",
+                                                   "YMCA"};
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return "random";
   return kNames[effectIndex];
@@ -11017,7 +11103,9 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
   const bool stompRoll = (rng() % 5U) == 0U;
   const double stompDelayMs = 350.0 + static_cast<double>(rng() % 700U);
   std::unique_ptr<ImageSource> stompFoot;
-  if (stompRoll && e != 23 && e != 24 && e != 30)
+  // Foot Stomp (34), Monty Python (56), Python Wars (67) — these already end
+  // on a foot, so don't double-stomp them.
+  if (stompRoll && e != 34 && e != 56 && e != 67)
   {
     std::size_t sfw = 0;
     std::size_t sfh = 0;
@@ -11034,358 +11122,359 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
   // scrolling the screen.
   std::fputs("\x1b[?7l", stdout);
 
+  // Cases follow the alphabetical kNames[] order above.
   switch (e)
   {
     case 0:
-      effectExplode(renderer, frame, subW, subH);
+      effectAkira(renderer, frame, subW, subH);
       break;
     case 1:
-      effectImplodeRing(renderer, frame, subW, subH);
+      effectApocalypse(renderer, frame, subW, subH);
       break;
     case 2:
-      effectSpiral(renderer, frame, subW, subH);
-      break;
-    case 3:
-      effectMatrix(renderer, frame, subW, subH, rng);
-      break;
-    case 4:
-      effectDissolve(renderer, frame, subW, subH, rng);
-      break;
-    case 5:
-      effectCrtOff(renderer, frame, subW, subH);
-      break;
-    case 6:
-      effectFade(renderer, frame, subW, subH);
-      break;
-    case 7:
-      effectFire(renderer, frame, subW, subH, rng);
-      break;
-    case 8:
-      effectFireworks(renderer, frame, subW, subH, rng);
-      break;
-    case 9:
-      effectPacman(renderer, frame, subW, subH);
-      break;
-    case 10:
-      effectTrain(renderer, frame, subW, subH);
-      break;
-    case 11:
-      effectTheEnd(renderer, frame, subW, subH, rng);
-      break;
-    case 12:
-      effectEyewink(renderer, frame, subW, subH);
-      break;
-    case 13:
-      effectSubmarine(renderer, frame, subW, subH, rng);
-      break;
-    case 14:
-      effectBond(renderer, frame, subW, subH);
-      break;
-    case 15:
-      effectTeardrop(renderer, frame, subW, subH);
-      break;
-    case 16:
-      effectTearsInRain(renderer, frame, subW, subH, rng);
-      break;
-    case 17:
-      effectWordReveal(renderer, frame, subW, subH, rng, words);
-      break;
-    case 18:
-      effectKoyaanisqatsi(renderer, frame, subW, subH);
-      break;
-    case 19:
-      effectRosebud(renderer, frame, subW, subH, rng);
-      break;
-    case 20:
-      effectShiver(renderer, frame, subW, subH, rng);
-      break;
-    case 21:
-      effectHal9000(renderer, frame, subW, subH);
-      break;
-    case 22:
-      effectRubik(renderer, frame, subW, subH, rng);
-      break;
-    case 23:
-      effectFoot(renderer, frame, subW, subH);
-      break;
-    case 24:
-      effectMontyPython(renderer, frame, subW, subH);
-      break;
-    case 25:
-      effectTunnel(renderer, frame, subW, subH);
-      break;
-    case 26:
-      effectGunshot(renderer, frame, subW, subH, rng);
-      break;
-    case 27:
-      effectSnowflakes(renderer, frame, subW, subH, rng);
-      break;
-    case 28:
-      effectGotcha(renderer, frame, subW, subH);
-      break;
-    case 29:
-      effectStarWars(renderer, frame, subW, subH);
-      break;
-    case 30:
-      effectPythonWars(renderer, frame, subW, subH);
-      break;
-    case 31:
-      effectFlatland(renderer, frame, subW, subH, rng);
-      break;
-    case 32:
-      effectTestCard(renderer, frame, subW, subH, rng);
-      break;
-    case 33:
-      effectDoves(renderer, frame, subW, subH, rng);
-      break;
-    case 34:
       effectAurora(renderer, frame, subW, subH, rng);
       break;
-    case 35:
-      effectThunderstorm(renderer, frame, subW, subH, rng);
+    case 3:
+      effectBallet(renderer, frame, subW, subH);
       break;
-    case 36:
-      effectGameOfLife(renderer, frame, subW, subH);
+    case 4:
+      effectBassSpiral(renderer, frame, subW, subH);
       break;
-    case 37:
-      effectThanos(renderer, frame, subW, subH, rng);
+    case 5:
+      effectBigKeyboard(renderer, frame, subW, subH);
       break;
-    case 38:
-      effectUtopia(renderer, frame, subW, subH, rng, linesFrame, swedenMask);
-      break;
-    case 39:
-      effectBall(renderer, frame, subW, subH);
-      break;
-    case 40:
-      effectSolarSystem(renderer, frame, subW, subH, rng);
-      break;
-    case 41:
-      effectSaturn(renderer, frame, subW, subH);
-      break;
-    case 42:
+    case 6:
       effectBlackHole(renderer, frame, subW, subH);
       break;
-    case 43:
+    case 7:
+      effectBond(renderer, frame, subW, subH);
+      break;
+    case 8:
+      effectBoneCut(renderer, frame, subW, subH);
+      break;
+    case 9:
+      effectBall(renderer, frame, subW, subH);
+      break;
+    case 10:
+      effectBoulder(renderer, frame, subW, subH);
+      break;
+    case 11:
+      effectButterfly(renderer, frame, subW, subH);
+      break;
+    case 12:
+      effectClockwork(renderer, frame, subW, subH);
+      break;
+    case 13:
+      effectCloseEncounters(renderer, frame, subW, subH);
+      break;
+    case 14:
+      effectCountdown(renderer, frame, subW, subH);
+      break;
+    case 15:
+      effectCrab(renderer, frame, subW, subH);
+      break;
+    case 16:
+      effectCrtOff(renderer, frame, subW, subH);
+      break;
+    case 17:
+      effectDeLorean(renderer, frame, subW, subH);
+      break;
+    case 18:
+      effectDialM(renderer, frame, subW, subH);
+      break;
+    case 19:
+      effectGlobeDance(renderer, frame, subW, subH);
+      break;
+    case 20:
+      effectDissolve(renderer, frame, subW, subH, rng);
+      break;
+    case 21:
+      effectDoves(renderer, frame, subW, subH, rng);
+      break;
+    case 22:
+      effectET(renderer, frame, subW, subH);
+      break;
+    case 23:
+      effectEndCard(renderer, frame, subW, subH);
+      break;
+    case 24:
+      effectExplode(renderer, frame, subW, subH);
+      break;
+    case 25:
+      effectEyewink(renderer, frame, subW, subH);
+      break;
+    case 26:
+      effectFade(renderer, frame, subW, subH);
+      break;
+    case 27:
+      effectFallToPieces(renderer, frame, subW, subH);
+      break;
+    case 28:
+      effectFeather(renderer, frame, subW, subH);
+      break;
+    case 29:
+      effectFilmBurn(renderer, frame, subW, subH);
+      break;
+    case 30:
+      effectFire(renderer, frame, subW, subH, rng);
+      break;
+    case 31:
+      effectFireworks(renderer, frame, subW, subH, rng);
+      break;
+    case 32:
+      effectFish(renderer, frame, subW, subH);
+      break;
+    case 33:
+      effectFlatland(renderer, frame, subW, subH, rng);
+      break;
+    case 34:
+      effectFoot(renderer, frame, subW, subH);
+      break;
+    case 35:
+      effectGameOfLife(renderer, frame, subW, subH);
+      break;
+    case 36:
+      effectGotcha(renderer, frame, subW, subH);
+      break;
+    case 37:
+      effectGreekDance(renderer, frame, subW, subH);
+      break;
+    case 38:
+      effectGunshot(renderer, frame, subW, subH, rng);
+      break;
+    case 39:
+      effectHal9000(renderer, frame, subW, subH);
+      break;
+    case 40:
+      effectImplodeRing(renderer, frame, subW, subH);
+      break;
+    case 41:
+      effectInception(renderer, frame, subW, subH);
+      break;
+    case 42:
       effectInterstellar(renderer, frame, subW, subH);
       break;
+    case 43:
+      effectIrisOut(renderer, frame, subW, subH);
+      break;
     case 44:
-      effectStingray(renderer, frame, subW, subH);
+      effectJaws(renderer, frame, subW, subH);
       break;
     case 45:
       effectJellyfish(renderer, frame, subW, subH);
       break;
     case 46:
-      effectButterfly(renderer, frame, subW, subH);
-      break;
-    case 47:
-      effectFish(renderer, frame, subW, subH);
-      break;
-    case 48:
-      effectCrab(renderer, frame, subW, subH);
-      break;
-    case 49:
-      effectSpider(renderer, frame, subW, subH);
-      break;
-    case 50:
-      effectRiverdance(renderer, frame, subW, subH);
-      break;
-    case 51:
-      effectPacmanDuel(renderer, frame, subW, subH);
-      break;
-    case 52:
-      effectTornado(renderer, frame, subW, subH);
-      break;
-    case 53:
-      effectThriller(renderer, frame, subW, subH);
-      break;
-    case 54:
-      effectYMCA(renderer, frame, subW, subH);
-      break;
-    case 55:
-      effectSkeletonWave(renderer, frame, subW, subH);
-      break;
-    case 56:
-      effectGreekDance(renderer, frame, subW, subH);
-      break;
-    case 57:
-      effectRussianDance(renderer, frame, subW, subH);
-      break;
-    case 58:
-      effectBallet(renderer, frame, subW, subH);
-      break;
-    case 59:
-      effectFallToPieces(renderer, frame, subW, subH);
-      break;
-    case 60:
-      effectMacarena(renderer, frame, subW, subH);
-      break;
-    case 61:
-      effectNeo(renderer, frame, subW, subH);
-      break;
-    case 62:
-      effectTruman(renderer, frame, subW, subH);
-      break;
-    case 63:
-      effectMoonRocket(renderer, frame, subW, subH);
-      break;
-    case 64:
-      effectFilmBurn(renderer, frame, subW, subH);
-      break;
-    case 65:
-      effectET(renderer, frame, subW, subH);
-      break;
-    case 66:
-      effectThelma(renderer, frame, subW, subH);
-      break;
-    case 67:
-      effectDeLorean(renderer, frame, subW, subH);
-      break;
-    case 68:
-      effectUp(renderer, frame, subW, subH);
-      break;
-    case 69:
-      effectCountdown(renderer, frame, subW, subH);
-      break;
-    case 70:
-      effectIrisOut(renderer, frame, subW, subH);
-      break;
-    case 71:
-      effectLawrence(renderer, frame, subW, subH);
-      break;
-    case 72:
       effectJurassic(renderer, frame, subW, subH);
       break;
-    case 73:
-      effectStandoff(renderer, frame, subW, subH);
-      break;
-    case 74:
-      effectJaws(renderer, frame, subW, subH);
-      break;
-    case 75:
-      effectStarGate(renderer, frame, subW, subH);
-      break;
-    case 76:
-      effectCloseEncounters(renderer, frame, subW, subH);
-      break;
-    case 77:
-      effectTitanic(renderer, frame, subW, subH);
-      break;
-    case 78:
-      effectInception(renderer, frame, subW, subH);
-      break;
-    case 79:
-      effectVertigo(renderer, frame, subW, subH);
-      break;
-    case 80:
-      effectPsycho(renderer, frame, subW, subH);
-      break;
-    case 81:
-      effectFeather(renderer, frame, subW, subH);
-      break;
-    case 82:
-      effectRedBalloon(renderer, frame, subW, subH);
-      break;
-    case 83:
-      effectMaryPoppins(renderer, frame, subW, subH);
-      break;
-    case 84:
-      effectWarp(renderer, frame, subW, subH);
-      break;
-    case 85:
-      effectMonolith(renderer, frame, subW, subH);
-      break;
-    case 86:
-      effectTron(renderer, frame, subW, subH);
-      break;
-    case 87:
-      effectBoulder(renderer, frame, subW, subH);
-      break;
-    case 88:
-      effectApocalypse(renderer, frame, subW, subH);
-      break;
-    case 89:
+    case 47:
       effectKong(renderer, frame, subW, subH);
       break;
-    case 90:
-      effectOz(renderer, frame, subW, subH);
+    case 48:
+      effectKoyaanisqatsi(renderer, frame, subW, subH);
       break;
-    case 91:
-      effectNosferatu(renderer, frame, subW, subH);
+    case 49:
+      effectLawrence(renderer, frame, subW, subH);
       break;
-    case 92:
-      effectBirds(renderer, frame, subW, subH);
-      break;
-    case 93:
-      effectPulp(renderer, frame, subW, subH);
-      break;
-    case 94:
-      effectStrangelove(renderer, frame, subW, subH);
-      break;
-    case 95:
-      effectAkira(renderer, frame, subW, subH);
-      break;
-    case 96:
-      effectClockwork(renderer, frame, subW, subH);
-      break;
-    case 97:
-      effectNewspaper(renderer, frame, subW, subH);
-      break;
-    case 98:
-      effectEndCard(renderer, frame, subW, subH);
-      break;
-    case 99:
-      effectShining(renderer, frame, subW, subH);
-      break;
-    case 100:
-      effectDialM(renderer, frame, subW, subH);
-      break;
-    case 101:
-      effectBassSpiral(renderer, frame, subW, subH);
-      break;
-    case 102:
+    case 50:
       effectLebowski(renderer, frame, subW, subH);
       break;
-    case 103:
-      effectSinginRain(renderer, frame, subW, subH);
+    case 51:
+      effectMacarena(renderer, frame, subW, subH);
       break;
-    case 104:
-      effectRocky(renderer, frame, subW, subH);
+    case 52:
+      effectMaryPoppins(renderer, frame, subW, subH);
       break;
-    case 105:
-      effectBoneCut(renderer, frame, subW, subH);
+    case 53:
+      effectMatrix(renderer, frame, subW, subH, rng);
       break;
-    case 106:
-      effectPrideRock(renderer, frame, subW, subH);
-      break;
-    case 107:
-      effectPleasantville(renderer, frame, subW, subH);
-      break;
-    case 108:
-      effectTatooine(renderer, frame, subW, subH);
-      break;
-    case 109:
+    case 54:
       effectMemento(renderer, frame, subW, subH);
       break;
-    case 110:
-      effectStandByMe(renderer, frame, subW, subH);
+    case 55:
+      effectMonolith(renderer, frame, subW, subH);
       break;
-    case 111:
+    case 56:
+      effectMontyPython(renderer, frame, subW, subH);
+      break;
+    case 57:
+      effectMoonRocket(renderer, frame, subW, subH);
+      break;
+    case 58:
+      effectNeo(renderer, frame, subW, subH);
+      break;
+    case 59:
+      effectNewspaper(renderer, frame, subW, subH);
+      break;
+    case 60:
+      effectNosferatu(renderer, frame, subW, subH);
+      break;
+    case 61:
+      effectPacman(renderer, frame, subW, subH);
+      break;
+    case 62:
+      effectPacmanDuel(renderer, frame, subW, subH);
+      break;
+    case 63:
+      effectPleasantville(renderer, frame, subW, subH);
+      break;
+    case 64:
+      effectPrideRock(renderer, frame, subW, subH);
+      break;
+    case 65:
+      effectPsycho(renderer, frame, subW, subH);
+      break;
+    case 66:
+      effectPulp(renderer, frame, subW, subH);
+      break;
+    case 67:
+      effectPythonWars(renderer, frame, subW, subH);
+      break;
+    case 68:
+      effectRedBalloon(renderer, frame, subW, subH);
+      break;
+    case 69:
+      effectRiverdance(renderer, frame, subW, subH);
+      break;
+    case 70:
+      effectRocky(renderer, frame, subW, subH);
+      break;
+    case 71:
+      effectRosebud(renderer, frame, subW, subH, rng);
+      break;
+    case 72:
+      effectRubik(renderer, frame, subW, subH, rng);
+      break;
+    case 73:
+      effectRussianDance(renderer, frame, subW, subH);
+      break;
+    case 74:
+      effectSaturn(renderer, frame, subW, subH);
+      break;
+    case 75:
       effectShawshank(renderer, frame, subW, subH);
       break;
-    case 112:
+    case 76:
+      effectShining(renderer, frame, subW, subH);
+      break;
+    case 77:
+      effectShiver(renderer, frame, subW, subH, rng);
+      break;
+    case 78:
+      effectSinginRain(renderer, frame, subW, subH);
+      break;
+    case 79:
+      effectSkeletonWave(renderer, frame, subW, subH);
+      break;
+    case 80:
+      effectSnowflakes(renderer, frame, subW, subH, rng);
+      break;
+    case 81:
+      effectSolarSystem(renderer, frame, subW, subH, rng);
+      break;
+    case 82:
       effectSoundOfMusic(renderer, frame, subW, subH);
       break;
-    case 113:
-      effectGlobeDance(renderer, frame, subW, subH);
+    case 83:
+      effectSpider(renderer, frame, subW, subH);
       break;
-    case 114:
+    case 84:
+      effectSpiral(renderer, frame, subW, subH);
+      break;
+    case 85:
       effectSpiritedTrain(renderer, frame, subW, subH);
       break;
-    case 115:
+    case 86:
+      effectStandoff(renderer, frame, subW, subH);
+      break;
+    case 87:
+      effectStarGate(renderer, frame, subW, subH);
+      break;
+    case 88:
+      effectStarWars(renderer, frame, subW, subH);
+      break;
+    case 89:
+      effectStingray(renderer, frame, subW, subH);
+      break;
+    case 90:
+      effectStrangelove(renderer, frame, subW, subH);
+      break;
+    case 91:
+      effectSubmarine(renderer, frame, subW, subH, rng);
+      break;
+    case 92:
+      effectTatooine(renderer, frame, subW, subH);
+      break;
+    case 93:
+      effectTeardrop(renderer, frame, subW, subH);
+      break;
+    case 94:
+      effectTearsInRain(renderer, frame, subW, subH, rng);
+      break;
+    case 95:
+      effectTestCard(renderer, frame, subW, subH, rng);
+      break;
+    case 96:
+      effectThanos(renderer, frame, subW, subH, rng);
+      break;
+    case 97:
+      effectBirds(renderer, frame, subW, subH);
+      break;
+    case 98:
+      effectTheEnd(renderer, frame, subW, subH, rng);
+      break;
+    case 99:
+      effectThelma(renderer, frame, subW, subH);
+      break;
+    case 100:
+      effectThriller(renderer, frame, subW, subH);
+      break;
+    case 101:
+      effectThunderstorm(renderer, frame, subW, subH, rng);
+      break;
+    case 102:
+      effectTitanic(renderer, frame, subW, subH);
+      break;
+    case 103:
+      effectTornado(renderer, frame, subW, subH);
+      break;
+    case 104:
       effectTotoro(renderer, frame, subW, subH);
       break;
+    case 105:
+      effectStandByMe(renderer, frame, subW, subH);
+      break;
+    case 106:
+      effectTrain(renderer, frame, subW, subH);
+      break;
+    case 107:
+      effectTron(renderer, frame, subW, subH);
+      break;
+    case 108:
+      effectTruman(renderer, frame, subW, subH);
+      break;
+    case 109:
+      effectTunnel(renderer, frame, subW, subH);
+      break;
+    case 110:
+      effectUp(renderer, frame, subW, subH);
+      break;
+    case 111:
+      effectUtopia(renderer, frame, subW, subH, rng, linesFrame, swedenMask);
+      break;
+    case 112:
+      effectVertigo(renderer, frame, subW, subH);
+      break;
+    case 113:
+      effectWarp(renderer, frame, subW, subH);
+      break;
+    case 114:
+      effectOz(renderer, frame, subW, subH);
+      break;
+    case 115:
+      effectWordReveal(renderer, frame, subW, subH, rng, words);
+      break;
     case 116:
-      effectBigKeyboard(renderer, frame, subW, subH);
+      effectYMCA(renderer, frame, subW, subH);
       break;
     default:
       effectFade(renderer, frame, subW, subH);
