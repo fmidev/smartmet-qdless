@@ -1,4 +1,4 @@
-#include "QdlessGeoTiffSource.h"
+#include "QdlessGdalRasterSource.h"
 
 #include <cpl_conv.h>
 #include <cpl_error.h>
@@ -170,7 +170,7 @@ int labelToParamId(const std::string& label)
 }
 }  // namespace
 
-GeoTiffSource::GeoTiffSource(const std::string& filename) : itsFilename(filename)
+GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(filename)
 {
   GDALAllRegister();
   auto* ds = static_cast<GDALDataset*>(GDALOpen(filename.c_str(), GA_ReadOnly));
@@ -328,30 +328,30 @@ GeoTiffSource::GeoTiffSource(const std::string& filename) : itsFilename(filename
   }
 }
 
-GeoTiffSource::~GeoTiffSource() = default;
+GdalRasterSource::~GdalRasterSource() = default;
 
-std::vector<int> GeoTiffSource::paramIds() const
+std::vector<int> GdalRasterSource::paramIds() const
 {
   return {itsParamId == 0 ? 1 : itsParamId};
 }
-std::string GeoTiffSource::paramShortName(int /*paramId*/) const { return itsParamName; }
-std::string GeoTiffSource::paramLongName(int paramId) const { return paramShortName(paramId); }
-std::string GeoTiffSource::paramUnits(int /*paramId*/) const { return itsParamUnits; }
-int GeoTiffSource::currentParamId() const { return itsParamId == 0 ? 1 : itsParamId; }
-bool GeoTiffSource::selectParamId(int paramId) { return paramId == currentParamId(); }
+std::string GdalRasterSource::paramShortName(int /*paramId*/) const { return itsParamName; }
+std::string GdalRasterSource::paramLongName(int paramId) const { return paramShortName(paramId); }
+std::string GdalRasterSource::paramUnits(int /*paramId*/) const { return itsParamUnits; }
+int GdalRasterSource::currentParamId() const { return itsParamId == 0 ? 1 : itsParamId; }
+bool GdalRasterSource::selectParamId(int paramId) { return paramId == currentParamId(); }
 
-std::size_t GeoTiffSource::timeCount() const { return 1; }
-std::size_t GeoTiffSource::currentTimeIndex() const { return 0; }
-void GeoTiffSource::selectTimeIndex(std::size_t /*i*/) {}
-NFmiMetTime GeoTiffSource::currentValidTime() const { return itsValidTime; }
-NFmiMetTime GeoTiffSource::originTime() const { return itsValidTime; }
+std::size_t GdalRasterSource::timeCount() const { return 1; }
+std::size_t GdalRasterSource::currentTimeIndex() const { return 0; }
+void GdalRasterSource::selectTimeIndex(std::size_t /*i*/) {}
+NFmiMetTime GdalRasterSource::currentValidTime() const { return itsValidTime; }
+NFmiMetTime GdalRasterSource::originTime() const { return itsValidTime; }
 
-std::size_t GeoTiffSource::levelCount() const { return 1; }
-std::size_t GeoTiffSource::currentLevelIndex() const { return 0; }
-void GeoTiffSource::selectLevelIndex(std::size_t /*i*/) {}
-float GeoTiffSource::levelValueAt(std::size_t /*i*/) const { return 0; }
+std::size_t GdalRasterSource::levelCount() const { return 1; }
+std::size_t GdalRasterSource::currentLevelIndex() const { return 0; }
+void GdalRasterSource::selectLevelIndex(std::size_t /*i*/) {}
+float GdalRasterSource::levelValueAt(std::size_t /*i*/) const { return 0; }
 
-float GeoTiffSource::interpolatedValue(double lat, double lon) const
+float GdalRasterSource::interpolatedValue(double lat, double lon) const
 {
   if (!itsArea || itsValues.empty())
     return std::numeric_limits<float>::quiet_NaN();
@@ -368,7 +368,7 @@ float GeoTiffSource::interpolatedValue(double lat, double lon) const
   return itsValues[j * itsNx + i];
 }
 
-void GeoTiffSource::uvToLatLon(double u, double v, double& lat, double& lon) const
+void GdalRasterSource::uvToLatLon(double u, double v, double& lat, double& lon) const
 {
   if (!itsArea)
   {
@@ -387,7 +387,7 @@ void GeoTiffSource::uvToLatLon(double u, double v, double& lat, double& lon) con
   lon = ll.X();
 }
 
-void GeoTiffSource::latLonToUV(double lat, double lon, double& u, double& v) const
+void GdalRasterSource::latLonToUV(double lat, double lon, double& u, double& v) const
 {
   if (!itsArea)
   {
@@ -404,7 +404,7 @@ void GeoTiffSource::latLonToUV(double lat, double lon, double& u, double& v) con
   v = h > 0 ? xy.Y() / h : 0.0;
 }
 
-LatLonBox GeoTiffSource::boundingBox() const
+LatLonBox GdalRasterSource::boundingBox() const
 {
   LatLonBox b;
   if (!itsArea) return b;
@@ -440,7 +440,7 @@ LatLonBox GeoTiffSource::boundingBox() const
   return b;
 }
 
-std::vector<std::pair<std::string, std::string>> GeoTiffSource::extraMetadata() const
+std::vector<std::pair<std::string, std::string>> GdalRasterSource::extraMetadata() const
 {
   std::vector<std::pair<std::string, std::string>> rows;
   rows.emplace_back("Format", "GeoTIFF");
@@ -466,7 +466,7 @@ std::vector<std::pair<std::string, std::string>> GeoTiffSource::extraMetadata() 
   return rows;
 }
 
-std::string GeoTiffSource::gridSignature() const
+std::string GdalRasterSource::gridSignature() const
 {
   // WKT, dimensions, and the GeoTransform together pin down the grid:
   // two files only match when their projection and pixel grid agree

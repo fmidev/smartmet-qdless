@@ -10,26 +10,27 @@ class NFmiArea;
 
 namespace Qdless
 {
-// DataSource for standard GeoTIFFs read via GDAL. grid-files' built-in
-// GeoTIFF reader only handles FMI's private GeometryId tag and does not
-// parse the standard georef tags (33550 ModelPixelScale, 33922 ModelTiepoint,
-// 34735 GeoKeyDirectory), so third-party GeoTIFFs need a fresh path.
+// DataSource for any raster GDAL can open with an axis-aligned geotransform
+// and a known SRS. Originally a GeoTIFF-only path; broadened so JPEG2000,
+// COG, NITF, HDF4 subdatasets, GeoPackage rasters, etc. all flow through
+// the same code. grid-files keeps owning GRIB and NetCDF — they have a
+// richer time/level model than the single-frame view here.
 //
 // One file == one parameter, one timestep, one level. The valid time and
 // the gain/offset/nodata/undetect quartet are read from the GDAL_METADATA
-// TIFF tag (42112) when present — FMI radar GeoTIFFs encode an XML blob
-// there in ODIM-style. When the metadata is missing, the valid time falls
-// back to a leading YYYYMMDDHHMM in the filename, then to mtime, all UTC.
-// Convention is end-of-accumulation per meteorological practice.
-class GeoTiffSource : public DataSource
+// item when present — FMI radar GeoTIFFs encode an XML blob there in
+// ODIM-style. When the metadata is missing, the valid time falls back to a
+// leading YYYYMMDDHHMM in the filename, then to mtime, all UTC. Convention
+// is end-of-accumulation per meteorological practice.
+class GdalRasterSource : public DataSource
 {
  public:
-  explicit GeoTiffSource(const std::string& filename);
-  ~GeoTiffSource() override;
-  GeoTiffSource(const GeoTiffSource&) = delete;
-  GeoTiffSource& operator=(const GeoTiffSource&) = delete;
-  GeoTiffSource(GeoTiffSource&&) = delete;
-  GeoTiffSource& operator=(GeoTiffSource&&) = delete;
+  explicit GdalRasterSource(const std::string& filename);
+  ~GdalRasterSource() override;
+  GdalRasterSource(const GdalRasterSource&) = delete;
+  GdalRasterSource& operator=(const GdalRasterSource&) = delete;
+  GdalRasterSource(GdalRasterSource&&) = delete;
+  GdalRasterSource& operator=(GdalRasterSource&&) = delete;
 
   std::vector<int> paramIds() const override;
   std::string paramShortName(int paramId) const override;

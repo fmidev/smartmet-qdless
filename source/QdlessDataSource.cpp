@@ -2,7 +2,7 @@
 
 #include <fmt/format.h>
 
-#include "QdlessGeoTiffSource.h"
+#include "QdlessGdalRasterSource.h"
 #include "QdlessGridFilesSource.h"
 #include "QdlessImageSource.h"
 #include "QdlessOdimSource.h"
@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <gdal_priv.h>
 #include <stdexcept>
 
 namespace Qdless
@@ -24,7 +25,7 @@ enum class FileKind
   kGrib,
   kNetCDF,
   kHdf5,
-  kGeoTiff,
+  kGdalRaster,
   kImage,
   kShapefile,
   kUnknown,
@@ -48,9 +49,9 @@ FileKind detectKind(const std::string& filename)
   // Require all four bytes — the bare II/MM BOM is also valid for many other
   // file types and we don't want false positives.
   if (n >= 4 && hdr[0] == 0x49 && hdr[1] == 0x49 && hdr[2] == 0x2A && hdr[3] == 0x00)
-    return FileKind::kGeoTiff;
+    return FileKind::kGdalRaster;
   if (n >= 4 && hdr[0] == 0x4D && hdr[1] == 0x4D && hdr[2] == 0x00 && hdr[3] == 0x2A)
-    return FileKind::kGeoTiff;
+    return FileKind::kGdalRaster;
   // Raw image formats. These have no spatial georeference — qdless renders
   // them in image-only mode (pixels straight to screen, overlays
   // suppressed). Detection is by magic only so we don't have to trial-open
@@ -81,11 +82,48 @@ FileKind detectKind(const std::string& filename)
 }
 }  // namespace
 
+// GDAL/OGR last-resort probe. The fast magic-byte checks above route
+// every format with a fixed signature (GRIB, NetCDF, TIFF, PNG, ...) to
+// its specialised backend. Anything that didn't match gets one more
+// chance here: ask GDAL whether it has a driver for the file, in either
+// vector or raster role. OGR-vector is tried first because its "no, I
+// don't recognise this" failure mode is faster (raster open will
+// attempt georef recovery on a JPEG and similar speculative work).
+// Returns nullptr if neither role recognises the file; callers fall
+// back to QueryData and let that backend's own loader speak last.
+std::unique_ptr<DataSource> tryGdalOpen(const std::string& filename)
+{
+  GDALAllRegister();
+  if (auto* ds = static_cast<GDALDataset*>(GDALOpenEx(
+          filename.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr)))
+  {
+    const int n = ds->GetLayerCount();
+    GDALClose(ds);
+    if (n > 0)
+      return std::make_unique<ShapeSource>(filename);
+  }
+  if (auto* ds = static_cast<GDALDataset*>(GDALOpenEx(
+          filename.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY, nullptr, nullptr, nullptr)))
+  {
+    const int n = ds->GetRasterCount();
+    GDALClose(ds);
+    if (n > 0)
+      return std::make_unique<GdalRasterSource>(filename);
+  }
+  return nullptr;
+}
+
 std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
 {
   switch (detectKind(filename))
   {
     case FileKind::kQueryData:
+      // QueryData has no magic; this is the magic-byte sniff's last guess.
+      // Before committing to QD's loader (whose error messages are opaque
+      // for non-QD inputs), try GDAL/OGR — picks up GeoPackage, KML,
+      // GeoJSON, JPEG2000, COG, NITF, etc. that the fast checks missed.
+      if (auto src = tryGdalOpen(filename))
+        return src;
       return std::make_unique<QueryDataSource>(filename);
     case FileKind::kGrib:
     case FileKind::kNetCDF:
@@ -100,8 +138,8 @@ std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
         return std::make_unique<OdimSource>(filename);
       // NetCDF4 (HDF5 magic, no ODIM /what/object). Hand off to grid-files.
       return std::make_unique<GridFilesSource>(filename);
-    case FileKind::kGeoTiff:
-      return std::make_unique<GeoTiffSource>(filename);
+    case FileKind::kGdalRaster:
+      return std::make_unique<GdalRasterSource>(filename);
     case FileKind::kImage:
       return std::make_unique<ImageSource>(filename);
     case FileKind::kShapefile:
@@ -109,6 +147,8 @@ std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
     case FileKind::kUnknown:
       break;
   }
+  if (auto src = tryGdalOpen(filename))
+    return src;
   throw std::runtime_error("unknown file format: " + filename);
 }
 
