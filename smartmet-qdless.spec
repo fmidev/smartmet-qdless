@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.28
-Release: 5%{?dist}.fmi
+Release: 6%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-6.fmi
+- Optional pixel-grade output for the 2D map via the Kitty graphics and Sixel protocols, toggled with `s`
+
 * Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-5.fmi
 - More effects carry the data on their large surfaces; exit-effect names sorted alphabetically with consistent title case
 

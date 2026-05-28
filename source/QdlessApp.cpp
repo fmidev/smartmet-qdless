@@ -4180,6 +4180,41 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       itsLastMessage = std::string("Corners: ") + cornerStyleLabel(itsCornerStyle);
       return true;
 
+    case 's':
+    case 'S':
+    {
+      if (!itsCaps.kitty && !itsCaps.sixel)
+      {
+        itsLastMessage = "Graphics: neither Kitty nor Sixel supported by this terminal";
+        return true;
+      }
+      // Cycle through Block -> Kitty (if supported) -> Sixel (if supported) -> Block.
+      // Kitty wins ties because it's RGBA (no quantisation) and cheaper to encode.
+      auto next = [&](GraphicsMode m)
+      {
+        if (m == GraphicsMode::Block)
+          return itsCaps.kitty ? GraphicsMode::Kitty
+                               : (itsCaps.sixel ? GraphicsMode::Sixel : GraphicsMode::Block);
+        if (m == GraphicsMode::Kitty)
+          return itsCaps.sixel ? GraphicsMode::Sixel : GraphicsMode::Block;
+        return GraphicsMode::Block;  // from Sixel back to off
+      };
+      itsGraphicsMode = next(itsGraphicsMode);
+      const char* label = itsGraphicsMode == GraphicsMode::Kitty   ? "Kitty"
+                          : itsGraphicsMode == GraphicsMode::Sixel ? "Sixel"
+                                                                   : "OFF";
+      if (itsGraphicsMode == GraphicsMode::Block)
+        itsLastMessage = "Graphics: OFF";
+      else
+        itsLastMessage =
+            fmt::format("Graphics: {} ({}×{}px cells)", label, itsCaps.cellPxW, itsCaps.cellPxH);
+      // Clear the screen — graphics blobs and block-glyph cells don't
+      // share grid layout, so leftover pixels from the previous mode
+      // would bleed through where the new mode writes less ink.
+      std::fputs("\x1b[2J", stdout);
+      return true;
+    }
+
     case 'n':
     case 'N':
       itsGraticuleStyle = nextLineStyle(itsGraticuleStyle);
@@ -4611,36 +4646,67 @@ void App::drawMap(UI& ui)
     // panel active for the duration of its render.
     itsActivePanel = static_cast<int>(i);
 
-    const int subW = r.width * 2;
-    const int subH = r.height * subRowsForStyle(itsCornerStyle);
+    // Sub-pixel grid: 2×subRows per cell in block-glyph mode; one sub-pixel
+    // per terminal pixel in any graphics mode (so coastlines / data
+    // sampling / overlays all upscale to the actual pixel grid naturally).
+    const bool gfx = itsGraphicsMode != GraphicsMode::Block;
+    const int subPerCellX = gfx ? itsCaps.cellPxW : 2;
+    const int subPerCellY = gfx ? itsCaps.cellPxH : subRowsForStyle(itsCornerStyle);
+    const int subW = r.width * subPerCellX;
+    const int subH = r.height * subPerCellY;
     float dMin = 0;
     float dMax = 0;
     auto pixels = sampleSlice(subW, subH, dMin, dMax);
     // Thick mode rasterises into the data buffer before the renderer so the
-    // line shows as a half-cell quadrant block.
-    if (itsGraticuleStyle == LineStyle::Thick)
+    // line shows as a half-cell quadrant block. In graphics mode, braille
+    // overlays would land on top of the pixel raster with the wrong grid
+    // (braille glyphs use cell-positioned characters); promote any Braille
+    // line style to Thick for the lifetime of this render so the lines
+    // make it into the pixel pass.
+    const LineStyle effGrat =
+        gfx && itsGraticuleStyle == LineStyle::Braille ? LineStyle::Thick : itsGraticuleStyle;
+    const LineStyle effCoast =
+        gfx && itsCoastlineStyle == LineStyle::Braille ? LineStyle::Thick : itsCoastlineStyle;
+    const LineStyle effBord =
+        gfx && itsBorderStyle == LineStyle::Braille ? LineStyle::Thick : itsBorderStyle;
+    const LineStyle effShape =
+        gfx && itsShapeOutlineStyle == LineStyle::Braille ? LineStyle::Thick : itsShapeOutlineStyle;
+    if (effGrat == LineStyle::Thick)
       overlayGraticule(pixels, subW, subH);
-    if (itsCoastlineStyle == LineStyle::Thick)
+    if (effCoast == LineStyle::Thick)
       overlayPolylines(pixels, subW, subH, itsCoastlines, Rgb{0, 0, 0});
-    if (itsBorderStyle == LineStyle::Thick)
+    if (effBord == LineStyle::Thick)
       overlayPolylines(pixels, subW, subH, itsBorders, Rgb{90, 90, 90});
-    if (itsShapeOutlineStyle == LineStyle::Thick)
+    if (effShape == LineStyle::Thick)
       overlayPolylines(pixels, subW, subH, itsShapeOutlines, borderColor());
     overlayCities(pixels, subW, subH);
     overlayCrossSection(pixels, subW, subH);
     overlayMarker(pixels, subW, subH);
 
-    itsRenderer.render(os, pixels, subW, subH, r.row, r.col);
+    switch (itsGraphicsMode)
+    {
+      case GraphicsMode::Kitty:
+        renderKitty(os, pixels, subW, subH, r.row, r.col);
+        break;
+      case GraphicsMode::Sixel:
+        renderSixel(os, pixels, subW, subH, r.row, r.col);
+        break;
+      case GraphicsMode::Block:
+      default:
+        itsRenderer.render(os, pixels, subW, subH, r.row, r.col);
+        break;
+    }
 
     // Braille mode draws on top of the rendered quadrant blocks so the
     // line is just a few dots wide; data colour shows through behind it.
-    if (itsGraticuleStyle == LineStyle::Braille)
+    // Skipped when sixel promoted these to Thick above.
+    if (effGrat == LineStyle::Braille)
       appendGraticuleBraille(os, pixels, subW, r.row, r.col);
-    if (itsCoastlineStyle == LineStyle::Braille)
+    if (effCoast == LineStyle::Braille)
       appendPolylineBraille(os, itsCoastlines, Rgb{0, 0, 0}, pixels, subW, r.row, r.col);
-    if (itsBorderStyle == LineStyle::Braille)
+    if (effBord == LineStyle::Braille)
       appendPolylineBraille(os, itsBorders, Rgb{90, 90, 90}, pixels, subW, r.row, r.col);
-    if (itsShapeOutlineStyle == LineStyle::Braille)
+    if (effShape == LineStyle::Braille)
       appendPolylineBraille(os, itsShapeOutlines, borderColor(), pixels, subW, r.row, r.col);
 
     if (itsShowWindArrows)
@@ -5991,6 +6057,12 @@ void App::playExitEffect(int effectIndex, unsigned seed, const std::string& word
 
 int App::runInteractive()
 {
+  // Probe Kitty / sixel + cell pixel size BEFORE ncurses takes over the
+  // terminal (initscr clobbers termios and intercepts stdin). The probe
+  // briefly raw-modes stdin to read the DA1 / \e[16t / Kitty replies, then
+  // restores it. No-op on non-tty contexts.
+  itsCaps = probeTerminalCapabilities();
+
   UI ui;
 
   // Deferred PostGIS layer pick: when launched with --pg but no

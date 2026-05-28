@@ -4,6 +4,7 @@
 #include "QdlessCoastline.h"
 #include "QdlessDataSource.h"
 #include "QdlessPalette.h"
+#include "QdlessGraphics.h"
 #include "QdlessRenderer.h"
 
 #include <array>
@@ -339,6 +340,20 @@ class App
   // that don't ship the Symbols-for-Legacy-Computing block. macOS Terminal.app
   // is auto-detected and starts in Square — see defaultCornerStyle().
   CornerStyle itsCornerStyle = defaultCornerStyle();
+  // Pixel-grade output for the 2D map. Toggled with `s`/`S`, which cycles
+  // through whichever protocols the host terminal supports — see
+  // probeTerminalCapabilities(). When non-Block, the map is sampled at
+  // terminal-pixel resolution (cellW*cellPxW × cellH*cellPxH) and emitted
+  // as a graphics blob instead of block glyphs; popups / 3D / exit effects
+  // keep block-glyph output regardless.
+  enum class GraphicsMode : std::uint8_t
+  {
+    Block,  // block-glyph cells (the default)
+    Kitty,  // Kitty graphics protocol (RGBA, no quantisation)
+    Sixel,  // sixel (≤254-colour quantisation per frame)
+  };
+  GraphicsMode itsGraphicsMode = GraphicsMode::Block;
+  TerminalCapabilities itsCaps{};
   // Top-N cap for the cities overlay; PageUp / PageDown step through fixed
   // levels (5, 10, 25, 50, 100, 250, 500). Default = a comfortable mid value.
   int itsCityOverlayN = 25;
