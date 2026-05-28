@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.28
-Release: 10%{?dist}.fmi
+Release: 11%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-11.fmi
+- Shining flood now follows the corridor's 1-point perspective wedge instead of a rectangle; 34 new exit effects across iconic art/cinema (Pink Panther, Bone Chandelier, ACME Anvil, Banksy Balloon, Ceci n'est pas, HAL Stare, Hitchcock, Hokusai Wave, Magritte Bowler, Munch Scream, Silly Walk, That's All Folks, UFO, Warhol Banana) and a mathematics/physics theme (Dodecahedron, Pythagoras, Mobius, Mandelbrot, Lorenz Attractor, Newton Cradle, Schrodinger, Pendulum Waves, Euler Identity, Bohr Atom, Foucault Pendulum, Galileo Tower, Fourier, Pi, Golden Spiral, Double Slit, Sierpinski, Brachistochrone, Chladni, Standing Wave)
+
 * Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-10.fmi
 - 3D + cross-section curtain view ([v]): the surface paints from the bottom level, a vertical slice between two arrow-driven endpoints shows the data at every height, both share one z-buffer, and Space animates time through the whole picture
 
