@@ -440,6 +440,179 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
   return result;
 }
 
+int UI::popupMenuSections(const std::string& title, const std::vector<MenuRow>& rows,
+                          int currentIndex, std::function<void(int)> onSelect)
+{
+  if (rows.empty()) return -1;
+  wtimeout(itsStatusWin, -1);
+
+  auto isHeader = [&](int i)
+  { return i >= 0 && i < static_cast<int>(rows.size()) && rows[i].isHeader; };
+  // First selectable row (used when the requested current index points
+  // at a header, e.g. an empty group at the top).
+  auto firstSelectable = [&]() -> int
+  {
+    for (std::size_t i = 0; i < rows.size(); ++i)
+      if (!rows[i].isHeader) return static_cast<int>(i);
+    return -1;
+  };
+  const int firstSel = firstSelectable();
+  if (firstSel < 0) return -1;  // every row is a header — nothing pickable
+
+  // Sizing — pad each non-header row by 2 spaces of indent (visual hierarchy).
+  int maxLabel = 0;
+  for (const auto& r : rows)
+    maxLabel = std::max(maxLabel, utf8Width(r.label) + (r.isHeader ? 6 : 4));
+  int width = std::max(maxLabel + 4, utf8Width(title) + 6);
+  width = std::min(width, COLS - 4);
+  int interiorW = width - 2;
+
+  constexpr int kFooterRows = 3;
+  int maxRows = std::max(1, LINES - 6 - kFooterRows);
+  int innerH = std::min(static_cast<int>(rows.size()), maxRows);
+  int height = innerH + kFooterRows + 2;
+  int top = std::max(0, (LINES - height) / 2);
+  int left = std::max(0, (COLS - width) / 2);
+
+  int sel = std::clamp(currentIndex, 0, static_cast<int>(rows.size()) - 1);
+  if (isHeader(sel)) sel = firstSel;
+  int scroll = std::max(0, sel - innerH / 2);
+  int result = -1;
+
+  static const std::array<std::string_view, 3> kFooter = {
+      "\xe2\x86\x91\xe2\x86\x93 select", "Enter pick", "Esc cancel"};
+
+  while (true)
+  {
+    if (sel < scroll) scroll = sel;
+    if (sel >= scroll + innerH) scroll = sel - innerH + 1;
+
+    std::ostringstream os;
+    putAt(os, top, left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x8c\xe2\x94\x80[" << kEscFgWhite
+       << title << kEscFgCyan << "]";
+    int titleConsumed = 4 + utf8Width(title);
+    for (int i = 0; i < width - titleConsumed - 1; ++i) os << "\xe2\x94\x80";
+    os << "\xe2\x94\x90" << kEscReset;
+
+    for (int i = 0; i < innerH; ++i)
+    {
+      putAt(os, top + 1 + i, left);
+      int idx = scroll + i;
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82";
+      if (idx >= static_cast<int>(rows.size()))
+      {
+        os << kEscBgBlack << kEscFgWhite;
+        pad(os, interiorW);
+      }
+      else if (rows[idx].isHeader)
+      {
+        // Header row: ── label ── in bold cyan, no selection highlight.
+        os << kEscBgBlack << kEscFgCyan << kEscBold;
+        os << " \xe2\x94\x80\xe2\x94\x80 " << rows[idx].label << " \xe2\x94\x80\xe2\x94\x80";
+        const int consumed = 7 + utf8Width(rows[idx].label);
+        pad(os, interiorW - consumed);
+        os << kEscReset;
+      }
+      else
+      {
+        const bool isSel = (idx == sel);
+        if (isSel)
+          os << kEscBgWhite << kEscFgBlack << kEscBold;
+        else
+          os << kEscBgBlack << kEscFgWhite;
+        os << "    ";  // 4-space indent (under the header decoration)
+        int consumed = 4;
+        os << rows[idx].label;
+        consumed += utf8Width(rows[idx].label);
+        pad(os, interiorW - consumed);
+      }
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+    }
+
+    for (int fr = 0; fr < kFooterRows; ++fr)
+    {
+      putAt(os, top + innerH + 1 + fr, left);
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
+         << ' ' << kFooter[fr];
+      pad(os, interiorW - 1 - utf8Width(kFooter[fr]));
+      os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+    }
+    putAt(os, top + height - 1, left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
+    for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
+    os << "\xe2\x94\x98" << kEscReset;
+
+    const std::string s = os.str();
+    std::fwrite(s.data(), 1, s.size(), stdout);
+    std::fflush(stdout);
+
+    int ch = wgetch(itsStatusWin);
+    if (ch == 27 || ch == 'q') { result = -1; break; }
+    if (ch == '\n' || ch == KEY_ENTER) { result = sel; break; }
+
+    auto moveTo = [&](int target) -> bool
+    {
+      const int last = static_cast<int>(rows.size()) - 1;
+      target = std::clamp(target, 0, last);
+      // Skip headers in the direction of motion.
+      const int dir = (target >= sel) ? 1 : -1;
+      while (target >= 0 && target <= last && isHeader(target))
+        target += dir;
+      if (target < 0 || target > last)  // ran past the ends; bounce back
+      {
+        target = (dir > 0) ? last : 0;
+        while (target >= 0 && target <= last && isHeader(target))
+          target += (dir > 0 ? -1 : 1);
+      }
+      if (target < 0 || target > last) return false;
+      if (target == sel) return false;
+      sel = target;
+      return true;
+    };
+    auto applyMove = [&](int key) -> bool
+    {
+      const int last = static_cast<int>(rows.size()) - 1;
+      if (key == KEY_UP || key == 'k')        return moveTo(sel - 1);
+      if (key == KEY_DOWN || key == 'j')      return moveTo(sel + 1);
+      if (key == KEY_HOME)                    return moveTo(0);
+      if (key == KEY_END)                     return moveTo(last);
+      if (key == KEY_NPAGE)                   return moveTo(sel + innerH);
+      if (key == KEY_PPAGE)                   return moveTo(sel - innerH);
+      return false;
+    };
+    const int prevSel = sel;
+    if (applyMove(ch))
+    {
+      if (onSelect)
+      {
+        wtimeout(itsStatusWin, 0);
+        int next;
+        while ((next = wgetch(itsStatusWin)) != ERR)
+        {
+          if (!applyMove(next))
+          {
+            ungetch(next);
+            break;
+          }
+        }
+        wtimeout(itsStatusWin, -1);
+        if (sel != prevSel) onSelect(sel);
+      }
+      continue;
+    }
+    if (ch == KEY_RESIZE)
+    {
+      recomputeLayout();
+      result = -1;
+      break;
+    }
+  }
+
+  touch();
+  return result;
+}
+
 int UI::popupSearch(const std::string& title,
                     std::function<std::vector<std::string>(const std::string&)> matcher,
                     const std::string& header, bool allowTab)

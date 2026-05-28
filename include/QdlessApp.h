@@ -89,6 +89,11 @@ struct Panel
 {
   int paramIndex = 0;
   std::size_t levelIndex = 0;
+  // For parameters that exist on multiple level types in the file
+  // (e.g. Temperature on both pressure and hybrid in the same GRIB), the
+  // active group is remembered per panel so cycling panels or switching
+  // back to a parameter restores the user's choice.
+  int levelGroupIdx = 0;
   Palette palette;
   float valueScale = 1.0F;
   float valueOffset = 0.0F;

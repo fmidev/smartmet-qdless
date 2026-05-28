@@ -104,6 +104,56 @@ float QueryDataSource::levelValueAt(std::size_t i) const
   return v;
 }
 
+std::string QueryDataSource::levelLabel(std::size_t i) const
+{
+  const auto save = itsInfo->LevelIndex();
+  itsInfo->LevelIndex(static_cast<unsigned long>(i));
+  const int t = static_cast<int>(itsInfo->Level()->LevelType());
+  const float v = itsInfo->Level()->LevelValue();
+  itsInfo->LevelIndex(save);
+  return DataSource::formatLevelByType(t, v);
+}
+
+bool QueryDataSource::levelsAscendWithValue() const
+{
+  // QueryData carries a single level type per file; ask the first level
+  // about it. Pressure / depth descend; everything else ascends.
+  if (itsInfo->SizeLevels() == 0)
+    return false;
+  const auto save = itsInfo->LevelIndex();
+  itsInfo->LevelIndex(0);
+  const int t = static_cast<int>(itsInfo->Level()->LevelType());
+  itsInfo->LevelIndex(save);
+  return t != 100 && t != 160;
+}
+
+std::vector<DataSource::LevelGroup> QueryDataSource::levelGroupsForParam(int /*paramId*/) const
+{
+  // QueryData files carry exactly one level type. Report it as a single
+  // group so the App's grouped picker still shows the type name in its
+  // status line.
+  const std::size_t n = itsInfo->SizeLevels();
+  if (n == 0)
+    return {};
+  std::vector<float> values(n);
+  const auto save = itsInfo->LevelIndex();
+  int typeId = 0;
+  for (std::size_t i = 0; i < n; ++i)
+  {
+    itsInfo->LevelIndex(static_cast<unsigned long>(i));
+    values[i] = itsInfo->Level()->LevelValue();
+    if (i == 0)
+      typeId = static_cast<int>(itsInfo->Level()->LevelType());
+  }
+  itsInfo->LevelIndex(save);
+  LevelGroup g;
+  g.typeId = typeId;
+  g.typeName = DataSource::levelTypeName(typeId);
+  g.values = std::move(values);
+  g.ascendsWithValue = (typeId != 100 && typeId != 160);
+  return {g};
+}
+
 float QueryDataSource::interpolatedValue(double lat, double lon) const
 {
   return itsInfo->InterpolatedValue(NFmiPoint(lon, lat));

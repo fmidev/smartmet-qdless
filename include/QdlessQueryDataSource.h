@@ -42,6 +42,9 @@ class QueryDataSource : public DataSource
   std::size_t currentLevelIndex() const override;
   void selectLevelIndex(std::size_t i) override;
   float levelValueAt(std::size_t i) const override;
+  std::string levelLabel(std::size_t i) const override;
+  bool levelsAscendWithValue() const override;
+  std::vector<LevelGroup> levelGroupsForParam(int paramId) const override;
 
   float interpolatedValue(double lat, double lon) const override;
   LatLonBox boundingBox() const override;

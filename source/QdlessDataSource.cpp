@@ -175,6 +175,66 @@ std::string DataSource::levelLabel(std::size_t i) const
   return fmt::format("{:g}", levelValueAt(i));
 }
 
+std::vector<DataSource::LevelGroup> DataSource::levelGroupsForParam(int /*paramId*/) const
+{
+  // Default: one synthetic group containing the existing flat list.
+  // Subclasses that know the level type override; this keeps Shape /
+  // Image / Gdal / Odim sources working unchanged.
+  LevelGroup g;
+  g.typeId = 0;  // kFmiNoLevelType
+  g.typeName = "Levels";
+  g.values.reserve(levelCount());
+  for (std::size_t i = 0; i < levelCount(); ++i)
+    g.values.push_back(levelValueAt(i));
+  g.ascendsWithValue = levelsAscendWithValue();
+  return {g};
+}
+
+std::string DataSource::levelTypeName(int typeId)
+{
+  // FmiLevelType (newbase/NFmiLevelType.h) numeric constants. Names are
+  // chosen for terseness in the level picker's section headers.
+  switch (typeId)
+  {
+    case 1: return "Surface";
+    case 50: return "Sounding";
+    case 51: return "Amdar";
+    case 100: return "Pressure (hPa)";
+    case 102: return "Mean sea level";
+    case 103: return "Altitude (m)";
+    case 105: return "Height (m)";
+    case 109: return "Hybrid";
+    case 120: return "Flight level";
+    case 160: return "Depth (m)";
+    case 169: return "Road class 1";
+    case 170: return "Road class 2";
+    case 171: return "Road class 3";
+    case 1001: return "SYNOP";
+    default: return typeId == 0 ? "Levels" : fmt::format("Level type {}", typeId);
+  }
+}
+
+std::string DataSource::formatLevelByType(int typeId, float value)
+{
+  switch (typeId)
+  {
+    case 1:  // Ground surface
+      return "Surface";
+    case 100:  // Pressure
+      return fmt::format("{:g} hPa", value);
+    case 103:  // Altitude
+    case 105:  // Height
+    case 160:  // Depth
+      return fmt::format("{:g} m", value);
+    case 120:  // Flight level
+      return fmt::format("FL{:g}", value);
+    case 102:  // Mean sea level
+      return "MSL";
+    default:
+      return fmt::format("{:g}", value);
+  }
+}
+
 std::string DataSource::gridSignature() const
 {
   // Default: lat/lon bbox to 6 decimals (~10 cm). Adequate for

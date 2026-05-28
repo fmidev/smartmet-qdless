@@ -3078,7 +3078,20 @@ void App::renderTimeline(UI& ui)
   // Level reminder for multi-level sources (pressure/hybrid/elangle/CAPPI).
   // Single-level sources skip this so we don't waste bar real estate.
   if (itsSource->levelCount() > 1)
+  {
     label += fmt::format("  L:{}", itsSource->levelLabel(itsSource->currentLevelIndex()));
+    // Multi-type GRIBs: surface the active type name so the user can see
+    // whether they're looking at pressure / hybrid / height / ...  For a
+    // single-type file the type suffix is already implicit in the label
+    // (e.g. "850 hPa") and would just clutter.
+    const auto groups = itsSource->levelGroupsForParam(id);
+    if (groups.size() > 1)
+    {
+      const int g = itsSource->currentLevelGroupIndex(id);
+      if (g >= 0 && g < static_cast<int>(groups.size()))
+        label += fmt::format(" ({})", groups[static_cast<std::size_t>(g)].typeName);
+    }
+  }
   if (const std::string orig = originTimeLabel(); !orig.empty())
     label += "   (analysis " + orig + ")";
   if (itsAnimating)
@@ -3211,6 +3224,24 @@ std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
     else
       rows.emplace_back("Levels", fmt::format("{}", nl));
   }
+  // Level-type inventory — one row per type present for the active
+  // parameter, sized to indicate "Temperature has 13 pressure surfaces
+  // *and* 65 hybrid surfaces in this file." Only shown when more than
+  // one type exists; single-type files are already covered by "Levels".
+  {
+    const auto groups = itsSource->levelGroupsForParam(itsSource->currentParamId());
+    if (groups.size() > 1)
+    {
+      std::string s;
+      for (std::size_t i = 0; i < groups.size(); ++i)
+      {
+        if (i)
+          s += ", ";
+        s += fmt::format("{} ({})", groups[i].typeName, groups[i].values.size());
+      }
+      rows.emplace_back("Level types", s);
+    }
+  }
 
   rows.emplace_back("", "");
 
@@ -3259,7 +3290,19 @@ void App::selectParam(int newIndex)
   if (newIndex < 0 || newIndex >= static_cast<int>(itsParamIds.size()))
     return;
   activePanel().paramIndex = newIndex;
-  itsSource->selectParamId(itsParamIds[newIndex]);
+  const int paramId = itsParamIds[newIndex];
+  itsSource->selectParamId(paramId);
+  // Restore the panel's last-active level group for this parameter (or
+  // clamp to 0 if the parameter only exists on one type now). The source
+  // owns the per-(param, group) level memory, so flipping the group here
+  // also snaps the level index back to where the user left it.
+  const int nGroups = static_cast<int>(itsSource->levelGroupsForParam(paramId).size());
+  int g = activePanel().levelGroupIdx;
+  if (g < 0 || g >= std::max(1, nGroups))
+    g = 0;
+  activePanel().levelGroupIdx = g;
+  itsSource->selectLevelGroup(paramId, g);
+  activePanel().levelIndex = itsSource->currentLevelIndex();
   loadPalette();  // re-resolve palette for the active panel's new parameter
 }
 
@@ -3882,19 +3925,93 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'L':  // uppercase only — lowercase 'l' is reserved for pan-right
     {
       // Live preview, matching the parameter popup.
-      const int savedIdx = static_cast<int>(itsSource->currentLevelIndex());
-      auto preview = [this, &ui](int idx)
+      const int paramId = itsSource->currentParamId();
+      const auto groups = itsSource->levelGroupsForParam(paramId);
+      const int savedGroup = activePanel().levelGroupIdx;
+      const int savedLevel = static_cast<int>(itsSource->currentLevelIndex());
+
+      // Build the menu: one header per group, followed by that group's
+      // levels. Remember which row maps to which (group, level) so we
+      // can flip both atomically on selection.
+      std::vector<UI::MenuRow> rows;
+      std::vector<std::pair<int, int>> rowToGL;  // (groupIdx, levelIdx) per row; (-1,-1) for headers
+      int currentRow = 0;
+      const bool multi = groups.size() > 1;
+      for (std::size_t gi = 0; gi < groups.size(); ++gi)
       {
-        selectLevel(idx);
+        if (multi)
+        {
+          UI::MenuRow h;
+          h.label = groups[gi].typeName + fmt::format(" ({})", groups[gi].values.size());
+          h.isHeader = true;
+          rows.push_back(std::move(h));
+          rowToGL.emplace_back(-1, -1);
+        }
+        for (std::size_t li = 0; li < groups[gi].values.size(); ++li)
+        {
+          UI::MenuRow r;
+          // Per-row label: just the type-aware value string (the header
+          // already names the type when multi; we keep the unit suffix
+          // for clarity in single-group case too).
+          r.label = DataSource::formatLevelByType(groups[gi].typeId, groups[gi].values[li]);
+          rows.push_back(std::move(r));
+          rowToGL.emplace_back(static_cast<int>(gi), static_cast<int>(li));
+          if (static_cast<int>(gi) == savedGroup && static_cast<int>(li) == savedLevel)
+            currentRow = static_cast<int>(rows.size()) - 1;
+        }
+      }
+      if (rows.empty())
+        return true;  // nothing to pick
+
+      auto applyRow = [&](int row)
+      {
+        if (row < 0 || row >= static_cast<int>(rowToGL.size()))
+          return;
+        const auto [gi, li] = rowToGL[row];
+        if (gi < 0)
+          return;
+        if (gi != activePanel().levelGroupIdx)
+        {
+          activePanel().levelGroupIdx = gi;
+          itsSource->selectLevelGroup(paramId, gi);
+        }
+        selectLevel(li);
+      };
+      auto preview = [&](int row)
+      {
+        applyRow(row);
         renderTimeline(ui);
         drawMap(ui);
         drawCrossSection(ui);
       };
-      int picked = ui.popupMenu("Levels", levelLabels(), savedIdx, false, preview);
+
+      int picked = multi ? ui.popupMenuSections("Levels", rows, currentRow, preview)
+                         : ui.popupMenu("Levels",
+                                        [&]
+                                        {
+                                          std::vector<std::string> ss;
+                                          ss.reserve(rows.size());
+                                          for (const auto& r : rows)
+                                            ss.push_back(r.label);
+                                          return ss;
+                                        }(),
+                                        savedLevel,
+                                        false,
+                                        [&](int li) { preview(li); });
       if (picked < 0)
-        selectLevel(savedIdx);
-      else if (picked != static_cast<int>(itsSource->currentLevelIndex()))
-        selectLevel(picked);
+      {
+        // Cancelled — restore everything to what it was when the popup opened.
+        if (savedGroup != activePanel().levelGroupIdx)
+        {
+          activePanel().levelGroupIdx = savedGroup;
+          itsSource->selectLevelGroup(paramId, savedGroup);
+        }
+        selectLevel(savedLevel);
+      }
+      else
+      {
+        applyRow(multi ? picked : picked);
+      }
       return true;
     }
 

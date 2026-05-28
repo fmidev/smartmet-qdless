@@ -77,6 +77,22 @@ class UI
                 int currentIndex, bool allowTab = false,
                 std::function<void(int)> onSelect = {});
 
+  // Section-header variant. Same shape as popupMenu, but each row can be
+  // marked as a section header: rendered bold with ── decoration, no
+  // hotkey, not selectable (j/k skip them, Enter / hotkey can't land on
+  // them, the live-preview callback never fires for them). Used by the
+  // level picker when the source carries multiple level types so the
+  // user sees groups labelled "Pressure (hPa)" / "Hybrid" / "Height (m)"
+  // with their levels listed underneath.
+  struct MenuRow
+  {
+    std::string label;
+    bool isHeader = false;
+  };
+  int popupMenuSections(const std::string& title, const std::vector<MenuRow>& rows,
+                        int currentIndex,
+                        std::function<void(int)> onSelect = {});
+
   // Centred legend popup showing palette colour swatches and value ranges.
   // The two title strings appear on two stacked rows so the popup can stay
   // narrow. Dismissed by any key.

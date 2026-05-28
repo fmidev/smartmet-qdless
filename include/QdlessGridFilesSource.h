@@ -50,6 +50,12 @@ class GridFilesSource : public DataSource
   std::size_t currentLevelIndex() const override;
   void selectLevelIndex(std::size_t i) override;
   float levelValueAt(std::size_t i) const override;
+  std::string levelLabel(std::size_t i) const override;
+  bool levelsAscendWithValue() const override;
+
+  std::vector<LevelGroup> levelGroupsForParam(int paramId) const override;
+  void selectLevelGroup(int paramId, int groupIdx) override;
+  int currentLevelGroupIndex(int paramId) const override;
 
   float interpolatedValue(double lat, double lon) const override;
   LatLonBox boundingBox() const override;
@@ -72,6 +78,9 @@ class GridFilesSource : public DataSource
   static void ensureGridDef();
 
  private:
+  // The active LevelGroup for the currently-selected parameter, or
+  // nullptr when the parameter has no levels at all.
+  const LevelGroup* activeGroup() const;
   // Build the (param, time, level) index from the messages in the file.
   void indexMessages();
   // Select the message matching the current (param, time, level).
@@ -100,13 +109,20 @@ class GridFilesSource : public DataSource
   std::vector<std::string> itsParamNativeNames;
   std::vector<NFmiMetTime> itsTimes;  // sorted, unique (for display)
   std::vector<long> itsTimesT;        // parallel: unix seconds (for indexing)
-  std::vector<float> itsLevels;       // sorted, unique
-  // Map (newbaseParamId, timeIdx, levelIdx) → message index.
-  std::map<std::tuple<int, std::size_t, std::size_t>, std::size_t> itsIndex;
+  // Per-parameter level groups (one group per FmiLevelType present for
+  // that parameter). The active group selects which entries the flat
+  // levelCount / levelValueAt API exposes.
+  std::map<int, std::vector<LevelGroup>> itsLevelGroups;
+  // Active group index per parameter (defaults to 0 = first group).
+  mutable std::map<int, int> itsActiveGroup;
+  // Active level within (paramId, groupIdx). Lets switching groups
+  // restore the user's last selection rather than snapping back to 0.
+  mutable std::map<std::pair<int, int>, std::size_t> itsActiveLevelInGroup;
+  // Map (paramId, levelTypeId, timeIdx, levelIdxInGroup) → message index.
+  std::map<std::tuple<int, int, std::size_t, std::size_t>, std::size_t> itsIndex;
 
   int itsCurrentParam = 0;
   std::size_t itsCurrentTime = 0;
-  std::size_t itsCurrentLevel = 0;
 
   // Cached grid geometry, populated by ensureGridGeometry().
   mutable bool itsGeometryCached = false;

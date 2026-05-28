@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.28
-Release: 8%{?dist}.fmi
+Release: 9%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-9.fmi
+- Multi-level-type GRIB support: pressure / hybrid / height / depth surfaces grouped per parameter, the L popup picks the group via section headers, and the cross-section never mixes types
+
 * Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-8.fmi
 - Parameter and level popups now live-preview as you navigate; held arrow keys are coalesced into a single render at the final position
 

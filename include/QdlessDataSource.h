@@ -76,7 +76,37 @@ class DataSource
   // "reference time". Returns an invalid (year=0) NFmiMetTime if unknown.
   virtual NFmiMetTime originTime() const { return NFmiMetTime(0, 0, 0, 0, 0); }
 
-  // Level axis.
+  // Level axis. The flat methods below (levelCount/levelValueAt/levelLabel)
+  // are always the *active group only* — see LevelGroup. GRIB / NetCDF
+  // files can carry several level types in one file (pressure surfaces
+  // alongside hybrid surfaces, height-above-ground, ...); mixing them on
+  // one cross-section axis is meaningless, so the source segregates them
+  // into typed groups and only one group is "live" at a time.
+  struct LevelGroup
+  {
+    int typeId = 0;             // FmiLevelType numeric value (0 = unknown)
+    std::string typeName;       // "Pressure (hPa)", "Hybrid", "Height (m)", ...
+    std::vector<float> values;  // sorted in natural order for this type
+    bool ascendsWithValue = false;
+  };
+  // All groups available for `paramId`. Default impl synthesises one
+  // group from the existing flat list so backends without multi-type
+  // levels keep working unchanged.
+  virtual std::vector<LevelGroup> levelGroupsForParam(int paramId) const;
+  // Switch which group is active for `paramId`. Default: no-op (single
+  // group). After this, levelCount / levelValueAt / levelLabel return
+  // values for the active group, and the source restores its own memory
+  // of the last-used level within that group.
+  virtual void selectLevelGroup(int /*paramId*/, int /*groupIdx*/) {}
+  virtual int currentLevelGroupIndex(int /*paramId*/) const { return 0; }
+
+  // Human-readable name for an FmiLevelType numeric value. Used by the
+  // level picker's section headers and the metadata popup.
+  static std::string levelTypeName(int typeId);
+  // Type-aware text for a level value (e.g. "850 hPa", "100 m",
+  // "FL150", "Surface"). Shared helper for backends that know the type.
+  static std::string formatLevelByType(int typeId, float value);
+
   virtual std::size_t levelCount() const = 0;
   virtual std::size_t currentLevelIndex() const = 0;
   virtual void selectLevelIndex(std::size_t i) = 0;

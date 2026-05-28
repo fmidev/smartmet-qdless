@@ -143,7 +143,12 @@ void GridFilesSource::indexMessages()
   std::map<int, std::string> idToNative;  // first non-empty native name
   std::set<int> paramSet;
   std::set<long> timeSet;  // unix timestamps
-  std::set<float> levelSet;
+  // Per (paramId, levelTypeId): the set of level values seen in the file.
+  // GRIB files routinely carry the same parameter on several level types
+  // (e.g. Temperature on pressure surfaces *and* hybrid surfaces *and*
+  // 2 m height); each becomes its own LevelGroup so the cross-section
+  // can never mix them.
+  std::map<std::pair<int, int>, std::set<float>> perParamType;
 
   auto firstNonEmpty = [](std::initializer_list<const char*> ss) -> std::string
   {
@@ -158,6 +163,7 @@ void GridFilesSource::indexMessages()
   {
     auto* m = itsFile->getMessageByIndex(i);
     const int id = resolveId(m);
+    const int typeId = static_cast<int>(m->getGridParameterLevelId());
     paramSet.insert(id);
     if (idToUnits.find(id) == idToUnits.end())
       idToUnits[id] = resolveUnits(m);
@@ -167,7 +173,7 @@ void GridFilesSource::indexMessages()
                                       m->getNetCdfParameterName(),
                                       m->getGribParameterName()});
     timeSet.insert(static_cast<long>(m->getForecastTimeT()));
-    levelSet.insert(static_cast<float>(m->getGridParameterLevel()));
+    perParamType[{id, typeId}].insert(static_cast<float>(m->getGridParameterLevel()));
   }
   itsParamIds.assign(paramSet.begin(), paramSet.end());
   itsParamUnits.clear();
@@ -179,7 +185,35 @@ void GridFilesSource::indexMessages()
     itsParamUnits.push_back(idToUnits[id]);
     itsParamNativeNames.push_back(idToNative[id]);
   }
-  itsLevels.assign(levelSet.begin(), levelSet.end());
+  // Build per-parameter level groups, sorted naturally per type
+  // (pressure / depth descend toward the surface; everything else
+  // ascends). Within one parameter, order the groups deterministically
+  // by typeId so the picker layout is stable.
+  itsLevelGroups.clear();
+  for (auto& [key, valSet] : perParamType)
+  {
+    const int paramId = key.first;
+    const int typeId = key.second;
+    LevelGroup g;
+    g.typeId = typeId;
+    g.typeName = DataSource::levelTypeName(typeId);
+    g.values.assign(valSet.begin(), valSet.end());
+    // Pressure (100) and Depth (160) are conventionally listed from the
+    // surface inward — biggest value first. Everything else (hybrid,
+    // height, altitude, flight level, hybrid 1 = surface) reads bottom
+    // -> top with increasing value.
+    g.ascendsWithValue = (typeId != 100 && typeId != 160);
+    if (!g.ascendsWithValue)
+      std::sort(g.values.begin(), g.values.end(), std::greater<float>());
+    else
+      std::sort(g.values.begin(), g.values.end());
+    itsLevelGroups[paramId].push_back(std::move(g));
+  }
+  for (auto& [paramId, groups] : itsLevelGroups)
+  {
+    std::sort(groups.begin(), groups.end(),
+              [](const LevelGroup& a, const LevelGroup& b) { return a.typeId < b.typeId; });
+  }
   itsTimesT.assign(timeSet.begin(), timeSet.end());
   itsTimes.clear();
   itsTimes.reserve(itsTimesT.size());
@@ -195,30 +229,52 @@ void GridFilesSource::indexMessages()
                           static_cast<short>(utc.tm_sec));
   }
 
-  // Build the lookup index — same name-resolution as above so the index
-  // matches itsParamIds.
+  // Build the lookup index, now keyed on (paramId, typeId, timeIdx,
+  // levelIdxInGroup). The level index is relative to the group's sorted
+  // values, so the message resolver matches whatever group is currently
+  // active.
   for (std::size_t i = 0; i < n; ++i)
   {
     auto* m = itsFile->getMessageByIndex(i);
     const int pId = resolveId(m);
+    const int typeId = static_cast<int>(m->getGridParameterLevelId());
     const long ts = static_cast<long>(m->getForecastTimeT());
     const float lv = static_cast<float>(m->getGridParameterLevel());
 
     // Match against the raw time_t we stored — NFmiMetTime can snap to
     // an internal time-step resolution and break round-trip equality.
     auto tIt = std::find(itsTimesT.begin(), itsTimesT.end(), ts);
-    auto lIt = std::find(itsLevels.begin(), itsLevels.end(), lv);
-    if (tIt == itsTimesT.end() || lIt == itsLevels.end())
+    if (tIt == itsTimesT.end())
+      continue;
+    const auto gIt = itsLevelGroups.find(pId);
+    if (gIt == itsLevelGroups.end())
+      continue;
+    int gIdx = -1;
+    for (std::size_t g = 0; g < gIt->second.size(); ++g)
+      if (gIt->second[g].typeId == typeId)
+      {
+        gIdx = static_cast<int>(g);
+        break;
+      }
+    if (gIdx < 0)
+      continue;
+    const auto& vals = gIt->second[gIdx].values;
+    auto lIt = std::find(vals.begin(), vals.end(), lv);
+    if (lIt == vals.end())
       continue;
     const std::size_t tIdx = static_cast<std::size_t>(tIt - itsTimesT.begin());
-    const std::size_t lIdx = static_cast<std::size_t>(lIt - itsLevels.begin());
-    itsIndex[std::make_tuple(pId, tIdx, lIdx)] = i;
+    const std::size_t lIdx = static_cast<std::size_t>(lIt - vals.begin());
+    itsIndex[std::make_tuple(pId, typeId, tIdx, lIdx)] = i;
   }
 }
 
 SmartMet::GRID::Message* GridFilesSource::currentMessage() const
 {
-  auto it = itsIndex.find(std::make_tuple(itsCurrentParam, itsCurrentTime, itsCurrentLevel));
+  const auto* g = activeGroup();
+  if (g == nullptr)
+    return nullptr;
+  const std::size_t lIdx = currentLevelIndex();
+  auto it = itsIndex.find(std::make_tuple(itsCurrentParam, g->typeId, itsCurrentTime, lIdx));
   if (it == itsIndex.end())
     return nullptr;
   return itsFile->getMessageByIndex(it->second);
@@ -316,22 +372,87 @@ NFmiMetTime GridFilesSource::originTime() const
   return parseForecastTime(msg->getReferenceTime().c_str());
 }
 
+// The active group for the currently-selected parameter. Returns nullptr
+// only if the file has no levels at all for that parameter (which
+// shouldn't happen in a well-formed file).
+const GridFilesSource::LevelGroup* GridFilesSource::activeGroup() const
+{
+  const auto it = itsLevelGroups.find(itsCurrentParam);
+  if (it == itsLevelGroups.end() || it->second.empty())
+    return nullptr;
+  int g = 0;
+  if (auto ag = itsActiveGroup.find(itsCurrentParam); ag != itsActiveGroup.end())
+    g = ag->second;
+  if (g < 0 || g >= static_cast<int>(it->second.size()))
+    g = 0;
+  return &it->second[static_cast<std::size_t>(g)];
+}
+
 std::size_t GridFilesSource::levelCount() const
 {
-  return itsLevels.size();
+  const auto* g = activeGroup();
+  return g ? g->values.size() : 0;
 }
 std::size_t GridFilesSource::currentLevelIndex() const
 {
-  return itsCurrentLevel;
+  const int g = currentLevelGroupIndex(itsCurrentParam);
+  if (auto it = itsActiveLevelInGroup.find({itsCurrentParam, g});
+      it != itsActiveLevelInGroup.end())
+    return it->second;
+  return 0;
 }
 void GridFilesSource::selectLevelIndex(std::size_t i)
 {
-  if (i < itsLevels.size())
-    itsCurrentLevel = i;
+  const std::size_t n = levelCount();
+  if (n == 0)
+    return;
+  if (i >= n)
+    i = n - 1;
+  itsActiveLevelInGroup[{itsCurrentParam, currentLevelGroupIndex(itsCurrentParam)}] = i;
 }
 float GridFilesSource::levelValueAt(std::size_t i) const
 {
-  return i < itsLevels.size() ? itsLevels[i] : 0.0F;
+  const auto* g = activeGroup();
+  if (g == nullptr || i >= g->values.size())
+    return 0.0F;
+  return g->values[i];
+}
+std::string GridFilesSource::levelLabel(std::size_t i) const
+{
+  const auto* g = activeGroup();
+  if (g == nullptr || i >= g->values.size())
+    return {};
+  return DataSource::formatLevelByType(g->typeId, g->values[i]);
+}
+bool GridFilesSource::levelsAscendWithValue() const
+{
+  const auto* g = activeGroup();
+  return g ? g->ascendsWithValue : false;
+}
+
+std::vector<GridFilesSource::LevelGroup> GridFilesSource::levelGroupsForParam(int paramId) const
+{
+  const auto it = itsLevelGroups.find(paramId);
+  if (it == itsLevelGroups.end())
+    return {};
+  return it->second;
+}
+void GridFilesSource::selectLevelGroup(int paramId, int groupIdx)
+{
+  const auto it = itsLevelGroups.find(paramId);
+  if (it == itsLevelGroups.end() || it->second.empty())
+    return;
+  if (groupIdx < 0)
+    groupIdx = 0;
+  if (groupIdx >= static_cast<int>(it->second.size()))
+    groupIdx = static_cast<int>(it->second.size()) - 1;
+  itsActiveGroup[paramId] = groupIdx;
+}
+int GridFilesSource::currentLevelGroupIndex(int paramId) const
+{
+  if (auto it = itsActiveGroup.find(paramId); it != itsActiveGroup.end())
+    return it->second;
+  return 0;
 }
 
 float GridFilesSource::interpolatedValue(double lat, double lon) const
