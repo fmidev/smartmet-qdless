@@ -46,6 +46,16 @@ class QueryDataSource : public DataSource
   bool levelsAscendWithValue() const override;
   std::vector<LevelGroup> levelGroupsForParam(int paramId) const override;
 
+  // Multi-level files that carry GeomHeight (or GeopHeight) can be
+  // sampled at arbitrary heights via vertical interpolation between
+  // levels; this enables the 3D curtain ('v') and the height-axis 2D
+  // cross-section to work on NWP hybrid / pressure data the same way
+  // they already do for PVOL polar volumes.
+  bool hasNativeHeight() const override;
+  std::pair<double, double> heightRangeKm() const override;
+  float interpolatedValueAtHeight(double lat, double lon, double heightKm) const override;
+  ColumnProfile sampleColumnProfile(double lat, double lon) const override;
+
   float interpolatedValue(double lat, double lon) const override;
   LatLonBox boundingBox() const override;
   void uvToLatLon(double u, double v, double& lat, double& lon) const override;

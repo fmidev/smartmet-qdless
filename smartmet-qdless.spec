@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.28
-Release: 9%{?dist}.fmi
+Release: 10%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-10.fmi
+- 3D + cross-section curtain view ([v]): the surface paints from the bottom level, a vertical slice between two arrow-driven endpoints shows the data at every height, both share one z-buffer, and Space animates time through the whole picture
+
 * Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-9.fmi
 - Multi-level-type GRIB support: pressure / hybrid / height / depth surfaces grouped per parameter, the L popup picks the group via section headers, and the cross-section never mixes types
 

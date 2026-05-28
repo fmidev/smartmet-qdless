@@ -326,6 +326,34 @@ class App
   // both backends without leaking source-specific text into draw3D*.
   std::string itsThreshold3DUnit = "dBZ";
 
+  // 3D + cross-section curtain (key [4]). Toggled on when the source
+  // declares hasNativeHeight() — multi-level QueryData with GeomHeight,
+  // or PVOL polar volumes. Renders the surface as a coloured floor,
+  // overlays a vertical curtain between two endpoints showing the
+  // cross-section sampled via interpolatedValueAtHeight, and lets the
+  // user fly the curtain around with the arrow keys without leaving 3D.
+  // Time animation (Space) keeps working; the curtain re-samples each
+  // frame so the slice evolves with the data underneath.
+  bool itsMode3DCurtain = false;
+  double itsCurtainLat1 = 0.0;
+  double itsCurtainLon1 = 0.0;
+  double itsCurtainLat2 = 0.0;
+  double itsCurtainLon2 = 0.0;
+  bool itsCurtainEndpointsInitialised = false;
+  // Curtain ceiling height in km — clipped to the source's heightRangeKm.
+  // PgUp / PgDn change it.
+  double itsCurtainHeightKm = 12.0;
+  // Which endpoint the arrow keys move. Cycled with Tab.
+  enum class CurtainEnd : std::uint8_t
+  {
+    A,
+    B,
+    Both,
+  };
+  CurtainEnd itsCurtainActiveEnd = CurtainEnd::B;
+  // Bbox-fraction step the arrow keys apply per press in mode 4.
+  static constexpr double kCurtainStepFrac = 0.03;
+
   // Animation state.
   bool itsAnimating = false;
   int itsAnimationDelayMs = 250;
@@ -503,6 +531,17 @@ class App
   // cross-section of the weather. Same camera + z-buffer pipeline as
   // draw3DQueryData.
   void draw3DSurfaceStack(const Layout& layout);
+  // 3D + cross-section curtain renderer for [4] mode. The surface is
+  // painted by inverse-projecting each output sub-pixel onto z=0 and
+  // sampling the bottom-level slice; the curtain between
+  // (lat1,lon1)..(lat2,lon2) is ray-cast against and filled via
+  // interpolatedValueAtHeight. Both share one z-buffer, so the curtain
+  // self-occludes against the ground and against the camera.
+  void draw3DCrossSection(const Layout& layout);
+  // Initialise itsCurtainLat1/Lon1/Lat2/Lon2 from the current viewport
+  // if they're still at their defaults. Called on the first [4] press
+  // and any time the viewport changes substantially.
+  void ensureCurtainEndpoints();
   // True if the active source can be rendered in 3D. Tested by [3]
   // and by drawMap when deciding whether to honour itsMode3D.
   bool sourceSupports3D() const;

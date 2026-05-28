@@ -313,6 +313,167 @@ bool QueryDataSource::isVolumetric() const
   return ok;
 }
 
+bool QueryDataSource::hasNativeHeight() const
+{
+  // Any volumetric QD has a height axis we can sample at arbitrary
+  // altitudes via interpolatedValueAtHeight below. PVOL was the
+  // original "native height" source; this just extends the contract to
+  // NWP hybrid / pressure files with GeomHeight.
+  return isVolumetric();
+}
+
+std::pair<double, double> QueryDataSource::heightRangeKm() const
+{
+  // Sample the height field at the centre of the data bbox to pick a
+  // sensible range for the cross-section / curtain Y-axis. The same
+  // (param, level, location) state is restored before returning so
+  // callers don't see the probe.
+  if (!isVolumetric())
+    return DataSource::heightRangeKm();
+  const auto savedParam = itsInfo->ParamIndex();
+  const auto savedLevel = itsInfo->LevelIndex();
+  bool useGeop = false;
+  if (!selectHeightParam(*itsInfo, useGeop))
+  {
+    itsInfo->ParamIndex(savedParam);
+    return DataSource::heightRangeKm();
+  }
+  const double scale = useGeop ? (1.0 / 9.80665) : 1.0;
+  const auto bb = boundingBox();
+  const NFmiPoint ll((bb.minLon + bb.maxLon) * 0.5, (bb.minLat + bb.maxLat) * 0.5);
+  double lo = std::numeric_limits<double>::infinity();
+  double hi = -std::numeric_limits<double>::infinity();
+  const auto nLevels = itsInfo->SizeLevels();
+  for (std::size_t i = 0; i < nLevels; ++i)
+  {
+    itsInfo->LevelIndex(static_cast<unsigned long>(i));
+    const float h = itsInfo->InterpolatedValue(ll);
+    if (h == kFloatMissing || !std::isfinite(h)) continue;
+    const double m = static_cast<double>(h) * scale;
+    lo = std::min(lo, m);
+    hi = std::max(hi, m);
+  }
+  itsInfo->ParamIndex(savedParam);
+  itsInfo->LevelIndex(savedLevel);
+  if (!std::isfinite(lo) || !std::isfinite(hi) || hi <= lo)
+    return DataSource::heightRangeKm();
+  // Clamp the bottom to >=0 — GeomHeight occasionally dips slightly
+  // negative for the lowest hybrid level (terrain offset).
+  return {std::max(0.0, lo / 1000.0), hi / 1000.0};
+}
+
+QueryDataSource::ColumnProfile QueryDataSource::sampleColumnProfile(double lat, double lon) const
+{
+  ColumnProfile p;
+  const auto nLevels = itsInfo->SizeLevels();
+  if (nLevels == 0)
+    return p;
+  const auto savedParam = itsInfo->ParamIndex();
+  const auto savedLevel = itsInfo->LevelIndex();
+  bool useGeop = false;
+  if (!selectHeightParam(*itsInfo, useGeop))
+  {
+    // No height field; fall back to a single (h=0, value).
+    itsInfo->ParamIndex(savedParam);
+    p.heightsM.push_back(0.0F);
+    p.values.push_back(interpolatedValue(lat, lon));
+    return p;
+  }
+  const auto heightParamIndex = itsInfo->ParamIndex();
+  const double heightScale = useGeop ? (1.0 / 9.80665) : 1.0;
+  const NFmiPoint ll(lon, lat);
+  p.heightsM.resize(nLevels);
+  p.values.resize(nLevels);
+  // Heights pass.
+  itsInfo->ParamIndex(heightParamIndex);
+  for (std::size_t i = 0; i < nLevels; ++i)
+  {
+    itsInfo->LevelIndex(static_cast<unsigned long>(i));
+    const float h = itsInfo->InterpolatedValue(ll);
+    p.heightsM[i] =
+        (h == kFloatMissing) ? kFloatMissing : static_cast<float>(h * heightScale);
+  }
+  // Active-param values pass.
+  itsInfo->ParamIndex(savedParam);
+  for (std::size_t i = 0; i < nLevels; ++i)
+  {
+    itsInfo->LevelIndex(static_cast<unsigned long>(i));
+    p.values[i] = itsInfo->InterpolatedValue(ll);
+  }
+  itsInfo->LevelIndex(savedLevel);
+  return p;
+}
+
+float QueryDataSource::interpolatedValueAtHeight(double lat, double lon, double heightKm) const
+{
+  const auto nLevels = itsInfo->SizeLevels();
+  if (nLevels < 2)
+    return interpolatedValue(lat, lon);
+
+  const auto savedParam = itsInfo->ParamIndex();
+  const auto savedLevel = itsInfo->LevelIndex();
+  bool useGeop = false;
+  if (!selectHeightParam(*itsInfo, useGeop))
+  {
+    itsInfo->ParamIndex(savedParam);
+    return interpolatedValue(lat, lon);
+  }
+  const auto heightParamIndex = itsInfo->ParamIndex();
+  const double heightScale = useGeop ? (1.0 / 9.80665) : 1.0;
+  const double targetM = heightKm * 1000.0;
+  const NFmiPoint ll(lon, lat);
+
+  // Heights at every level for this (lat, lon).
+  std::vector<float> heights(nLevels);
+  itsInfo->ParamIndex(heightParamIndex);
+  for (std::size_t i = 0; i < nLevels; ++i)
+  {
+    itsInfo->LevelIndex(static_cast<unsigned long>(i));
+    const float h = itsInfo->InterpolatedValue(ll);
+    heights[i] =
+        (h == kFloatMissing) ? kFloatMissing : static_cast<float>(h * heightScale);
+  }
+
+  // Find the adjacent (level i, level i+1) pair that brackets targetM.
+  // Hybrid level lists may ascend or descend with index — accept either.
+  int loIdx = -1, hiIdx = -1;
+  for (std::size_t i = 0; i + 1 < nLevels; ++i)
+  {
+    const float a = heights[i];
+    const float b = heights[i + 1];
+    if (a == kFloatMissing || b == kFloatMissing)
+      continue;
+    const float minv = std::min(a, b);
+    const float maxv = std::max(a, b);
+    if (targetM >= minv && targetM <= maxv)
+    {
+      loIdx = (a <= b) ? static_cast<int>(i) : static_cast<int>(i + 1);
+      hiIdx = (a <= b) ? static_cast<int>(i + 1) : static_cast<int>(i);
+      break;
+    }
+  }
+  if (loIdx < 0)
+  {
+    itsInfo->ParamIndex(savedParam);
+    itsInfo->LevelIndex(savedLevel);
+    return kFloatMissing;  // outside the column's vertical extent
+  }
+
+  itsInfo->ParamIndex(savedParam);
+  itsInfo->LevelIndex(static_cast<unsigned long>(loIdx));
+  const float vLo = itsInfo->InterpolatedValue(ll);
+  itsInfo->LevelIndex(static_cast<unsigned long>(hiIdx));
+  const float vHi = itsInfo->InterpolatedValue(ll);
+  itsInfo->LevelIndex(savedLevel);
+
+  if (vLo == kFloatMissing || vHi == kFloatMissing)
+    return kFloatMissing;
+  const float hLo = heights[loIdx];
+  const float hHi = heights[hiIdx];
+  const float t = (hHi != hLo) ? static_cast<float>((targetM - hLo) / (hHi - hLo)) : 0.0F;
+  return vLo + (vHi - vLo) * t;
+}
+
 bool QueryDataSource::sampleVolume(const std::function<void(const VolumeSample&)>& cb) const
 {
   const auto nLevels = itsInfo->SizeLevels();

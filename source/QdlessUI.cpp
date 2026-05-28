@@ -971,6 +971,16 @@ void UI::popupHelp(HelpContext ctx)
       add("PgUp PgDn in 3D", "Vertical exaggeration: more / less");
       add("0 in 3D", "Reset camera");
     }
+    if (ctx.hasNativeHeight)
+    {
+      add("", "");
+      add("v", "Toggle 3D + cross-section curtain (vertical slice)");
+      add("arrows in v", "Move active endpoint A / B / both");
+      add("Tab in v", "Cycle active endpoint: A \xe2\x86\x92 B \xe2\x86\x92 A+B");
+      add("PgUp PgDn in v", "Raise / lower curtain ceiling");
+      add("h l j k + - 0", "Camera controls (same as 3D)");
+      add("Space in v", "Animate over time — surface + curtain re-sample each step");
+    }
   }
   add("e", "Export PNG");
   add("", "");

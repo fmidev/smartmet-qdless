@@ -147,6 +147,28 @@ class DataSource
     return interpolatedValue(lat, lon);
   }
 
+  // Batched column profile for the active (param, time): return the
+  // height (in metres above the reference) and the param value for
+  // every level at one (lat, lon). Cheap renderer pre-sample for
+  // cross-section curtains — calling interpolatedValueAtHeight per
+  // output pixel is O(nLevels) per call, but with this the renderer
+  // only pays that cost once per column instead of once per pixel.
+  // Default: a single (height=0, value=interpolatedValue) tuple, which
+  // is right for sources that have no vertical axis. Volumetric sources
+  // (QD with GeomHeight, PVOL) override.
+  struct ColumnProfile
+  {
+    std::vector<float> heightsM;  // length nLevels; metres above reference
+    std::vector<float> values;    // length nLevels; active-param value
+  };
+  virtual ColumnProfile sampleColumnProfile(double lat, double lon) const
+  {
+    ColumnProfile p;
+    p.heightsM.push_back(0.0F);
+    p.values.push_back(interpolatedValue(lat, lon));
+    return p;
+  }
+
   // Sample the currently-selected (param, time, level) slice at a given
   // lat/lon. Returns kFloatMissing or non-finite for missing / out-of-grid.
   virtual float interpolatedValue(double lat, double lon) const = 0;
