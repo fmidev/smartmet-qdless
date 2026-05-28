@@ -4029,6 +4029,38 @@ void drawSphere(std::vector<Rgb>& dst,
     }
 }
 
+// Screen-round, data-textured disk tinted with `tint`. Cell aspect is folded
+// into the y-radius so the result reads as a circle on the terminal — matching
+// plotDot's geometry — but with the data wrapped on a lit sphere instead of a
+// flat fill. Lets the sun/moon/balloon disks across the effect catalogue carry
+// the underlying view as their surface.
+inline void drawDataDisk(std::vector<Rgb>& dst,
+                         int w,
+                         int h,
+                         const std::vector<Rgb>& src,
+                         float cx,
+                         float cy,
+                         float r,
+                         float ya,
+                         float shade,
+                         float spin,
+                         const Rgb& tint)
+{
+  drawSphere(dst,
+             w,
+             h,
+             src,
+             cx,
+             cy,
+             r,
+             r / ya,
+             shade,
+             spin,
+             tint.r / 255.0F,
+             tint.g / 255.0F,
+             tint.b / 255.0F);
+}
+
 // Solar system: the view collapses into a (warm, glowing) sun and then buds off
 // several different-sized planets that fly out and orbit it on a tilted
 // ecliptic — inner ones faster (Kepler-ish), passing in front of and behind the
@@ -6294,14 +6326,17 @@ void effectMoonRocket(const Renderer& renderer, const std::vector<Rgb>& src, int
               Rgb{u8(170 * tw), u8(170 * tw), u8(195 * tw), false};
         }
         const float mi = std::clamp(t * 5.0F, 0.0F, 1.0F);
-        plotDot(dst,
-                w,
-                h,
-                moonCx,
-                moonCy,
-                moonR,
-                ya,
-                Rgb{u8(238 * mi), u8(232 * mi), u8(196 * mi), false});
+        drawDataDisk(dst,
+                     w,
+                     h,
+                     src,
+                     moonCx,
+                     moonCy,
+                     moonR,
+                     ya,
+                     0.70F,
+                     t * 0.25F,
+                     Rgb{u8(238 * mi), u8(232 * mi), u8(196 * mi), false});
         const bool hit = t >= hitT;
         const float wince = std::clamp((t - hitT) / 0.10F, 0.0F, 1.0F);
         const Rgb feat{u8(120 * mi), u8(94 * mi), u8(64 * mi), false};
@@ -6564,14 +6599,17 @@ void effectET(const Renderer& renderer, const std::vector<Rgb>& src, int w, int 
                       moonR * 1.16F,
                       ya,
                       Rgb{u8(38 * mi), u8(42 * mi), u8(58 * mi), false});
-              plotDot(dst,
-                      w,
-                      h,
-                      moonCx,
-                      moonCy,
-                      moonR,
-                      ya,
-                      Rgb{u8(236 * mi), u8(232 * mi), u8(206 * mi), false});
+              drawDataDisk(dst,
+                           w,
+                           h,
+                           src,
+                           moonCx,
+                           moonCy,
+                           moonR,
+                           ya,
+                           0.70F,
+                           t * 0.25F,
+                           Rgb{u8(236 * mi), u8(232 * mi), u8(206 * mi), false});
               plotDot(dst,
                       w,
                       h,
@@ -6874,7 +6912,17 @@ void effectUp(const Renderer& renderer, const std::vector<Rgb>& src, int w, int 
         {
           const float a = hash(i * 3) * 6.2832F, rr = std::sqrt(hash(i * 3 + 1)) * mn * 0.16F;
           const float bx = bcx + std::cos(a) * rr, by = bcy + std::sin(a) * rr * 0.9F;
-          plotDot(dst, w, h, bx, by, mn * 0.03F, ya, kBalloon[i % 6]);
+          drawDataDisk(dst,
+                       w,
+                       h,
+                       src,
+                       bx,
+                       by,
+                       mn * 0.03F,
+                       ya,
+                       0.85F,
+                       hash(i * 5) * 6.2832F + t,
+                       kBalloon[i % 6]);
         }
         const float s = form;
         auto fillRect = [&](float x0, float y0, float x1, float y1, const Rgb& c)
@@ -7107,7 +7155,8 @@ void effectLawrence(const Renderer& renderer, const std::vector<Rgb>& src, int w
                         false};
               dst[static_cast<std::size_t>(y) * w + x] = c;
             }
-          plotDot(dst, w, h, sunX, sunY, 0.17F * mn, ya, Rgb{255, 232, 165, false});
+          drawDataDisk(
+              dst, w, h, src, sunX, sunY, 0.17F * mn, ya, 0.55F, t * 0.3F, Rgb{255, 232, 165, false});
           plotDot(dst, w, h, sunX, sunY, 0.12F * mn, ya, Rgb{255, 250, 225, false});
         }
       });
@@ -7475,15 +7524,31 @@ void effectCloseEncounters(const Renderer& renderer, const std::vector<Rgb>& src
         }
         if (rise > 0.0F)  // the mothership
         {
-          plotDot(dst, w, h, w * 0.5F, shipCy, shipR, ya, Rgb{30, 32, 40, false});
-          plotDot(dst,
-                  w,
-                  h,
-                  w * 0.5F,
-                  shipCy,
-                  shipR * 0.34F,
-                  ya,
-                  Rgb{u8(220 * halo + 35), u8(225 * halo + 35), u8(255 * halo + 45), false});
+          drawDataDisk(dst,
+                       w,
+                       h,
+                       src,
+                       w * 0.5F,
+                       shipCy,
+                       shipR,
+                       ya,
+                       0.85F,
+                       t * 0.20F,
+                       Rgb{50, 54, 70, false});  // hull, data-wrapped
+          drawDataDisk(dst,
+                       w,
+                       h,
+                       src,
+                       w * 0.5F,
+                       shipCy,
+                       shipR * 0.34F,
+                       ya,
+                       0.30F,
+                       t * 0.60F,
+                       Rgb{u8(220 * halo + 35),
+                           u8(225 * halo + 35),
+                           u8(255 * halo + 45),
+                           false});  // bright core
           for (int i = 0; i < 26; ++i)  // studded lights around the rim
           {
             const float a = i / 26.0F * 3.14159F;  // lower hemisphere
@@ -8038,16 +8103,29 @@ void effectMonolith(const Renderer& renderer, const std::vector<Rgb>& src, int w
                     c = Rgb{u8(6 + glow * 230), u8(7 + glow * 210), u8(16 + glow * 150), false};
                   dst[static_cast<std::size_t>(y) * w + x] = c;
                 }
-              plotDot(dst,
-                      w,
-                      h,
-                      monoCx,
-                      sunY,
-                      mn * 0.13F,
-                      ya,
-                      Rgb{u8(255), u8(238), u8(180 + 60 * flare), false});  // sun
-              const float crY = sunY - mn * 0.36F;                          // crescent above
-              plotDot(dst, w, h, monoCx, crY, mn * 0.075F, ya, Rgb{220, 222, 210, false});
+              drawDataDisk(dst,
+                           w,
+                           h,
+                           src,
+                           monoCx,
+                           sunY,
+                           mn * 0.13F,
+                           ya,
+                           0.50F,
+                           t * 0.3F,
+                           Rgb{u8(255), u8(238), u8(180 + 60 * flare), false});  // sun
+              const float crY = sunY - mn * 0.36F;                               // crescent above
+              drawDataDisk(dst,
+                           w,
+                           h,
+                           src,
+                           monoCx,
+                           crY,
+                           mn * 0.075F,
+                           ya,
+                           0.75F,
+                           t * 0.4F,
+                           Rgb{220, 222, 210, false});
               plotDot(dst,
                       w,
                       h,
@@ -8222,7 +8300,17 @@ void effectApocalypse(const Renderer& renderer, const std::vector<Rgb>& src, int
             }
             dst[static_cast<std::size_t>(y) * w + x] = c;
           }
-        plotDot(dst, w, h, sunX, sunY, 0.16F * mn, ya, Rgb{255, 180, 90, false});  // hazy sun
+        drawDataDisk(dst,
+                     w,
+                     h,
+                     src,
+                     sunX,
+                     sunY,
+                     0.16F * mn,
+                     ya,
+                     0.55F,
+                     t * 0.25F,
+                     Rgb{255, 180, 90, false});  // hazy sun
         const Rgb heli{12, 8, 6, false};
         for (int i = 0; i < 4; ++i)  // choppers crossing at different depths
         {
@@ -8284,8 +8372,17 @@ void effectKong(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
           }
         // pale moon behind the perch, so the ape reads as a silhouette
         plotDot(dst, w, h, towerX, towerTop - mn * 0.02F, mn * 0.26F, ya, Rgb{55, 58, 74, false});
-        plotDot(
-            dst, w, h, towerX, towerTop - mn * 0.02F, mn * 0.17F, ya, Rgb{206, 206, 198, false});
+        drawDataDisk(dst,
+                     w,
+                     h,
+                     src,
+                     towerX,
+                     towerTop - mn * 0.02F,
+                     mn * 0.17F,
+                     ya,
+                     0.70F,
+                     t * 0.2F,
+                     Rgb{206, 206, 198, false});
         {  // the tower (Empire State) rising to the perch
           const float tw = mn * 0.05F;
           for (int y = static_cast<int>(towerTop); y < h; ++y)
@@ -8432,18 +8529,35 @@ void effectNosferatu(const Renderer& renderer, const std::vector<Rgb>& src, int 
               {
                 const float ang = (f - 2) * 0.34F + std::sin(t * 3.0F + f) * 0.05F;
                 const float fl = mn * (0.42F + (f == 2 ? 0.06F : 0.0F));  // middle finger longest
-                const float tx = hx + std::sin(ang) * fl, tyy = handBase - std::cos(ang) * fl;
+                const float bx = hx + std::sin(ang) * mn * 0.05F;
+                const float by = handBase - mn * 0.04F;
+                const float tx = hx + std::sin(ang) * fl;
+                const float tyy = handBase - std::cos(ang) * fl;
+                // Tapered finger: thick at the knuckle, narrowing to a needle
+                // point. Stamping shrinking dots along the line gives a smooth
+                // bevel that drawSeg's uniform stroke can't.
+                constexpr int kSteps = 24;
+                for (int k = 0; k <= kSteps; ++k)
+                {
+                  const float u = static_cast<float>(k) / kSteps;
+                  const float px = bx + (tx - bx) * u;
+                  const float py = by + (tyy - by) * u;
+                  const float rad = std::max(0.6F, mn * 0.028F * (1.0F - u * 0.95F));
+                  plotDot(dst, w, h, px, py, rad, ya, shadow);
+                }
+                // Sharp continuation past the tip — a hairline barb that gives
+                // the claw a distinct point rather than ending in a stub.
+                const float barb = mn * 0.045F;
                 drawSeg(dst,
                         w,
                         h,
-                        hx + std::sin(ang) * mn * 0.05F,
-                        handBase - mn * 0.04F,
                         tx,
                         tyy,
-                        std::max(1.0F, mn * 0.024F),
+                        tx + std::sin(ang) * barb,
+                        tyy - std::cos(ang) * barb,
+                        std::max(1.0F, mn * 0.006F),
                         ya,
                         shadow);
-                plotDot(dst, w, h, tx, tyy, std::max(1.0F, mn * 0.02F), ya, shadow);  // claw tip
               }
             });
 }
@@ -9489,14 +9603,17 @@ void effectRocky(const Renderer& renderer, const std::vector<Rgb>& src, int w, i
                     u8(120 - 60 * sf + l * 0.10F + glow * 30),
                     false};
           }
-        plotDot(dst,
-                w,
-                h,
-                sunX,
-                sunY,
-                mn * 0.10F * (0.6F + 0.4F * sun),
-                ya,
-                Rgb{u8(255), u8(220), u8(160), false});
+        drawDataDisk(dst,
+                     w,
+                     h,
+                     src,
+                     sunX,
+                     sunY,
+                     mn * 0.10F * (0.6F + 0.4F * sun),
+                     ya,
+                     0.55F,
+                     t * 0.3F,
+                     Rgb{u8(255), u8(220), u8(160), false});
         for (int i = 0; i < kSteps; ++i)
         {
           const float f0 = static_cast<float>(i) / kSteps;
@@ -9730,7 +9847,17 @@ void effectPrideRock(const Renderer& renderer, const std::vector<Rgb>& src, int 
                             false};
                   dst[static_cast<std::size_t>(y) * w + x] = c;
                 }
-              plotDot(dst, w, h, sunX, sunY, mn * 0.13F, ya, Rgb{255, 220, 140, false});  // sun
+              drawDataDisk(dst,
+                           w,
+                           h,
+                           src,
+                           sunX,
+                           sunY,
+                           mn * 0.13F,
+                           ya,
+                           0.55F,
+                           t * 0.3F,
+                           Rgb{255, 220, 140, false});  // sun
               // Pride Rock silhouette: a tilted boulder rising from the horizon
               const float rx0 = w * 0.32F, rx1 = w * 0.68F;  // base
               const float rtx = w * 0.56F;                   // tip
@@ -9878,15 +10005,28 @@ void effectTatooine(const Renderer& renderer, const std::vector<Rgb>& src, int w
             }
             dst[static_cast<std::size_t>(y) * w + x] = c;
           }
-        plotDot(dst, w, h, w * 0.5F - sepX, sunY, mn * 0.11F, ya, Rgb{255, 215, 130, false});
-        plotDot(dst,
-                w,
-                h,
-                w * 0.5F + sepX,
-                sunY + mn * 0.02F,
-                mn * 0.085F,
-                ya,
-                Rgb{255, 175, 90, false});  // smaller, slightly lower sister sun
+        drawDataDisk(dst,
+                     w,
+                     h,
+                     src,
+                     w * 0.5F - sepX,
+                     sunY,
+                     mn * 0.11F,
+                     ya,
+                     0.55F,
+                     t * 0.3F,
+                     Rgb{255, 215, 130, false});
+        drawDataDisk(dst,
+                     w,
+                     h,
+                     src,
+                     w * 0.5F + sepX,
+                     sunY + mn * 0.02F,
+                     mn * 0.085F,
+                     ya,
+                     0.55F,
+                     t * 0.45F,
+                     Rgb{255, 175, 90, false});  // smaller, slightly lower sister sun
         // a small figure silhouette in the foreground
         const float fx = w * 0.30F, fy = horizonY + mn * 0.08F, ht = mn * 0.10F;
         const Rgb fig{6, 6, 10, false};
@@ -9994,14 +10134,17 @@ void effectStandByMe(const Renderer& renderer, const std::vector<Rgb>& src, int 
                       false};
             dst[static_cast<std::size_t>(y) * w + x] = c;
           }
-        plotDot(dst,
-                w,
-                h,
-                w * 0.5F,
-                horizonY - mn * 0.02F,
-                mn * 0.10F,
-                ya,
-                Rgb{255, 200, 130, false});  // setting sun
+        drawDataDisk(dst,
+                     w,
+                     h,
+                     src,
+                     w * 0.5F,
+                     horizonY - mn * 0.02F,
+                     mn * 0.10F,
+                     ya,
+                     0.50F,
+                     t * 0.3F,
+                     Rgb{255, 200, 130, false});  // setting sun
         // rails + sleepers, converging from bottom to horizon
         const float vx = w * 0.5F, vy = horizonY;
         const float gauge = mn * 0.18F;  // half-rail spacing at the bottom
@@ -10091,7 +10234,17 @@ void effectShawshank(const Renderer& renderer, const std::vector<Rgb>& src, int 
             }
             dst[static_cast<std::size_t>(y) * w + x] = c;
           }
-        plotDot(dst, w, h, sunX, sunY, mn * 0.08F, ya, Rgb{255, 245, 200, false});
+        drawDataDisk(dst,
+                     w,
+                     h,
+                     src,
+                     sunX,
+                     sunY,
+                     mn * 0.08F,
+                     ya,
+                     0.45F,
+                     t * 0.3F,
+                     Rgb{255, 245, 200, false});
         // a tiny boat moored offshore
         const float bx = w * 0.62F, by = horizonY + mn * 0.05F + bob;
         const Rgb hull{40, 30, 22, false};
@@ -10453,7 +10606,9 @@ void effectTotoro(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
           }
         const float tx = w * 0.58F, ty = groundY - mn * 0.20F;  // Totoro centre-right
         const Rgb fur{24, 26, 30, false};
-        plotDot(dst, w, h, tx, ty, mn * 0.20F, ya, fur);  // big round body
+        // belly: the data wrapped on a softly-lit sphere, kept dark by the
+        // low-luminance tint so Totoro still reads as a night silhouette.
+        drawDataDisk(dst, w, h, src, tx, ty, mn * 0.20F, ya, 0.55F, 0.10F, Rgb{60, 64, 72, false});
         plotDot(dst,
                 w,
                 h,
