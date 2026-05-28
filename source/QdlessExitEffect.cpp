@@ -8801,9 +8801,678 @@ void effectClockwork(const Renderer& renderer, const std::vector<Rgb>& src, int 
       });
 }
 
+// Spinning newspaper: the data flies in as a tumbling newspaper page (its body
+// the sampled data, sepia-newsprint tinted), spins to a stop facing the camera
+// with the headline EXTRA EXTRA above it, then fades.
+void effectNewspaper(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float cx = w * 0.5F, cy = h * 0.5F;
+  const int scale = std::max(1, static_cast<int>(std::lround(w / 130.0F)));
+  runFrames(
+      renderer,
+      w,
+      h,
+      4800,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float sa = std::pow(1.0F - t, 2.0F) * 9.4F;  // spins, decaying to 0
+        const float latScale = std::cos(sa);               // facing when sa->0
+        const float fit = 0.20F + 0.78F * t;               // grows to fit the view
+        const float halfW = w * 0.42F * fit, halfH = h * 0.42F * fit;
+        for (int y = 0; y < h; ++y)  // dim the room behind the spinning page
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            dst[static_cast<std::size_t>(y) * w + x] =
+                s.transparent ? Rgb{8, 8, 12, false}
+                              : Rgb{u8(s.r * 0.25F), u8(s.g * 0.24F), u8(s.b * 0.22F), false};
+          }
+        const float swW = std::fabs(halfW * latScale);
+        if (swW < 0.6F)
+          return;
+        const int x0 = static_cast<int>(cx - swW), x1 = static_cast<int>(cx + swW);
+        const int y0 = static_cast<int>(cy - halfH), y1 = static_cast<int>(cy + halfH);
+        for (int y = std::max(0, y0); y <= std::min(h - 1, y1); ++y)
+          for (int x = std::max(0, x0); x <= std::min(w - 1, x1); ++x)
+          {
+            const float lx = (x - cx) / swW;                   // local -1..1
+            const float ly = (y - cy) / halfH;                 // local -1..1
+            const float sgn = latScale < 0.0F ? -1.0F : 1.0F;  // back side mirrors x
+            const float ulx = lx * sgn;
+            const Rgb d = sample(src, w, h, (ulx * 0.5F + 0.5F) * w, (ly * 0.5F + 0.5F) * h);
+            const float l = d.transparent ? 80.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+            float r = 222 + l * 0.10F, g = 214 + l * 0.10F, b = 192 + l * 0.08F;
+            const float col = std::fabs(std::fmod(ulx * 2.5F + 5.0F, 1.0F) - 0.5F);
+            if (col < 0.04F)
+            {
+              r *= 0.55F;
+              g *= 0.55F;
+              b *= 0.55F;
+            }
+            if (std::fabs(lx) > 0.985F || std::fabs(ly) > 0.985F)
+            {
+              r = 30;
+              g = 30;
+              b = 36;
+            }
+            dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(r), u8(g), u8(b), false};
+          }
+        if (latScale > 0.55F)  // headline appears as the card faces us
+        {
+          auto stamp = [&](const std::string& str, float leftX, float topY, int sc, const Rgb& c)
+          {
+            constexpr int kFW = 5, kFH = 7, kGap = 1;
+            for (int ci = 0; ci < static_cast<int>(str.size()); ++ci)
+            {
+              const auto g =
+                  glyph5x7(static_cast<char>(std::toupper(static_cast<unsigned char>(str[ci]))));
+              const int cox = ci * (kFW + kGap) * sc;
+              for (int fy = 0; fy < kFH; ++fy)
+                for (int fx = 0; fx < kFW; ++fx)
+                {
+                  if (g[fy][fx] != '1')
+                    continue;
+                  for (int sy = 0; sy < sc; ++sy)
+                    for (int sx = 0; sx < sc; ++sx)
+                    {
+                      const int xp = static_cast<int>(leftX) + cox + fx * sc + sx;
+                      const int yp = static_cast<int>(topY) + fy * sc + sy;
+                      if (xp >= 0 && xp < w && yp >= 0 && yp < h)
+                        dst[static_cast<std::size_t>(yp) * w + xp] = c;
+                    }
+                }
+            }
+          };
+          const int bigS = std::max(scale, 2);
+          const std::string head = "EXTRA  EXTRA";
+          const float bigW = static_cast<float>(head.size()) * 6 * bigS - bigS;
+          stamp(head, cx - bigW * 0.5F, cy - halfH * 0.78F, bigS, Rgb{18, 16, 14, false});
+          const std::string sub = "QDLESS EXITS";
+          const float subW = static_cast<float>(sub.size()) * 6 * scale - scale;
+          stamp(sub, cx - subW * 0.5F, cy - halfH * 0.48F, scale, Rgb{40, 36, 30, false});
+          (void)mn;
+        }
+      });
+}
+
+// The End card: the data desaturates to sepia, vignettes down, and a silent-era
+// double-bordered title card centred with "THE END" fades in over it.
+void effectEndCard(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const int scale = std::max(2, static_cast<int>(std::lround(w / 60.0F)));
+  runFrames(
+      renderer,
+      w,
+      h,
+      4600,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float desat = std::clamp(t / 0.35F, 0.0F, 1.0F);
+        const float vign = std::clamp((t - 0.20F) / 0.50F, 0.0F, 1.0F);
+        const float card = std::clamp((t - 0.45F) / 0.30F, 0.0F, 1.0F);
+        const float fade = std::clamp((t - 0.88F) / 0.12F, 0.0F, 1.0F);
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 0.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            const float br = s.transparent ? 0 : s.r, bg = s.transparent ? 0 : s.g,
+                        bb = s.transparent ? 0 : s.b;
+            float r = br * (1 - desat) + l * 1.08F * desat;
+            float g = bg * (1 - desat) + l * 0.86F * desat;
+            float b = bb * (1 - desat) + l * 0.60F * desat;
+            const float vd = std::hypot((x - w * 0.5F) / w, (y - h * 0.5F) / h);
+            const float vm = 1.0F - vign * std::clamp(vd * 1.4F - 0.2F, 0.0F, 0.85F);
+            r *= vm;
+            g *= vm;
+            b *= vm;
+            dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(r), u8(g), u8(b), false};
+          }
+        const float cw = mn * 0.42F, ch = mn * 0.20F;
+        const float cxp = w * 0.5F, cyp = h * 0.5F;
+        for (int yo = -static_cast<int>(ch); yo <= static_cast<int>(ch); ++yo)
+          for (int xo = -static_cast<int>(cw); xo <= static_cast<int>(cw); ++xo)
+          {
+            const int x = static_cast<int>(cxp) + xo, y = static_cast<int>(cyp) + yo;
+            if (x < 0 || x >= w || y < 0 || y >= h)
+              continue;
+            const float ax = std::fabs(xo) / cw, ay = std::fabs(yo) / ch;
+            const bool outer = (ax > 0.96F || ay > 0.92F);
+            const bool inner = (ax > 0.86F && ax < 0.90F) || (ay > 0.78F && ay < 0.84F);
+            if (outer || inner)
+            {
+              const Rgb b{u8(40), u8(34), u8(28), false};
+              const Rgb& d = dst[static_cast<std::size_t>(y) * w + x];
+              dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(d.r + (b.r - d.r) * card),
+                                                             u8(d.g + (b.g - d.g) * card),
+                                                             u8(d.b + (b.b - d.b) * card),
+                                                             false};
+            }
+          }
+        if (card > 0.0F)
+        {
+          auto stamp = [&](const std::string& str, float leftX, float topY, int sc, const Rgb& c)
+          {
+            constexpr int kFW = 5, kFH = 7, kGap = 1;
+            for (int ci = 0; ci < static_cast<int>(str.size()); ++ci)
+            {
+              const auto g =
+                  glyph5x7(static_cast<char>(std::toupper(static_cast<unsigned char>(str[ci]))));
+              const int cox = ci * (kFW + kGap) * sc;
+              for (int fy = 0; fy < kFH; ++fy)
+                for (int fx = 0; fx < kFW; ++fx)
+                {
+                  if (g[fy][fx] != '1')
+                    continue;
+                  for (int sy = 0; sy < sc; ++sy)
+                    for (int sx = 0; sx < sc; ++sx)
+                    {
+                      const int xp = static_cast<int>(leftX) + cox + fx * sc + sx;
+                      const int yp = static_cast<int>(topY) + fy * sc + sy;
+                      if (xp >= 0 && xp < w && yp >= 0 && yp < h)
+                      {
+                        const Rgb& d = dst[static_cast<std::size_t>(yp) * w + xp];
+                        dst[static_cast<std::size_t>(yp) * w + xp] =
+                            Rgb{u8(d.r + (c.r - d.r) * card),
+                                u8(d.g + (c.g - d.g) * card),
+                                u8(d.b + (c.b - d.b) * card),
+                                false};
+                      }
+                    }
+                }
+            }
+          };
+          const std::string s = "THE END";
+          const float tw = static_cast<float>(s.size()) * 6 * scale - scale;
+          stamp(s, cxp - tw * 0.5F, cyp - 3.5F * scale, scale, Rgb{22, 18, 14, false});
+        }
+        if (fade > 0.0F)
+          for (std::size_t k = 0; k < dst.size(); ++k)
+            dst[k] = Rgb{u8(dst[k].r * (1 - fade)),
+                         u8(dst[k].g * (1 - fade)),
+                         u8(dst[k].b * (1 - fade)),
+                         false};
+      });
+}
+
+// The Shining elevator: the data forms a corridor in 1-point perspective (the
+// carpet is the data warped into the floor). At the vanishing point an elevator
+// opens — and a red flood pours forward, the level rising toward the camera
+// until it engulfs the screen.
+void effectShining(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  const float horizon = h * 0.46F, cxw = w * 0.5F, A = h - horizon;
+  const float wallA = horizon;
+  runFrames(
+      renderer,
+      w,
+      h,
+      5200,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float openT = std::clamp((t - 0.20F) / 0.18F, 0.0F, 1.0F);
+        const float flow = std::clamp((t - 0.38F) / 0.50F, 0.0F, 1.0F);
+        const float front = horizon + (h - horizon) * flow;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            Rgb out;
+            if (y > horizon)
+            {
+              const float v = A / (y - horizon);
+              const float wu = (x - cxw) * v / (w * 0.5F);
+              const Rgb d = sample(src, w, h, (wu * 0.25F + 0.5F) * w, std::fmod(v * 22.0F, h));
+              const float l = d.transparent ? 50 : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+              out = Rgb{u8(80 + l * 0.18F), u8(40 + l * 0.10F), u8(50 + l * 0.10F), false};
+            }
+            else
+            {
+              const float du = std::fabs(x - cxw) / (w * 0.5F);
+              const float vv = wallA / (horizon - y + 1.0F);
+              const float wally = (1.0F - du);
+              const Rgb d = sample(src, w, h, std::fmod(vv * 26.0F, w), (du * 0.5F + 0.25F) * h);
+              const float l = d.transparent ? 60 : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+              out = Rgb{u8(130 + l * 0.18F * wally),
+                        u8(110 + l * 0.16F * wally),
+                        u8(90 + l * 0.12F * wally),
+                        false};
+            }
+            dst[static_cast<std::size_t>(y) * w + x] = out;
+          }
+        const float dw = std::max(2.0F, w * 0.06F), dh = std::max(3.0F, h * 0.10F);
+        const float ey = horizon - dh * 0.5F;
+        for (int yo = 0; yo <= static_cast<int>(dh); ++yo)
+          for (int xo = -static_cast<int>(dw); xo <= static_cast<int>(dw); ++xo)
+          {
+            const int x = static_cast<int>(cxw) + xo, y = static_cast<int>(ey) + yo;
+            if (x < 0 || x >= w || y < 0 || y >= h)
+              continue;
+            const float opx = std::fabs(static_cast<float>(xo)) / dw;
+            const Rgb door{20, 12, 12, false}, mouth{180, 8, 8, false};
+            dst[static_cast<std::size_t>(y) * w + x] = (opx < openT) ? mouth : door;
+          }
+        if (flow > 0.0F)
+        {
+          for (int y = static_cast<int>(front); y < h; ++y)
+            for (int x = 0; x < w; ++x)
+            {
+              const float turb = 0.85F + 0.15F * std::sin((x - y) * 0.3F + t * 8.0F);
+              const float deep = std::clamp((y - front) / (h - front + 1.0F), 0.0F, 1.0F);
+              const Rgb& base = dst[static_cast<std::size_t>(y) * w + x];
+              dst[static_cast<std::size_t>(y) * w + x] =
+                  Rgb{u8((180 + 60 * deep) * turb + base.r * 0.10F),
+                      u8(14 * turb + base.g * 0.05F),
+                      u8(14 * turb + base.b * 0.05F),
+                      false};
+            }
+          for (int x = 0; x < w; ++x)
+          {
+            const int yf = static_cast<int>(front + std::sin(x * 0.4F + t * 6.0F) * 1.2F);
+            if (yf >= 0 && yf < h)
+              dst[static_cast<std::size_t>(yf) * w + x] = Rgb{255, 130, 130, false};
+          }
+        }
+      });
+}
+
+// Dial M for Murder: a rotary phone dial appears, the finger pulls the wheel
+// round to "M" against the stop, then releases and the wheel spins back home —
+// then the line rings and we cut to black.
+void effectDialM(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float cx = w * 0.5F, cy = h * 0.52F;
+  const float R = mn * 0.30F;
+  const float holeR = mn * 0.045F;
+  const float ringR = R + holeR + 2.0F;
+  const int mPos = 5;
+  const float aPer = 6.2832F / 10.0F;
+  runFrames(
+      renderer,
+      w,
+      h,
+      4800,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            dst[static_cast<std::size_t>(y) * w + x] =
+                s.transparent
+                    ? Rgb{12, 10, 14, false}
+                    : Rgb{u8(s.r * 0.22F + 4), u8(s.g * 0.20F + 4), u8(s.b * 0.18F + 6), false};
+          }
+        float ang = 0.0F;
+        if (t < 0.18F)
+          ang = 0.0F;
+        else if (t < 0.48F)
+          ang = ((t - 0.18F) / 0.30F) * (aPer * mPos);
+        else if (t < 0.78F)
+        {
+          const float k = (t - 0.48F) / 0.30F;
+          ang = (1.0F - std::pow(k, 0.85F)) * (aPer * mPos);
+        }
+        else
+          ang = 0.0F;
+        const float ringFlash = (t > 0.80F) ? std::exp(-std::pow((t - 0.84F) / 0.04F, 2.0F)) +
+                                                  std::exp(-std::pow((t - 0.92F) / 0.04F, 2.0F))
+                                            : 0.0F;
+        plotDot(dst, w, h, cx, cy, ringR, ya, Rgb{42, 36, 32, false});
+        plotDot(dst, w, h, cx, cy, R + holeR * 0.2F, ya, Rgb{215, 208, 195, false});
+        plotDot(dst, w, h, cx, cy, R * 0.32F, ya, Rgb{40, 32, 28, false});
+        for (int k = 0; k < 10; ++k)
+        {
+          const float a = -1.5708F + k * aPer + ang;
+          const float hx = cx + std::sin(a) * R, hy = cy - std::cos(a) * R;
+          plotDot(dst, w, h, hx, hy, holeR, ya, Rgb{20, 16, 16, false});
+          if (k == mPos)
+          {
+            const auto g = glyph5x7('M');
+            const int sc = std::max(1, static_cast<int>(holeR / 4.0F));
+            for (int fy = 0; fy < 7; ++fy)
+              for (int fx = 0; fx < 5; ++fx)
+                if (g[fy][fx] == '1')
+                  for (int sy = 0; sy < sc; ++sy)
+                    for (int sx = 0; sx < sc; ++sx)
+                    {
+                      const int xp = static_cast<int>(hx - 2.5F * sc) + fx * sc + sx;
+                      const int yp = static_cast<int>(hy - 3.5F * sc) + fy * sc + sy;
+                      if (xp >= 0 && xp < w && yp >= 0 && yp < h)
+                        dst[static_cast<std::size_t>(yp) * w + xp] = Rgb{230, 220, 200, false};
+                    }
+          }
+        }
+        const float pa = -1.5708F + 7.5F * aPer;
+        plotDot(dst,
+                w,
+                h,
+                cx + std::sin(pa) * (R + holeR * 0.5F),
+                cy - std::cos(pa) * (R + holeR * 0.5F),
+                holeR * 0.5F,
+                ya,
+                Rgb{60, 50, 44, false});
+        if (t > 0.18F && t < 0.50F)
+        {
+          const float a = -1.5708F + mPos * aPer + ang;
+          plotDot(dst,
+                  w,
+                  h,
+                  cx + std::sin(a) * R,
+                  cy - std::cos(a) * R,
+                  holeR * 0.75F,
+                  ya,
+                  Rgb{220, 180, 150, false});
+        }
+        if (ringFlash > 0.02F)
+          for (std::size_t k = 0; k < dst.size(); ++k)
+            dst[k] = Rgb{u8(dst[k].r + (255 - dst[k].r) * ringFlash * 0.7F),
+                         u8(dst[k].g + (240 - dst[k].g) * ringFlash * 0.7F),
+                         u8(dst[k].b + (200 - dst[k].b) * ringFlash * 0.7F),
+                         false};
+        if (t > 0.96F)
+          for (std::size_t k = 0; k < dst.size(); ++k)
+            dst[k] = Rgb{0, 0, 0, false};
+      });
+}
+
+// Saul Bass spiral: an extreme close-up of an eye (data in its iris), with the
+// graphic black-and-white Bass title spiral expanding from the pupil, rotating —
+// finally swallowing the screen.
+void effectBassSpiral(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  const float ya = yAspectFor(renderer);
+  const float cx = w * 0.5F, cy = h * 0.5F, mn = std::min(static_cast<float>(w), h * ya);
+  const float eyeR = mn * 0.48F, irisR = mn * 0.27F;
+  runFrames(
+      renderer, w, h, 4800,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float spinR = std::pow(t, 1.1F) * mn * 0.72F;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const float dx = x - cx, dy = (y - cy) * ya, r = std::hypot(dx, dy);
+            Rgb base;
+            if (r < irisR)
+            {
+              const Rgb d = sample(src, w, h, (dx / irisR * 0.5F + 0.5F) * w,
+                                   (dy / irisR * 0.5F + 0.5F) * h);
+              if (r < irisR * 0.22F)
+                base = Rgb{4, 4, 6, false};
+              else
+                base = Rgb{u8(d.r * 0.85F), u8(d.g * 0.85F), u8(d.b * 0.85F), false};
+            }
+            else if (r < eyeR)
+              base = Rgb{225, 220, 212, false};
+            else
+              base = Rgb{30, 22, 20, false};
+            if (r < spinR)
+            {
+              const float th = std::atan2(dy, dx);
+              const float arm = std::sin(th * 4.0F - std::log(r + 1.0F) * 2.6F + t * 7.0F);
+              if (arm > 0.0F)
+                base = Rgb{8, 8, 10, false};
+              else if (arm < -0.7F)
+                base = Rgb{240, 235, 226, false};
+            }
+            dst[static_cast<std::size_t>(y) * w + x] = base;
+          }
+      });
+}
+
+// The Big Lebowski: POV inside the bowling ball as it rolls down the lane (a
+// data-grain wooden floor) toward the pins — then a STRIKE: the pins fly outward
+// in a white flash.
+void effectLebowski(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float horizon = h * 0.40F, cxw = w * 0.5F, A = h - horizon;
+  struct Pin
+  {
+    float wu;
+    float wv;
+  };
+  static const Pin pins[] = {{0.0F, 0.0F},   {-0.18F, 0.22F}, {0.18F, 0.22F}, {-0.34F, 0.44F},
+                             {0.0F, 0.44F},  {0.34F, 0.44F},  {-0.50F, 0.66F}, {-0.17F, 0.66F},
+                             {0.17F, 0.66F}, {0.50F, 0.66F}};
+  runFrames(
+      renderer, w, h, 4800,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float approach = t * 3.2F;
+        const float strike = std::clamp((t - 0.85F) / 0.10F, 0.0F, 1.0F);
+        const float scroll = t * 4.0F;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            Rgb out;
+            if (y <= horizon)
+            {
+              const float gb = std::exp(-(horizon - y) / (h * 0.2F)) * 0.3F;
+              out = Rgb{u8(12 + gb * 80), u8(10 + gb * 60), u8(20 + gb * 40), false};
+            }
+            else
+            {
+              const float v = A / (y - horizon);
+              const float wu = (x - cxw) * v / (w * 0.5F);
+              const float wv = v + scroll;
+              const bool gutter = std::fabs(wu) > 0.55F;
+              const Rgb d = sample(src, w, h, (wu * 0.30F + 0.5F) * w, std::fmod(wv * 18.0F, h));
+              const float l = d.transparent ? 70 : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+              if (gutter)
+                out = Rgb{30, 22, 18, false};
+              else
+              {
+                const float plank = std::sin(wv * 8.0F) * 0.08F;
+                out = Rgb{u8(180 + l * 0.20F + plank * 30), u8(120 + l * 0.16F + plank * 20),
+                          u8(60 + l * 0.10F), false};
+              }
+            }
+            dst[static_cast<std::size_t>(y) * w + x] = out;
+          }
+        for (int i = 0; i < 10; ++i)
+        {
+          float pwv = 3.5F + pins[i].wv - approach;
+          float pwu = pins[i].wu;
+          if (strike > 0.0F)
+          {
+            const float spd = 0.4F + hash(i * 3) * 0.6F;
+            pwu +=
+                (pins[i].wu < 0 ? -1.0F : (pins[i].wu > 0 ? 1.0F : (hash(i) - 0.5F))) * strike * spd;
+            pwv += strike * 0.6F;
+          }
+          if (pwv < 0.05F)
+            continue;
+          const float sy = horizon + A / pwv;
+          const float sx = cxw + pwu * w * 0.5F / pwv;
+          const float sz = mn * 0.18F / pwv;
+          if (sy < 0 || sy > h + sz || sx < -sz || sx > w + sz)
+            continue;
+          plotDot(dst, w, h, sx, sy, sz * 0.5F, ya, Rgb{245, 240, 230, false});
+          plotDot(dst, w, h, sx, sy - sz * 0.6F, sz * 0.3F, ya, Rgb{245, 240, 230, false});
+          plotDot(dst, w, h, sx, sy - sz * 0.35F, sz * 0.18F, ya, Rgb{200, 30, 30, false});
+        }
+        const float flash = (t > 0.83F) ? std::exp(-std::pow((t - 0.86F) / 0.04F, 2.0F)) : 0.0F;
+        if (flash > 0.01F)
+          for (std::size_t k = 0; k < dst.size(); ++k)
+            dst[k] = Rgb{u8(dst[k].r + (255 - dst[k].r) * flash),
+                         u8(dst[k].g + (255 - dst[k].g) * flash),
+                         u8(dst[k].b + (255 - dst[k].b) * flash), false};
+      });
+}
+
+// Singin' in the Rain: a figure swings off a lamppost with an umbrella in the
+// pouring rain, on a wet night street made of the dimmed data.
+void effectSinginRain(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float postX = w * 0.55F;
+  runFrames(
+      renderer, w, h, 5400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float lantX = postX, lantY = h * 0.22F;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            const float gd = std::hypot(x - lantX, (y - lantY) * ya);
+            const float glow = std::exp(-gd / (mn * 0.30F));
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(16 + l * 0.10F + glow * 130), u8(24 + l * 0.12F + glow * 100),
+                    u8(38 + l * 0.18F + glow * 60), false};
+          }
+        drawSeg(dst, w, h, postX, h * 0.95F, postX, h * 0.22F, std::max(1.0F, mn * 0.014F), ya,
+                Rgb{18, 16, 18, false});
+        plotDot(dst, w, h, lantX, lantY, mn * 0.06F, ya, Rgb{255, 230, 150, false});
+        const float barX = postX - mn * 0.16F, barY = h * 0.26F;
+        drawSeg(dst, w, h, postX, barY, barX, barY, std::max(1.0F, mn * 0.012F), ya,
+                Rgb{18, 16, 18, false});
+        const float swing = std::sin(t * 2.2F) * 0.45F;
+        const float L = mn * 0.20F;
+        const float bodyX = barX + std::sin(swing) * L, bodyY = barY + std::cos(swing) * L;
+        const Rgb suit{30, 26, 32, false};
+        drawSeg(dst, w, h, barX, barY, bodyX, bodyY, std::max(1.0F, mn * 0.020F), ya, suit);
+        plotDot(dst, w, h, bodyX + std::sin(swing) * mn * 0.04F,
+                bodyY + std::cos(swing) * mn * 0.04F, mn * 0.04F, ya, Rgb{210, 180, 150, false});
+        const float kick = std::sin(t * 4.0F) * 0.5F;
+        const float legX = bodyX + std::sin(swing) * mn * 0.18F;
+        const float legY = bodyY + std::cos(swing) * mn * 0.18F;
+        drawSeg(dst, w, h, bodyX, bodyY, legX - kick * mn * 0.08F, legY, std::max(1.0F, mn * 0.014F),
+                ya, suit);
+        drawSeg(dst, w, h, bodyX, bodyY, legX + kick * mn * 0.08F, legY, std::max(1.0F, mn * 0.014F),
+                ya, suit);
+        const float uHand = bodyX - mn * 0.10F, uHandY = bodyY - mn * 0.05F;
+        drawSeg(dst, w, h, bodyX, bodyY - mn * 0.04F, uHand, uHandY, std::max(1.0F, mn * 0.012F), ya,
+                suit);
+        const float uTop = uHandY - mn * 0.20F;
+        drawSeg(dst, w, h, uHand, uHandY, uHand, uTop, std::max(1.0F, mn * 0.010F), ya, suit);
+        for (int k = -5; k <= 5; ++k)
+        {
+          const float a = k / 5.0F;
+          const float ux = uHand + a * mn * 0.18F;
+          const float uy = uTop - (1.0F - a * a) * mn * 0.08F;
+          plotDot(dst, w, h, ux, uy, mn * 0.024F, ya, Rgb{40, 32, 36, false});
+        }
+        for (int i = 0; i < 120; ++i)
+        {
+          const float rx = std::fmod(hash(i * 2) * w + t * w * 0.05F + i * 0.7F, (float)w);
+          const float ry = std::fmod(hash(i * 2 + 1) * h + t * h * 1.6F + i * 0.4F, (float)h);
+          drawSeg(dst, w, h, rx, ry, rx - mn * 0.018F, ry + mn * 0.04F, std::max(1.0F, mn * 0.005F),
+                  ya, Rgb{170, 200, 230, false});
+        }
+      });
+}
+
+// Rocky: dawn breaks over the city (data tinted morning), a silhouette sprints
+// up the museum steps and at the top throws both arms up in victory.
+void effectRocky(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float botX = w * 0.5F, botY = h * 0.96F;
+  const float topY = h * 0.42F;
+  constexpr int kSteps = 10;
+  runFrames(
+      renderer, w, h, 5400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float sun = std::clamp((t - 0.10F) / 0.8F, 0.0F, 1.0F);
+        const float sunY = h * 0.50F - sun * h * 0.24F, sunX = w * 0.5F;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            const float sf = static_cast<float>(y) / h;
+            const float sd = std::hypot(x - sunX, (y - sunY) * ya);
+            const float glow = std::exp(-sd / (mn * 0.55F)) * sun;
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(60 + 90 * sf + l * 0.16F + glow * 120),
+                    u8(70 + 60 * sf + l * 0.14F + glow * 90),
+                    u8(120 - 60 * sf + l * 0.10F + glow * 30), false};
+          }
+        plotDot(dst, w, h, sunX, sunY, mn * 0.10F * (0.6F + 0.4F * sun), ya,
+                Rgb{u8(255), u8(220), u8(160), false});
+        for (int i = 0; i < kSteps; ++i)
+        {
+          const float f0 = static_cast<float>(i) / kSteps;
+          const float f1 = static_cast<float>(i + 1) / kSteps;
+          const float sw0 = (1.0F - f0) * (w * 0.42F);
+          const float sw1 = (1.0F - f1) * (w * 0.42F);
+          const float sy = botY + (topY - botY) * f1;
+          const Rgb stone{u8(95 - i * 3), u8(85 - i * 2), u8(75 - i * 2), false};
+          const Rgb edge{u8(150 - i * 4), u8(140 - i * 4), u8(125 - i * 3), false};
+          const int y0 = static_cast<int>(sy);
+          const int y1 = static_cast<int>(botY + (topY - botY) * f0);
+          for (int y = std::min(y0, y1); y <= std::max(y0, y1); ++y)
+          {
+            const float ff =
+                static_cast<float>(y - y1) / std::max(1.0F, static_cast<float>(y0 - y1));
+            const float halfw = sw1 + (sw0 - sw1) * (1.0F - ff);
+            for (int x = static_cast<int>(botX - halfw); x <= static_cast<int>(botX + halfw); ++x)
+              if (x >= 0 && x < w && y >= 0 && y < h)
+                dst[static_cast<std::size_t>(y) * w + x] = stone;
+          }
+          for (int x = static_cast<int>(botX - sw1); x <= static_cast<int>(botX + sw1); ++x)
+            if (x >= 0 && x < w && static_cast<int>(sy) >= 0 && static_cast<int>(sy) < h)
+              dst[static_cast<std::size_t>(static_cast<int>(sy)) * w + x] = edge;
+        }
+        const float climb = std::clamp(t / 0.72F, 0.0F, 1.0F);
+        const float victory = std::clamp((t - 0.72F) / 0.28F, 0.0F, 1.0F);
+        const float fx = botX, fy = botY + (topY - botY) * climb;
+        const float ht = mn * 0.14F;
+        const Rgb body{30, 26, 30, false};
+        plotDot(dst, w, h, fx, fy - ht * 1.0F, ht * 0.13F, ya, body);
+        drawSeg(dst, w, h, fx, fy - ht * 0.92F, fx, fy - ht * 0.40F, ht * 0.12F, ya, body);
+        if (victory < 0.05F)
+        {
+          const float stride = std::sin(t * 16.0F) * ht * 0.20F;
+          drawSeg(dst, w, h, fx, fy - ht * 0.40F, fx - stride, fy, ht * 0.10F, ya, body);
+          drawSeg(dst, w, h, fx, fy - ht * 0.40F, fx + stride, fy, ht * 0.10F, ya, body);
+          const float armSwing = std::sin(t * 16.0F + 1.5708F) * ht * 0.18F;
+          drawSeg(dst, w, h, fx, fy - ht * 0.78F, fx + armSwing, fy - ht * 0.52F, ht * 0.08F, ya,
+                  body);
+          drawSeg(dst, w, h, fx, fy - ht * 0.78F, fx - armSwing, fy - ht * 0.52F, ht * 0.08F, ya,
+                  body);
+        }
+        else
+        {
+          const float vh = victory * ht * 0.6F;
+          drawSeg(dst, w, h, fx, fy - ht * 0.40F, fx - ht * 0.10F, fy, ht * 0.10F, ya, body);
+          drawSeg(dst, w, h, fx, fy - ht * 0.40F, fx + ht * 0.10F, fy, ht * 0.10F, ya, body);
+          drawSeg(dst, w, h, fx, fy - ht * 0.78F, fx - ht * 0.22F, fy - ht * 1.10F - vh, ht * 0.08F,
+                  ya, body);
+          drawSeg(dst, w, h, fx, fy - ht * 0.78F, fx + ht * 0.22F, fy - ht * 1.10F - vh, ht * 0.08F,
+                  ya, body);
+        }
+      });
+}
+
 // Effect roster. Keep in sync with the dispatch switch below and with the
 // names in exitEffectName().
-constexpr int kEffectCount = 97;
+constexpr int kEffectCount = 105;
 }  // namespace
 
 int exitEffectCount()
@@ -8909,7 +9578,15 @@ const char* exitEffectName(int effectIndex)
                                                    "Pulp Fiction",
                                                    "Strangelove",
                                                    "Akira",
-                                                   "Clockwork"};
+                                                   "Clockwork",
+                                                   "newspaper",
+                                                   "end card",
+                                                   "Shining",
+                                                   "Dial M",
+                                                   "Bass spiral",
+                                                   "Lebowski",
+                                                   "Singin'",
+                                                   "Rocky"};
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return "random";
   return kNames[effectIndex];
@@ -9294,6 +9971,30 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
       break;
     case 96:
       effectClockwork(renderer, frame, subW, subH);
+      break;
+    case 97:
+      effectNewspaper(renderer, frame, subW, subH);
+      break;
+    case 98:
+      effectEndCard(renderer, frame, subW, subH);
+      break;
+    case 99:
+      effectShining(renderer, frame, subW, subH);
+      break;
+    case 100:
+      effectDialM(renderer, frame, subW, subH);
+      break;
+    case 101:
+      effectBassSpiral(renderer, frame, subW, subH);
+      break;
+    case 102:
+      effectLebowski(renderer, frame, subW, subH);
+      break;
+    case 103:
+      effectSinginRain(renderer, frame, subW, subH);
+      break;
+    case 104:
+      effectRocky(renderer, frame, subW, subH);
       break;
     default:
       effectFade(renderer, frame, subW, subH);
