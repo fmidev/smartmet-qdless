@@ -11012,7 +11012,6 @@ void effectAcmeAnvil(const Renderer& renderer, const std::vector<Rgb>& src, int 
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n)
   { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   runFrames(renderer, w, h, 4400,
@@ -11629,8 +11628,6 @@ void effectMagritteBowler(const Renderer& renderer, const std::vector<Rgb>& src,
 // flash zooms one notch into the seahorse valley.
 void effectMandelbrot(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
-  const float ya = yAspectFor(renderer);
-  const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(
       renderer, w, h, 5400,
@@ -13112,7 +13109,6 @@ void effectChladni(const Renderer& renderer, const std::vector<Rgb>& src, int w,
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(
       renderer, w, h, 5400,
       [&](float t, std::vector<Rgb>& dst)
