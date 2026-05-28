@@ -36,6 +36,13 @@ constexpr int subRowsForStyle(CornerStyle s)
   return s == CornerStyle::Sextant ? 3 : 2;
 }
 
+// Initial CornerStyle for a fresh session. Returns Square when the host
+// terminal is known to ship without the Symbols-for-Legacy-Computing block
+// (notably macOS Terminal.app with its bundled Menlo font, where Sextant /
+// SmallTriangle glyphs render as tofu); otherwise Sextant. Users can still
+// cycle with `t` regardless.
+CornerStyle defaultCornerStyle();
+
 // Renders an Rgb buffer to a UTF-8 terminal using quadrant-block glyphs (one
 // terminal cell carries a 2x2 sub-pixel grid). Detects truecolor vs xterm-256
 // via the COLORTERM environment variable.
@@ -68,6 +75,6 @@ class Renderer
 
  private:
   bool itsTruecolor;
-  CornerStyle itsCornerStyle = CornerStyle::Sextant;
+  CornerStyle itsCornerStyle = defaultCornerStyle();
 };
 }  // namespace Qdless

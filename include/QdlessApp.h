@@ -336,8 +336,9 @@ class App
   LineStyle itsBorderStyle = LineStyle::Braille;
   // Cell rendering style; cycled with `t`. Sextant (2×3 sub-pixels) is the
   // default; SmallTriangle (2×2 + corner bevels) is the fallback for fonts
-  // that don't ship the Symbols-for-Legacy-Computing block.
-  CornerStyle itsCornerStyle = CornerStyle::Sextant;
+  // that don't ship the Symbols-for-Legacy-Computing block. macOS Terminal.app
+  // is auto-detected and starts in Square — see defaultCornerStyle().
+  CornerStyle itsCornerStyle = defaultCornerStyle();
   // Top-N cap for the cities overlay; PageUp / PageDown step through fixed
   // levels (5, 10, 25, 50, 100, 250, 500). Default = a comfortable mid value.
   int itsCityOverlayN = 25;

@@ -14,8 +14,7 @@ namespace
 // 16 quadrant-block glyphs indexed by a 4-bit mask: bit0=TL, bit1=TR, bit2=BL,
 // bit3=BR. The "lit" pixels are foreground; the "unlit" pixels are background.
 constexpr std::array<const char*, 16> kQuadrant = {
-    " ", "▘", "▝", "▀", "▖", "▌", "▞", "▛",
-    "▗", "▚", "▐", "▜", "▄", "▙", "▟", "█"};
+    " ", "▘", "▝", "▀", "▖", "▌", "▞", "▛", "▗", "▚", "▐", "▜", "▄", "▙", "▟", "█"};
 
 // 1/12-cell corner triangles from Symbols for Legacy Computing (U+1FB00).
 // Each glyph fills only a small triangle hugging one cell-corner (hypotenuse
@@ -24,9 +23,22 @@ constexpr std::array<const char*, 16> kQuadrant = {
 // lone-bg masks (7/11/13/14) the small region needs to show the lone *bg*
 // colour, so we swap fg/bg on output (no all-but-corner complement glyph
 // exists). Indexed by the same 4-bit mask as kQuadrant.
-constexpr std::array<const char*, 16> kSmallTriangle = {
-    nullptr, "🭗", "🭢", nullptr, "🬼", nullptr, nullptr, "🭇",
-    "🭇",    nullptr, nullptr, "🭢", nullptr, "🬼", "🭗", nullptr};
+constexpr std::array<const char*, 16> kSmallTriangle = {nullptr,
+                                                        "🭗",
+                                                        "🭢",
+                                                        nullptr,
+                                                        "🬼",
+                                                        nullptr,
+                                                        nullptr,
+                                                        "🭇",
+                                                        "🭇",
+                                                        nullptr,
+                                                        nullptr,
+                                                        "🭢",
+                                                        nullptr,
+                                                        "🬼",
+                                                        "🭗",
+                                                        nullptr};
 
 constexpr bool smallTriangleSwapsColors(std::uint8_t mask)
 {
@@ -41,16 +53,21 @@ constexpr bool smallTriangleSwapsColors(std::uint8_t mask)
 // Build the table once at first use.
 const std::array<const char*, 64>& sextantTable()
 {
-  static const auto kTable = []() {
+  static const auto kTable = []()
+  {
     std::array<const char*, 64> t{};
     static std::array<std::string, 64> store;
     for (int m = 0; m < 64; ++m)
     {
       const char* literal = nullptr;
-      if (m == 0) literal = " ";
-      else if (m == 21) literal = "▌";  // U+258C left half
-      else if (m == 42) literal = "▐";  // U+2590 right half
-      else if (m == 63) literal = "█";  // U+2588 full
+      if (m == 0)
+        literal = " ";
+      else if (m == 21)
+        literal = "▌";  // U+258C left half
+      else if (m == 42)
+        literal = "▐";  // U+2590 right half
+      else if (m == 63)
+        literal = "█";  // U+2588 full
       if (literal != nullptr)
       {
         t[m] = literal;
@@ -78,14 +95,16 @@ bool detectTruecolor()
 {
   // NOLINTNEXTLINE(concurrency-mt-unsafe) - called once at construction.
   const char* ct = std::getenv("COLORTERM");
-  if (ct == nullptr) return false;
+  if (ct == nullptr)
+    return false;
   return std::strcmp(ct, "truecolor") == 0 || std::strcmp(ct, "24bit") == 0;
 }
 
 // xterm-256 quantization: 6x6x6 color cube indices 16..231.
 int xterm256(const Rgb& c)
 {
-  auto step = [](std::uint8_t v) {
+  auto step = [](std::uint8_t v)
+  {
     static constexpr std::array<int, 6> levels = {0, 95, 135, 175, 215, 255};
     int best = 0;
     int bestDist = 256 * 256;
@@ -113,7 +132,8 @@ int xterm256(const Rgb& c)
     static constexpr std::array<int, 6> levels = {0, 95, 135, 175, 215, 255};
     int dCube = (c.r - levels[r]) * (c.r - levels[r]) + (c.g - levels[g]) * (c.g - levels[g]) +
                 (c.b - levels[b]) * (c.b - levels[b]);
-    if (dGray * 3 < dCube) return 232 + idx;
+    if (dGray * 3 < dCube)
+      return 232 + idx;
   }
   return 16 + 36 * r + 6 * g + b;
 }
@@ -129,12 +149,15 @@ void splitCell(const Rgb* q, int n, Rgb& fg, Rgb& bg, std::uint8_t& mask)
   int lo = 0;
   for (int i = 1; i < n; ++i)
   {
-    if (luma(q[i]) > luma(q[hi])) hi = i;
-    if (luma(q[i]) < luma(q[lo])) lo = i;
+    if (luma(q[i]) > luma(q[hi]))
+      hi = i;
+    if (luma(q[i]) < luma(q[lo]))
+      lo = i;
   }
   fg = q[hi];
   bg = q[lo];
-  auto dist2 = [](const Rgb& a, const Rgb& b) {
+  auto dist2 = [](const Rgb& a, const Rgb& b)
+  {
     int dr = static_cast<int>(a.r) - b.r;
     int dg = static_cast<int>(a.g) - b.g;
     int db = static_cast<int>(a.b) - b.b;
@@ -148,7 +171,8 @@ void splitCell(const Rgb* q, int n, Rgb& fg, Rgb& bg, std::uint8_t& mask)
   for (int i = 0; i < n; ++i)
   {
     int side = dist2(q[i], fg) < dist2(q[i], bg) ? 1 : 0;
-    if (side == 1) mask |= static_cast<std::uint8_t>(1U << i);
+    if (side == 1)
+      mask |= static_cast<std::uint8_t>(1U << i);
     sumR[side] += q[i].r;
     sumG[side] += q[i].g;
     sumB[side] += q[i].b;
@@ -164,6 +188,18 @@ void splitCell(const Rgb* q, int n, Rgb& fg, Rgb& bg, std::uint8_t& mask)
              static_cast<std::uint8_t>(sumB[1] / count[1])};
 }
 }  // namespace
+
+CornerStyle defaultCornerStyle()
+{
+  // macOS Terminal.app sets TERM_PROGRAM=Apple_Terminal and ships with Menlo,
+  // which lacks the Symbols-for-Legacy-Computing block (U+1FB00..U+1FBFF).
+  // Sextant / SmallTriangle glyphs render as tofu there, so fall back to the
+  // universally-supported quadrant blocks (U+2580..U+259F, Unicode 1.1).
+  if (const char* tp = std::getenv("TERM_PROGRAM"))
+    if (std::strcmp(tp, "Apple_Terminal") == 0)
+      return CornerStyle::Square;
+  return CornerStyle::Sextant;
+}
 
 Renderer::Renderer() : itsTruecolor(detectTruecolor()) {}
 
@@ -223,9 +259,8 @@ void Renderer::render(std::ostream& os,
 
   // Glyph for an N-bit mask in the current style. SmallTriangle bevels are
   // applied separately at the 3:1-mask level on quadrant modes.
-  auto baseGlyph = [&](std::uint8_t m) -> const char* {
-    return sextant ? sextantTable()[m] : kQuadrant[m];
-  };
+  auto baseGlyph = [&](std::uint8_t m) -> const char*
+  { return sextant ? sextantTable()[m] : kQuadrant[m]; };
 
   for (int cy = 0; cy < cellH; ++cy)
   {
@@ -249,7 +284,8 @@ void Renderer::render(std::ostream& os,
       // colours — never use them as a "real" colour in k-means.
       int nTrans = 0;
       for (int i = 0; i < n; ++i)
-        if (q[i].transparent) ++nTrans;
+        if (q[i].transparent)
+          ++nTrans;
 
       if (nTrans == n)
       {
@@ -296,7 +332,8 @@ void Renderer::render(std::ostream& os,
         glyph = kSmallTriangle[mask];
         swapColors = (glyph != nullptr) && smallTriangleSwapsColors(mask);
       }
-      if (glyph == nullptr) glyph = baseGlyph(mask);
+      if (glyph == nullptr)
+        glyph = baseGlyph(mask);
 
       const Rgb& outFg = swapColors ? bg : fg;
       const Rgb& outBg = swapColors ? fg : bg;
