@@ -71,8 +71,11 @@ class UI
   // Items beyond hotkey-able count are reachable via arrow keys + Enter.
   // When `allowTab` is true, pressing Tab returns kPopupSearchTab so the
   // caller can switch to a sibling view (matches popupSearch).
+  // If `onSelect` is set it is called with the new index every time the
+  // highlight moves (live preview); the popup re-renders on top after.
   int popupMenu(const std::string& title, const std::vector<std::string>& items,
-                int currentIndex, bool allowTab = false);
+                int currentIndex, bool allowTab = false,
+                std::function<void(int)> onSelect = {});
 
   // Centred legend popup showing palette colour swatches and value ranges.
   // The two title strings appear on two stacked rows so the popup can stay

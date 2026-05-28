@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.28
-Release: 7%{?dist}.fmi
+Release: 8%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-8.fmi
+- Parameter and level popups now live-preview as you navigate; held arrow keys are coalesced into a single render at the final position
+
 * Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-7.fmi
 - Renamed GeoTiffSource to GdalRasterSource and added a GDAL/OGR fallback so any raster or vector format GDAL can read is now openable (GeoJSON, KML, GeoPackage, JPEG2000, COG, NITF, ...)
 

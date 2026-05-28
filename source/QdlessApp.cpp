@@ -3859,16 +3859,41 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case 'p':
     case 'P':
     {
-      int picked = ui.popupMenu("Parameters", paramLabels(), activePanel().paramIndex);
-      if (picked >= 0)
+      // Live preview: as the highlight moves, commit the candidate
+      // parameter and repaint the map underneath so the user can sweep
+      // through all parameters by holding ↓ / ↑. Esc reverts to the
+      // entry-time selection; Enter or a hotkey leaves the previewed
+      // parameter active.
+      const int savedIdx = activePanel().paramIndex;
+      auto preview = [this, &ui](int idx)
+      {
+        selectParam(idx);
+        renderTimeline(ui);
+        drawMap(ui);
+        drawCrossSection(ui);
+      };
+      int picked = ui.popupMenu("Parameters", paramLabels(), savedIdx, false, preview);
+      if (picked < 0)
+        selectParam(savedIdx);
+      else if (picked != activePanel().paramIndex)
         selectParam(picked);
-      return true;  // even on cancel, we need to repaint over the popup
+      return true;  // repaint over the popup
     }
     case 'L':  // uppercase only — lowercase 'l' is reserved for pan-right
     {
-      int picked =
-          ui.popupMenu("Levels", levelLabels(), static_cast<int>(itsSource->currentLevelIndex()));
-      if (picked >= 0)
+      // Live preview, matching the parameter popup.
+      const int savedIdx = static_cast<int>(itsSource->currentLevelIndex());
+      auto preview = [this, &ui](int idx)
+      {
+        selectLevel(idx);
+        renderTimeline(ui);
+        drawMap(ui);
+        drawCrossSection(ui);
+      };
+      int picked = ui.popupMenu("Levels", levelLabels(), savedIdx, false, preview);
+      if (picked < 0)
+        selectLevel(savedIdx);
+      else if (picked != static_cast<int>(itsSource->currentLevelIndex()))
         selectLevel(picked);
       return true;
     }

@@ -257,7 +257,7 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseM
 }
 
 int UI::popupMenu(const std::string& title, const std::vector<std::string>& items,
-                  int currentIndex, bool allowTab)
+                  int currentIndex, bool allowTab, std::function<void(int)> onSelect)
 {
   if (items.empty()) return -1;
   wtimeout(itsStatusWin, -1);  // see comment in popupSearch
@@ -375,20 +375,48 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
       result = sel;
       break;
     }
-    if (ch == KEY_UP || ch == 'k') { sel = std::max(0, sel - 1); continue; }
-    if (ch == KEY_DOWN || ch == 'j')
+    auto applyMove = [&](int key) -> bool
     {
-      sel = std::min(static_cast<int>(items.size()) - 1, sel + 1);
+      const int last = static_cast<int>(items.size()) - 1;
+      if (key == KEY_UP || key == 'k')
+        sel = std::max(0, sel - 1);
+      else if (key == KEY_DOWN || key == 'j')
+        sel = std::min(last, sel + 1);
+      else if (key == KEY_HOME)
+        sel = 0;
+      else if (key == KEY_END)
+        sel = last;
+      else if (key == KEY_NPAGE)
+        sel = std::min(last, sel + innerH);
+      else if (key == KEY_PPAGE)
+        sel = std::max(0, sel - innerH);
+      else
+        return false;
+      return true;
+    };
+    const int prevSel = sel;
+    if (applyMove(ch))
+    {
+      // Held-key streams: drain queued movement keys and only fire the
+      // (potentially expensive) preview callback once for the final
+      // position. Non-movement keys are pushed back for the outer loop.
+      if (onSelect)
+      {
+        wtimeout(itsStatusWin, 0);
+        int next;
+        while ((next = wgetch(itsStatusWin)) != ERR)
+        {
+          if (!applyMove(next))
+          {
+            ungetch(next);
+            break;
+          }
+        }
+        wtimeout(itsStatusWin, -1);
+        if (sel != prevSel) onSelect(sel);
+      }
       continue;
     }
-    if (ch == KEY_HOME) { sel = 0; continue; }
-    if (ch == KEY_END) { sel = static_cast<int>(items.size()) - 1; continue; }
-    if (ch == KEY_NPAGE)
-    {
-      sel = std::min(static_cast<int>(items.size()) - 1, sel + innerH);
-      continue;
-    }
-    if (ch == KEY_PPAGE) { sel = std::max(0, sel - innerH); continue; }
     if (ch == KEY_RESIZE)
     {
       recomputeLayout();
