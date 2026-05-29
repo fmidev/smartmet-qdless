@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 11%{?dist}.fmi
+Release: 12%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-12.fmi
+- Extrema view performance: the merge-tree cost scales with cell count, so on a multi-million-cell hybrid volume it took ~2 s — which surfaced as ~2 s per frame during time animation, where the per-frame time change forces a recompute. sampleVolumeGrid now takes a cell budget and horizontally strides the read (levels preserved) so the working lattice is capped (~400k cells for the interactive view), bounding both the newbase read and the merge-tree compute regardless of input size; the toggle-on freeze and per-animation-frame recompute drop to ~0.15 s. The --extrema text report still runs at full resolution. Trade-off: a coarser feature lattice when the cap engages.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-11.fmi
 - New persistent-extrema view in the 3D point-cloud mode (toggle [x] while in [3] on a volumetric QueryData file). Replaces the full point cloud with just the most prominent local maxima and minima of the per-level-median anomaly field, found by a union-find merge tree and ranked by topological persistence (the contrast a feature must build before it merges into the surrounding field). Each surviving feature is drawn as its saddle-bounded "air mass" blob — a solid palette-coloured body so the data still drives the colour — with a bright vertical stem and marker at the extremum (warm for maxima, cool for minima) for a cross-section-style read. The merge tree is cached per parameter + time so orbiting / animating does not recompute it. --dump --3d --extrema renders one frame headlessly.
 

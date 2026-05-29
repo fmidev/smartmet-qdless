@@ -89,13 +89,18 @@ class QueryDataSource : public DataSource
   // VolumeGrid::idx; lats/lons are ny*nx. Missing or non-finite cells are
   // written as NaN. Returns false (arrays untouched) when the file is not a
   // multi-level grid with a height field. Param/level/loc indices restored.
+  // targetMaxCells > 0 caps the grid: when the full volume exceeds it the
+  // read is horizontally strided (levels kept) so nx*ny*nz stays under the
+  // budget, bounding both this read and any downstream O(N) analysis. The
+  // reported nx/ny are then the strided dimensions. 0 = full resolution.
   bool sampleVolumeGrid(std::size_t& nx,
                         std::size_t& ny,
                         std::size_t& nz,
                         std::vector<float>& values,
                         std::vector<float>& heights,
                         std::vector<float>& lats,
-                        std::vector<float>& lons) const;
+                        std::vector<float>& lons,
+                        std::size_t targetMaxCells = 0) const;
 
   // True if the file carries the "surface stack" of layers used for the
   // synthetic 3D cloud + precipitation view: Precipitation1h,

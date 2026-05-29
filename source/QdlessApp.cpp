@@ -7274,8 +7274,15 @@ void App::ensureExtremaCache()
   itsExtremaFeatures.clear();
   itsExtremaGrid = VolumeGrid{};
 
+  // Cap the working resolution so the merge tree (and the read) stay
+  // interactive on big hybrid volumes — this is what kept the view at ~2 s
+  // per frame during time animation, where the per-frame param/time change
+  // forces a recompute. ~400k cells ≈ 0.15 s; features are for visualisation,
+  // so the coarser lattice is fine.
+  constexpr std::size_t kCellBudget = 400000;
   VolumeGrid g;
-  if (!qd->sampleVolumeGrid(g.nx, g.ny, g.nz, g.values, g.heights, g.lats, g.lons))
+  if (!qd->sampleVolumeGrid(
+          g.nx, g.ny, g.nz, g.values, g.heights, g.lats, g.lons, kCellBudget))
     return;
   itsExtremaGrid = g;  // keep the original (un-detrended) field for colour + coords
 

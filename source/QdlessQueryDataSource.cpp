@@ -553,7 +553,8 @@ bool QueryDataSource::sampleVolumeGrid(std::size_t& nx,
                                        std::vector<float>& values,
                                        std::vector<float>& heights,
                                        std::vector<float>& lats,
-                                       std::vector<float>& lons) const
+                                       std::vector<float>& lons,
+                                       std::size_t targetMaxCells) const
 {
   if (!itsInfo->IsGrid())
     return false;
@@ -561,11 +562,28 @@ bool QueryDataSource::sampleVolumeGrid(std::size_t& nx,
   const auto nLoc = itsInfo->SizeLocations();
   if (nLevels < 2 || nLoc == 0)
     return false;
-  nx = itsInfo->GridXNumber();
-  ny = itsInfo->GridYNumber();
-  nz = nLevels;
-  if (nx * ny != nLoc)
+  const std::size_t fullNx = itsInfo->GridXNumber();
+  const std::size_t fullNy = itsInfo->GridYNumber();
+  if (fullNx * fullNy != nLoc)
     return false;  // not a plain structured grid; bail rather than mis-index
+
+  // Horizontal stride to keep the cell count under the caller's budget — the
+  // merge-tree cost (and this read) scale with the cell count, so on a big
+  // hybrid volume a stride of a few keeps the extrema view interactive.
+  // Vertical resolution is preserved (levels carry the air-mass structure).
+  std::size_t stride = 1;
+  if (targetMaxCells > 0)
+  {
+    const double full = static_cast<double>(fullNx) * fullNy * nLevels;
+    if (full > static_cast<double>(targetMaxCells))
+      stride = static_cast<std::size_t>(std::ceil(std::sqrt(full / targetMaxCells)));
+    if (stride < 1)
+      stride = 1;
+  }
+  nx = (fullNx + stride - 1) / stride;
+  ny = (fullNy + stride - 1) / stride;
+  nz = nLevels;
+  const std::size_t nLoc2 = nx * ny;
 
   const auto savedParam = itsInfo->ParamIndex();
   const auto savedLevel = itsInfo->LevelIndex();
@@ -582,46 +600,44 @@ bool QueryDataSource::sampleVolumeGrid(std::size_t& nx,
 
   constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
 
-  // Lat/lon per cell (level-invariant) — locationIndex = j*nx+i, matching
-  // VolumeGrid::idx's row-major slice layout.
-  lats.assign(nLoc, kNaN);
-  lons.assign(nLoc, kNaN);
-  itsInfo->FirstLocation();
-  for (std::size_t s = 0; s < nLoc; ++s)
-  {
-    const NFmiPoint ll = itsInfo->LatLon();
-    lats[s] = static_cast<float>(ll.Y());
-    lons[s] = static_cast<float>(ll.X());
-    if (!itsInfo->NextLocation())
-      break;
-  }
+  // Source location index of strided cell (i2,j2): (j2*stride)*fullNx + i2*stride.
+  auto srcLoc = [&](std::size_t i2, std::size_t j2)
+  { return (j2 * stride) * fullNx + i2 * stride; };
 
-  values.assign(static_cast<std::size_t>(nLoc) * nLevels, kNaN);
-  heights.assign(static_cast<std::size_t>(nLoc) * nLevels, kNaN);
+  // Lat/lon per kept cell (level-invariant) — dest index j2*nx + i2.
+  lats.assign(nLoc2, kNaN);
+  lons.assign(nLoc2, kNaN);
+  for (std::size_t j2 = 0; j2 < ny; ++j2)
+    for (std::size_t i2 = 0; i2 < nx; ++i2)
+    {
+      itsInfo->LocationIndex(static_cast<unsigned long>(srcLoc(i2, j2)));
+      const NFmiPoint ll = itsInfo->LatLon();
+      lats[j2 * nx + i2] = static_cast<float>(ll.Y());
+      lons[j2 * nx + i2] = static_cast<float>(ll.X());
+    }
+
+  values.assign(nLoc2 * nLevels, kNaN);
+  heights.assign(nLoc2 * nLevels, kNaN);
   for (std::size_t li = 0; li < nLevels; ++li)
   {
-    const std::size_t base = li * nLoc;
-    itsInfo->ParamIndex(heightParamIndex);
-    itsInfo->LevelIndex(static_cast<unsigned long>(li));
-    itsInfo->FirstLocation();
-    for (std::size_t s = 0; s < nLoc; ++s)
+    const std::size_t base = li * nLoc2;
+    for (int pass = 0; pass < 2; ++pass)
     {
-      const float h = itsInfo->FloatValue();
-      if (h != kFloatMissing && std::isfinite(h))
-        heights[base + s] = static_cast<float>(h * heightScale);
-      if (!itsInfo->NextLocation())
-        break;
-    }
-    itsInfo->ParamIndex(savedParam);
-    itsInfo->LevelIndex(static_cast<unsigned long>(li));
-    itsInfo->FirstLocation();
-    for (std::size_t s = 0; s < nLoc; ++s)
-    {
-      const float v = itsInfo->FloatValue();
-      if (v != kFloatMissing && std::isfinite(v))
-        values[base + s] = v;
-      if (!itsInfo->NextLocation())
-        break;
+      itsInfo->ParamIndex(pass == 0 ? heightParamIndex : savedParam);
+      itsInfo->LevelIndex(static_cast<unsigned long>(li));
+      for (std::size_t j2 = 0; j2 < ny; ++j2)
+        for (std::size_t i2 = 0; i2 < nx; ++i2)
+        {
+          itsInfo->LocationIndex(static_cast<unsigned long>(srcLoc(i2, j2)));
+          const float val = itsInfo->FloatValue();
+          if (val == kFloatMissing || !std::isfinite(val))
+            continue;
+          const std::size_t d = base + j2 * nx + i2;
+          if (pass == 0)
+            heights[d] = static_cast<float>(val * heightScale);
+          else
+            values[d] = val;
+        }
     }
   }
 
