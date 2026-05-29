@@ -81,6 +81,8 @@ int main(int argc, char* argv[])
         ("list-exit-effects", "list the exit effect names and exit") //
         ("3d", po::bool_switch(&opts.start3D),
          "start in 3D point-cloud mode (PVOL or multi-level QueryData with height field)") //
+        ("globe", po::bool_switch(&opts.startGlobe),
+         "start in globe view (orthographic 3D sphere; any gridded geographic source)") //
         ("dir",
          po::value<std::string>(&dirArg),
          "directory whose files (sorted by filename) form the time series") //

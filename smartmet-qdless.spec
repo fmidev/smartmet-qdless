@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 6%{?dist}.fmi
+Release: 7%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-7.fmi
+- New --globe CLI flag: start in globe view (orthographic 3D sphere) when the source supports it.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-6.fmi
 - Curtain swing now translates the plane along its own normal back and forth (a parallel sweep through the data), instead of pivoting the azimuth. Amplitude is one bbox-extent so a full half-period traverses the data from one side to the other. With rotate also on, the swept axis spins with the plane.
 
