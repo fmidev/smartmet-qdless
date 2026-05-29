@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 13%{?dist}.fmi
+Release: 14%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-14.fmi
+- 12 new astronomy exit effects (Maths & physics theme): Solar Eclipse (sun + corona, moon transits), Lunar Eclipse (data-textured moon turns blood-red in the umbra), Sagittarius A (galactic-centre black hole with S-stars on elliptical orbits, photon ring), Wormhole (Einstein-Rosen torus warping data through the throat), Mars Rover (rover with wheel tracks on the rusty data-sampled surface, Olympus Mons silhouette), Solar Flare (sun surface eruption with prominence arch + CME blast), Pillars of Creation (three tall dust columns silhouetted against a data-coloured nebula), LIGO Chirp (two BHs spiral in + chirp waveform plotted underneath), Cosmic Web (filaments + voids + data-textured cluster nodes), Spaghettify (star stretched into a noodle by tidal forces), Magnetar (neutron star with dipole field loops + X-ray flares), Halley (comet on a high-eccentricity elliptical orbit swinging past the Sun, tail grows on approach). Total roster: 268 effects across 11 themes.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-13.fmi
 - Weather effects overhaul. New: Tornado Duel (two tornadoes form, drift together, collide and merge into a single fatter funnel before dissipating). Renamed Ice Storm to Snow Tree (snow accumulates on a large bare tree until cumulative load tips it over). Rewrote Coriolis with a clear cyclone-on-each-hemisphere reference plus curving wind arrows that bend right of motion in the north and left in the south. Rewrote El Nino, Jet Stream, Monsoon and Polar Vortex as proper geographic globe views: El Nino is now an orthographic Pacific globe with a growing east-equator warm anomaly; Jet Stream is a globe with a multi-harmonic polar-front jet ribbon and particles flowing along it; Monsoon is centred on the Bay of Bengal with a rain front advancing over the Indian subcontinent and Indochina; Polar Vortex is a top-down polar projection with a multi-harmonic Rossby wave circling the pole. Re-themed Crab, Fire, Fish, Jellyfish, Spider out of Weather (now Terminal effects) and Sun Dogs into Maths & physics (atmospheric optics).
 
