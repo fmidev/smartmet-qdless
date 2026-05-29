@@ -3,6 +3,7 @@
 #include "QdlessCities.h"
 #include "QdlessCoastline.h"
 #include "QdlessDataSource.h"
+#include "QdlessExtrema.h"
 #include "QdlessPalette.h"
 #include "QdlessGraphics.h"
 #include "QdlessRenderer.h"
@@ -340,6 +341,17 @@ class App
   // both backends without leaking source-specific text into draw3D*.
   std::string itsThreshold3DUnit = "dBZ";
 
+  // Persistent-extrema overlay for the volumetric 3D view (toggle [x]). When
+  // on, draw3DQueryData replaces the full point cloud with just the most
+  // persistent anomaly "air masses" (merge-tree blobs), each shown as a solid
+  // mass plus a vertical stem + marker at its extremum. The cache is keyed by
+  // param+time so spinning the camera / animating does not re-run the
+  // O(N log N) merge tree every frame.
+  bool itsShowExtrema = false;
+  VolumeGrid itsExtremaGrid;                // original (un-detrended) volume — coords + colour
+  std::vector<Feature> itsExtremaFeatures;  // retained non-global maxima then minima
+  std::string itsExtremaKey;                // cache signature: "paramId|timeIndex"
+
   // 3D + cross-section curtain (key [4]). Toggled on when the source
   // declares hasNativeHeight() — multi-level QueryData with GeomHeight,
   // or PVOL polar volumes. Renders the surface as a coloured floor,
@@ -610,6 +622,13 @@ class App
   // anomaly) and print the most persistent maxima / minima to stdout.
   // Returns a process exit code. No rendering — headless analysis only.
   int dumpExtremaReport() const;
+
+  // Rebuild itsExtremaGrid + itsExtremaFeatures for the active volumetric
+  // parameter when the param/time signature changes; no-op on a cache hit.
+  // Detrends a per-level-median copy, runs the merge-tree finder, and keeps
+  // the most persistent non-global maxima and minima. Clears the cache when
+  // the source is not a volumetric QueryData.
+  void ensureExtremaCache();
   // Reset itsThreshold3D / itsThreshold3DUnit / itsVexagger3D to
   // source-appropriate defaults (dBZ for PVOL, % for QueryData). Called
   // each time 3D is toggled on so a switch between sources doesn't

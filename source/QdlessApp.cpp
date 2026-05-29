@@ -3982,6 +3982,25 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         itsVexagger3D = std::max(1.0, itsVexagger3D / 1.4);
         itsLastMessage = fmt::format("3D vertical exaggeration: {:.1f}×", itsVexagger3D);
         return true;
+      case 'x':
+      case 'X':
+      {
+        // Toggle the persistent-extrema overlay (volumetric QueryData only):
+        // swap the full point cloud for the detected anomaly air masses.
+        const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
+        if (qd != nullptr && qd->isVolumetric())
+        {
+          itsShowExtrema = !itsShowExtrema;
+          itsLastMessage = itsShowExtrema
+                               ? "Extrema: persistent anomaly air masses (x = back to cloud)"
+                               : "Extrema off — full volume cloud";
+        }
+        else
+        {
+          itsLastMessage = "Extrema view needs a volumetric QueryData file (hybrid / pressure)";
+        }
+        return true;
+      }
       case '3':
         // Fall through to the normal toggle handler below.
         break;
@@ -5821,31 +5840,90 @@ void App::draw3DQueryData(const Layout& layout)
   if (itsBorderStyle == LineStyle::Thick)
     drawPolylinesThick(itsBorders, Rgb{120, 120, 120});
 
-  // Volume points. The sampler walks every (level, grid-cell) of the
-  // active parameter; we threshold and splat in the camera frame. The
-  // sampler restores info state on return, so the cb is the only place
-  // we touch per-point work — keep it lean.
-  const float threshold = itsThreshold3D;
   const double vexagger = itsVexagger3D;
-  qd->sampleVolume(
-      [&](const QueryDataSource::VolumeSample& s)
+
+  if (!itsShowExtrema)
+  {
+    // Volume points. The sampler walks every (level, grid-cell) of the
+    // active parameter; we threshold and splat in the camera frame. The
+    // sampler restores info state on return, so the cb is the only place
+    // we touch per-point work — keep it lean.
+    const float threshold = itsThreshold3D;
+    qd->sampleVolume(
+        [&](const QueryDataSource::VolumeSample& s)
+        {
+          if (!std::isfinite(s.value) || s.value < threshold)
+            return;
+          double wx = 0, wy = 0;
+          latLonToXY(s.lat, s.lon, wx, wy);
+          const double wz = s.heightMeters * vexagger;
+          double col = 0, rowSx = 0;
+          float depth = 0;
+          project(wx, wy, wz, col, rowSx, depth);
+          const Rgb color = activePanel().palette.lookup(transform(s.value));
+          const int c = static_cast<int>(col);
+          const int r = static_cast<int>(rowSx);
+          plot(c, r, depth, color);
+          plot(c + 1, r, depth, color);
+          plot(c, r + 1, depth, color);
+          plot(c + 1, r + 1, depth, color);
+        });
+  }
+  else
+  {
+    // Persistent-extrema view: instead of the full cloud, draw only the
+    // most persistent anomaly "air masses" — each merge-tree blob as a solid
+    // palette-coloured mass (so the data still drives the colour), with a
+    // bright vertical stem from the ground to the peak and a marker at the
+    // extremum, giving the cross-section-style read the user asked for.
+    ensureExtremaCache();
+    const VolumeGrid& g = itsExtremaGrid;
+    const std::size_t slice = g.sliceCount();
+    if (slice > 0 && g.heights.size() == g.cellCount())
+    {
+      auto cellWorld = [&](std::size_t flat, double& wx, double& wy, double& wz)
       {
-        if (!std::isfinite(s.value) || s.value < threshold)
-          return;
-        double wx = 0, wy = 0;
-        latLonToXY(s.lat, s.lon, wx, wy);
-        const double wz = s.heightMeters * vexagger;
-        double col = 0, rowSx = 0;
-        float depth = 0;
-        project(wx, wy, wz, col, rowSx, depth);
-        const Rgb color = activePanel().palette.lookup(transform(s.value));
-        const int c = static_cast<int>(col);
-        const int r = static_cast<int>(rowSx);
-        plot(c, r, depth, color);
-        plot(c + 1, r, depth, color);
-        plot(c, r + 1, depth, color);
-        plot(c + 1, r + 1, depth, color);
-      });
+        const std::size_t s = flat % slice;
+        latLonToXY(g.lats[s], g.lons[s], wx, wy);
+        wz = static_cast<double>(g.heights[flat]) * vexagger;
+      };
+      for (const auto& f : itsExtremaFeatures)
+      {
+        // The blob mass: a 2×2 splat per cell, palette-coloured by the raw
+        // value; the z-buffer makes it read as a solid body from any angle.
+        for (const std::size_t flat : f.blob)
+        {
+          double wx = 0, wy = 0, wz = 0;
+          cellWorld(flat, wx, wy, wz);
+          double col = 0, row = 0;
+          float depth = 0;
+          project(wx, wy, wz, col, row, depth);
+          const float v = g.values[flat];
+          const Rgb color = std::isfinite(v) ? activePanel().palette.lookup(transform(v))
+                                             : Rgb{160, 160, 160};
+          const int c = static_cast<int>(col);
+          const int r = static_cast<int>(row);
+          plot(c, r, depth, color);
+          plot(c + 1, r, depth, color);
+          plot(c, r + 1, depth, color);
+          plot(c + 1, r + 1, depth, color);
+        }
+        // Bright stem + marker at the peak (warm = max, cool = min).
+        const Rgb tint = (f.kind == ExtremumKind::Max) ? Rgb{255, 90, 80} : Rgb{90, 170, 255};
+        double px = 0, py = 0, pz = 0;
+        cellWorld(f.peakCell, px, py, pz);
+        drawLine(px, py, 0.0, px, py, pz, tint);
+        double mc = 0, mr = 0;
+        float md = 0;
+        project(px, py, pz, mc, mr, md);
+        const int cc = static_cast<int>(mc);
+        const int rr = static_cast<int>(mr);
+        for (int dy = -1; dy <= 1; ++dy)
+          for (int dx = -1; dx <= 1; ++dx)
+            plot(cc + dx, rr + dy, md - 1.0F, tint);  // bias toward camera so it stays visible
+      }
+    }
+  }
 
   std::ostringstream os;
   cache3DRaster(pixels, subW, subH);
@@ -5970,13 +6048,21 @@ void App::draw3DQueryData(const Layout& layout)
   }
 
   const std::string hud =
-      fmt::format(" 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}{} ",
-                  itsCamYaw * 180.0 / M_PI,
-                  itsCamPitch * 180.0 / M_PI,
-                  itsCamZoom,
-                  itsVexagger3D,
-                  itsThreshold3D,
-                  itsThreshold3DUnit);
+      itsShowExtrema
+          ? fmt::format(" 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  "
+                        "extrema={} masses  [x] cloud ",
+                        itsCamYaw * 180.0 / M_PI,
+                        itsCamPitch * 180.0 / M_PI,
+                        itsCamZoom,
+                        itsVexagger3D,
+                        itsExtremaFeatures.size())
+          : fmt::format(" 3D  yaw={:.0f}°  pitch={:.0f}°  zoom={:.2f}×  vex={:.0f}×  thresh={:.0f}{} ",
+                        itsCamYaw * 180.0 / M_PI,
+                        itsCamPitch * 180.0 / M_PI,
+                        itsCamZoom,
+                        itsVexagger3D,
+                        itsThreshold3D,
+                        itsThreshold3DUnit);
   const int hudRow = l.map.row + l.map.height - 1;
   const int hudCol =
       std::max(l.map.col, l.map.col + l.map.width - static_cast<int>(hud.size()) - 1);
@@ -7169,6 +7255,69 @@ void App::apply3DDefaultsForSource()
   }
 }
 
+void App::ensureExtremaCache()
+{
+  const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
+  if (qd == nullptr || !qd->isVolumetric())
+  {
+    itsExtremaFeatures.clear();
+    itsExtremaGrid = VolumeGrid{};
+    itsExtremaKey.clear();
+    return;
+  }
+  const std::string key =
+      fmt::format("{}|{}", itsSource->currentParamId(), itsSource->currentTimeIndex());
+  if (key == itsExtremaKey && itsExtremaGrid.cellCount() > 0)
+    return;  // cache hit — param and time unchanged
+
+  itsExtremaKey = key;
+  itsExtremaFeatures.clear();
+  itsExtremaGrid = VolumeGrid{};
+
+  VolumeGrid g;
+  if (!qd->sampleVolumeGrid(g.nx, g.ny, g.nz, g.values, g.heights, g.lats, g.lons))
+    return;
+  itsExtremaGrid = g;  // keep the original (un-detrended) field for colour + coords
+
+  VolumeGrid detr = g;  // detrend a copy so colours stay true to the raw values
+  detrendPerLevelMedian(detr);
+
+  auto maxima = findExtrema(detr, ExtremumKind::Max, 0.0F, 0, 60000);
+  auto minima = findExtrema(detr, ExtremumKind::Min, 0.0F, 0, 60000);
+
+  // Keep non-global features whose persistence is a meaningful fraction of
+  // the *strongest real feature* — scaling to the global range fails because
+  // that range is set by the single most extreme cell, dwarfing the genuine
+  // features. Features come sorted by descending persistence with the global
+  // one first, so the first non-global entry is the strongest. Capped so the
+  // view stays legible.
+  constexpr std::size_t kCap = 8;
+  auto keepProminent = [&](std::vector<Feature>& v)
+  {
+    float ref = 0.0F;
+    for (const auto& f : v)
+      if (!f.isGlobal)
+      {
+        ref = f.persistence;  // strongest non-global
+        break;
+      }
+    if (ref <= 0.0F)
+      return;
+    const float floor = 0.15F * ref;
+    std::size_t kept = 0;
+    for (auto& f : v)
+    {
+      if (f.isGlobal || f.persistence < floor)
+        continue;
+      itsExtremaFeatures.push_back(std::move(f));
+      if (++kept >= kCap)
+        break;
+    }
+  };
+  keepProminent(maxima);
+  keepProminent(minima);
+}
+
 int App::dumpExtremaReport() const
 {
   const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
@@ -7227,10 +7376,10 @@ int App::runOnce()
                  "concrete file or leaf directory.\n";
     return 1;
   }
-  // --extrema: persistence/merge-tree analysis of the active 3D parameter.
-  // Text report only (no raster) — the verification harness for the feature
-  // finder before it drives any rendering.
-  if (itsOpts.dumpExtrema)
+  // --extrema (without --3d): persistence/merge-tree analysis of the active
+  // 3D parameter as a text report (no raster). With --3d it instead renders
+  // the blob view (handled in the start3D block below via itsShowExtrema).
+  if (itsOpts.dumpExtrema && !itsOpts.start3D)
     return dumpExtremaReport();
 
   TerminalSize ts = terminalSize();
@@ -7265,6 +7414,7 @@ int App::runOnce()
   {
     itsMode3D = true;
     apply3DDefaultsForSource();
+    itsShowExtrema = itsOpts.dumpExtrema;  // --3d --extrema → render the blob view
     Layout layout{};
     layout.map = {0, 0, cellH, cellW};
     loadCoastlines(cellW * 2, cellH * 4);

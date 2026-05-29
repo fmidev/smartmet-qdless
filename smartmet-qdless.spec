@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 10%{?dist}.fmi
+Release: 11%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-11.fmi
+- New persistent-extrema view in the 3D point-cloud mode (toggle [x] while in [3] on a volumetric QueryData file). Replaces the full point cloud with just the most prominent local maxima and minima of the per-level-median anomaly field, found by a union-find merge tree and ranked by topological persistence (the contrast a feature must build before it merges into the surrounding field). Each surviving feature is drawn as its saddle-bounded "air mass" blob — a solid palette-coloured body so the data still drives the colour — with a bright vertical stem and marker at the extremum (warm for maxima, cool for minima) for a cross-section-style read. The merge tree is cached per parameter + time so orbiting / animating does not recompute it. --dump --3d --extrema renders one frame headlessly.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-10.fmi
 - New --extrema headless report: walks the active volumetric QueryData parameter, detrends each level by its area-weighted median (so the values are level-relative anomalies), runs a persistence / merge-tree finder, and prints the most persistent 3D maxima and minima with lat / lon / height / anomaly / persistence / blob size. No rendering — verification path for the upcoming on-globe extrema overlay.
 
