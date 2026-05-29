@@ -109,9 +109,28 @@ int main(int argc, char* argv[])
 
     if (vm.count("list-exit-effects") != 0U)
     {
+      // Grouped by theme (Cinema, History, Maths & physics, ...) so the
+      // ~200-strong roster is browsable. Within a theme effects stay in
+      // their alphabetical kNames[] order. Names remain the canonical
+      // identifier for --exit-effect (theme is purely a display detail).
       std::cout << "Exit effects (use names with --exit-effect):\n";
-      for (int i = 0; i < Qdless::exitEffectCount(); ++i)
-        std::cout << "  " << Qdless::exitEffectName(i) << '\n';
+      const int nThemes = Qdless::exitThemeCount();
+      const int nEffects = Qdless::exitEffectCount();
+      for (int t = 0; t < nThemes; ++t)
+      {
+        bool wroteHeader = false;
+        for (int i = 0; i < nEffects; ++i)
+        {
+          if (Qdless::exitEffectTheme(i) != t)
+            continue;
+          if (!wroteHeader)
+          {
+            std::cout << "\n  " << Qdless::exitThemeName(t) << ":\n";
+            wroteHeader = true;
+          }
+          std::cout << "    " << Qdless::exitEffectName(i) << '\n';
+        }
+      }
       return 0;
     }
 

@@ -4023,18 +4023,68 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
     case KEY_F(8):
     {
-      // Hidden: pick an exit effect from a menu and play it.
-      std::vector<std::string> items;
-      items.reserve(static_cast<std::size_t>(exitEffectCount()));
-      for (int i = 0; i < exitEffectCount(); ++i)
-        items.emplace_back(exitEffectName(i));
-      const int sel = ui.popupMenu("Exit effect", items, itsExitEffectPreview);
-      if (sel >= 0)
+      // Two-step exit-effect picker: choose a theme, then an effect.
+      // 211 effects in one flat list is too much to scroll; the theme
+      // grouping turns it into ~10 short menus. Esc out of the inner
+      // popup returns to the theme list; Esc out of the theme list
+      // closes the picker. The theme cursor + per-theme effect cursor
+      // are remembered across F8 invocations.
+      const int nThemes = exitThemeCount();
+      while (true)
       {
+        std::vector<std::string> themeItems;
+        std::vector<int> themeCounts(static_cast<std::size_t>(nThemes), 0);
+        themeItems.reserve(static_cast<std::size_t>(nThemes));
+        for (int i = 0; i < exitEffectCount(); ++i)
+        {
+          const int t = exitEffectTheme(i);
+          if (t >= 0 && t < nThemes)
+            ++themeCounts[static_cast<std::size_t>(t)];
+        }
+        for (int t = 0; t < nThemes; ++t)
+          themeItems.emplace_back(fmt::format(
+              "{} ({})", exitThemeName(t), themeCounts[static_cast<std::size_t>(t)]));
+        const int themeSel =
+            ui.popupMenu("Exit effect — choose a theme", themeItems, itsExitThemePreview);
+        if (themeSel < 0)
+          break;  // Esc — close picker entirely
+        itsExitThemePreview = themeSel;
+
+        // Build the effects-in-this-theme list, remembering the global
+        // index so the selection maps back to playExitEffect.
+        std::vector<std::string> effectItems;
+        std::vector<int> globalIdx;
+        for (int i = 0; i < exitEffectCount(); ++i)
+        {
+          if (exitEffectTheme(i) == themeSel)
+          {
+            effectItems.emplace_back(exitEffectName(i));
+            globalIdx.push_back(i);
+          }
+        }
+        if (effectItems.empty())
+          continue;  // empty theme (shouldn't happen) — back to theme picker
+
+        // Default the inner cursor to whatever effect was last previewed
+        // if it lives in this theme; otherwise start at 0.
+        int innerStart = 0;
+        for (int k = 0; k < static_cast<int>(globalIdx.size()); ++k)
+          if (globalIdx[static_cast<std::size_t>(k)] == itsExitEffectPreview)
+          {
+            innerStart = k;
+            break;
+          }
+        const int innerSel = ui.popupMenu(
+            fmt::format("Exit effect — {}", exitThemeName(themeSel)),
+            effectItems, innerStart);
+        if (innerSel < 0)
+          continue;  // Esc out of inner — back to theme picker
+        const int sel = globalIdx[static_cast<std::size_t>(innerSel)];
         itsExitEffectPreview = sel;
         // For word reveal the current line is forced; other effects ignore it.
         playExitEffect(sel, 0, exitWordline(itsExitWordPreview));
         itsLastMessage = fmt::format("Exit effect: {}", exitEffectName(sel));
+        break;
       }
       ui.touch();
       return true;

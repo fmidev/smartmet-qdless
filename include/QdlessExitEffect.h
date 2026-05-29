@@ -56,6 +56,17 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
 int exitEffectCount();
 const char* exitEffectName(int effectIndex);
 
+// Themes group effects for menu / listing purposes. Each effect belongs to
+// exactly one theme (its most defining one). The integer returned by
+// exitEffectTheme is a 0-based index into the themes named by
+// exitThemeName — stable for the lifetime of the binary so callers can
+// cache it. Themes are listed in the menu-order they should appear, not
+// alphabetical: broad cultural themes first, then sciences, then the
+// purely visual / terminal effects at the end.
+int exitThemeCount();
+const char* exitThemeName(int themeIndex);
+int exitEffectTheme(int effectIndex);
+
 // Resolve a name to its effect index, or -1 if no match. Case-insensitive and
 // punctuation/space-insensitive, so "tears in rain", "Tears-In-Rain" and
 // "tearsinrain" all match. Used to parse --exit-effect.

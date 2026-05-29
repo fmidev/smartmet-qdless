@@ -172,6 +172,7 @@ class App
                       unsigned seed = 0,
                       const std::string& wordsOverride = {});
   int itsExitEffectPreview = 0;  // next effect the cycle key (F9) shows
+  int itsExitThemePreview = 0;   // F8 two-step picker: theme cursor (remembered across opens)
   int itsExitWordPreview = 0;    // current word-reveal line for F11 / F12
   int itsLastExitIndex = -1;     // last effect played, for the repeat key (F10)
   unsigned itsLastExitSeed = 0;  // its seed; 0 = nothing played yet
