@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.5.28
-Release: 11%{?dist}.fmi
+Version: 26.5.29
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-1.fmi
+- Warning-clean build over the previous release; no behaviour change
+
 * Thu May 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.28-11.fmi
 - Shining flood now follows the corridor's 1-point perspective wedge instead of a rectangle; 34 new exit effects across iconic art/cinema (Pink Panther, Bone Chandelier, ACME Anvil, Banksy Balloon, Ceci n'est pas, HAL Stare, Hitchcock, Hokusai Wave, Magritte Bowler, Munch Scream, Silly Walk, That's All Folks, UFO, Warhol Banana) and a mathematics/physics theme (Dodecahedron, Pythagoras, Mobius, Mandelbrot, Lorenz Attractor, Newton Cradle, Schrodinger, Pendulum Waves, Euler Identity, Bohr Atom, Foucault Pendulum, Galileo Tower, Fourier, Pi, Golden Spiral, Double Slit, Sierpinski, Brachistochrone, Chladni, Standing Wave)
 
