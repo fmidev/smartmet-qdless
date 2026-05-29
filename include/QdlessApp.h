@@ -300,6 +300,12 @@ class App
   // sources without hasNativeHeight().
   bool itsCrossHeightAxis = true;
 
+  // Hovmöller toggle ('H' in cross-section). When true, the chart's Y-axis
+  // is time (oldest at top, newest at bottom): the line is sampled across
+  // every time step at the current level, so the chart shows the variable's
+  // evolution along the path. Mutually exclusive with itsCrossHeightAxis.
+  bool itsCrossTimeAxis = false;
+
   // 3D mode (radar volume): rotate-and-zoom view onto the polar data as
   // a point cloud above a coastline-and-graticule ground plane. Toggled
   // with [3]. Camera orbits the radar at (yaw, pitch); zoom scales the

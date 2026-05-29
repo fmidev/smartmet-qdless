@@ -959,6 +959,8 @@ void UI::popupHelp(HelpContext ctx)
       add("x", "Cross-section");
       if (ctx.hasNativeHeight)
         add("y in section", "Y-axis: height (km) \xe2\x86\x94 elevation angle");
+      add("H in section",
+          "Hovmöller: chart Y-axis becomes time (multi-time files only)");
     }
     if (ctx.has3DVolume)
     {

@@ -1578,19 +1578,51 @@ void App::drawCrossSection(UI& ui)
   };
   const double totalKm = haversineKm(lat1, lon1, lat2, lon2);
 
+  // Hovmöller mode disables heightMode (mutually exclusive).
+  const bool hovmollerMode = itsCrossTimeAxis && itsSource->timeCount() > 1;
+  const bool effectiveHeightMode = !hovmollerMode && heightMode;
+
   // Per-row labels. In level mode the rows correspond to source levels
   // (sorted into draw order); in height mode they're heights in km
-  // spanning the source's heightRangeKm().
+  // spanning the source's heightRangeKm(); in Hovmöller mode they're
+  // time stamps spanning the file's time series.
   std::vector<std::string> rowLabels;
-  std::vector<int> levelOrder;  // populated only in level mode
+  std::vector<int> levelOrder;     // populated only in level mode
+  std::vector<int> hovmollerTimes;  // populated only in Hovmöller mode
 
   double heightLoKm = 0;
   double heightHiKm = 0;
   int chartH = 0;
 
   std::size_t savedLevel = itsSource->currentLevelIndex();
+  std::size_t savedTime = itsSource->currentTimeIndex();
 
-  if (heightMode)
+  if (hovmollerMode)
+  {
+    const int nTimes = static_cast<int>(itsSource->timeCount());
+    // One chart cell row per time step, capped so the popup still fits a
+    // standard terminal. If there are more times than rows, sub-sample
+    // evenly so the full series still appears.
+    const int maxRows = std::max(8, LINES - 12);
+    chartH = std::min(nTimes, maxRows);
+    hovmollerTimes.resize(chartH);
+    rowLabels.resize(chartH);
+    for (int cy = 0; cy < chartH; ++cy)
+    {
+      // Oldest at top, newest at bottom (standard Hovmöller convention).
+      const int ti = (chartH == 1) ? 0 : (cy * (nTimes - 1)) / (chartH - 1);
+      hovmollerTimes[cy] = ti;
+      itsSource->selectTimeIndex(static_cast<std::size_t>(ti));
+      const NFmiMetTime t = itsSource->currentValidTime();
+      rowLabels[cy] = fmt::format("{:02}-{:02} {:02}:{:02}",
+                                  static_cast<int>(t.GetMonth()),
+                                  static_cast<int>(t.GetDay()),
+                                  static_cast<int>(t.GetHour()),
+                                  static_cast<int>(t.GetMin()));
+    }
+    itsSource->selectTimeIndex(savedTime);
+  }
+  else if (effectiveHeightMode)
   {
     auto range = itsSource->heightRangeKm();
     heightLoKm = range.first;
@@ -1654,7 +1686,27 @@ void App::drawCrossSection(UI& ui)
 
   // Sample.
   std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH);
-  if (heightMode)
+  if (hovmollerMode)
+  {
+    // One sweep per chart row at a specific time index. The current level
+    // stays selected — Hovmöller is distance × time at a fixed level.
+    for (int cy = 0; cy < chartH; ++cy)
+    {
+      itsSource->selectTimeIndex(static_cast<std::size_t>(hovmollerTimes[cy]));
+      for (int sx = 0; sx < subW; ++sx)
+      {
+        const double frac = (static_cast<double>(sx) + 0.5) / subW;
+        const double lat = lat1 + frac * (lat2 - lat1);
+        const double lon = lon1 + frac * (lon2 - lon1);
+        const float val = transform(itsSource->interpolatedValue(lat, lon));
+        const Rgb c = activePanel().palette.lookup(val);
+        for (int sr = 0; sr < subRows; ++sr)
+          pixels[static_cast<std::size_t>(cy * subRows + sr) * subW + sx] = c;
+      }
+    }
+    itsSource->selectTimeIndex(savedTime);
+  }
+  else if (effectiveHeightMode)
   {
     // Per-pixel sampling: each pixel (sy, sx) has its own (h, lat, lon).
     // The top sub-row maps to heightHiKm, the bottom to heightLoKm.
@@ -1736,7 +1788,8 @@ void App::drawCrossSection(UI& ui)
 
   NFmiEnumConverter conv;
   std::string title =
-      "Cross-section: " + std::string(itsSource->paramShortName(itsSource->currentParamId()));
+      (hovmollerMode ? "Hovmöller: " : "Cross-section: ") +
+      std::string(itsSource->paramShortName(itsSource->currentParamId()));
 
   std::ostringstream os;
 
@@ -1747,7 +1800,9 @@ void App::drawCrossSection(UI& ui)
   pos(0);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m"
      << "\xe2\x94\x8c\xe2\x94\x80[\x1b[38;5;15m" << title << "\x1b[38;5;14m]";
-  int titleConsumed = 4 + static_cast<int>(title.size());
+  // "Hovmöller" has one 2-byte char (ö) that occupies a single cell, so
+  // byte count overstates cell count by 1 in Hovmöller mode.
+  int titleConsumed = 4 + static_cast<int>(title.size()) - (hovmollerMode ? 1 : 0);
   for (int i = 0; i < width - titleConsumed - 1; ++i)
     os << "\xe2\x94\x80";
   os << "\xe2\x94\x90\x1b[0m";
@@ -1805,18 +1860,31 @@ void App::drawCrossSection(UI& ui)
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
 
   // Footer. Mention the [Y] toggle only when the source actually offers
-  // both axes — for pressure/hybrid data it's a no-op.
+  // both axes — for pressure/hybrid data it's a no-op. 'H' toggles
+  // Hovmöller when the source has more than one time step.
   pos(3 + chartH);
-  const std::string footerStr =
-      itsSource->hasNativeHeight()
-          ? std::string(" 'x' close, 'y' Y-axis: ") +
-                (heightMode ? "km \xe2\x86\x92 angle" : "angle \xe2\x86\x92 km") +
-                ", \xe2\x86\x90/\xe2\x86\x92 step time"
-          : std::string(" 'x' close, \xe2\x86\x90/\xe2\x86\x92 step time, Space animate");
-  // Each ←/→ arrow is 3 bytes UTF-8 but 1 cell wide; the toggle string also
-  // has one → for the same skew. Count them dynamically.
-  const int arrowsInFooter = itsSource->hasNativeHeight() ? 3 : 2;
-  const int footerCells = static_cast<int>(footerStr.size()) - 2 * arrowsInFooter;
+  const bool offerH = itsSource->timeCount() > 1;
+  std::string footerStr;
+  if (hovmollerMode)
+    footerStr = std::string(" 'x' close, 'H' back to ") +
+                (heightMode ? "height" : "levels") +
+                std::string(", \xe2\x86\x90/\xe2\x86\x92 step time");
+  else if (itsSource->hasNativeHeight())
+    footerStr = std::string(" 'x' close, 'y' Y-axis: ") +
+                (effectiveHeightMode ? "km \xe2\x86\x92 angle" : "angle \xe2\x86\x92 km") +
+                (offerH ? std::string(", 'H' Hovmöller") : std::string()) +
+                ", \xe2\x86\x90/\xe2\x86\x92 step time";
+  else
+    footerStr = std::string(" 'x' close") +
+                (offerH ? std::string(", 'H' Hovmöller") : std::string()) +
+                ", \xe2\x86\x90/\xe2\x86\x92 step time, Space animate";
+  // UTF-8 byte / cell skew. Each ←/→ arrow is 3 bytes / 1 cell (2-byte
+  // overhead). Each ö in "Hovmöller" is 2 bytes / 1 cell (1-byte overhead).
+  int arrowsInFooter = 2;  // ← and →
+  if (!hovmollerMode && itsSource->hasNativeHeight()) ++arrowsInFooter;  // angle → km
+  const int ohlerCount = (!hovmollerMode && offerH) ? 1 : 0;
+  const int footerCells =
+      static_cast<int>(footerStr.size()) - 2 * arrowsInFooter - 1 * ohlerCount;
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[48;5;0m\x1b[38;5;15m" << footerStr;
   padSpaces(os, interiorW - footerCells);
   os << "\x1b[0m\x1b[48;5;0m\x1b[38;5;14m\xe2\x94\x82\x1b[0m";
@@ -4727,12 +4795,30 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       if (itsCrossActive && itsSource->hasNativeHeight())
       {
         itsCrossHeightAxis = !itsCrossHeightAxis;
+        itsCrossTimeAxis = false;  // mutually exclusive with Hovmöller
         itsLastMessage = itsCrossHeightAxis ? "Cross-section: Y-axis = height (km)"
                                             : "Cross-section: Y-axis = elevation angle";
       }
       else if (itsCrossActive)
       {
         itsLastMessage = "Y-axis toggle: this source has no 3D height info";
+      }
+      return true;
+
+    case 'H':
+      // Hovmöller toggle: when the cross-section is open and the source has
+      // multiple time steps, swap the chart's Y-axis from level/height to
+      // time. The line is sampled at the current level across every time
+      // step. Uppercase only — lowercase 'h' is the vim-style pan-left.
+      if (itsCrossActive && itsSource->timeCount() > 1)
+      {
+        itsCrossTimeAxis = !itsCrossTimeAxis;
+        itsLastMessage = itsCrossTimeAxis ? "Cross-section: Hovmöller (time vs distance)"
+                                          : "Cross-section: level/height vs distance";
+      }
+      else if (itsCrossActive)
+      {
+        itsLastMessage = "Hovmöller toggle: this source has only one time step";
       }
       return true;
 
