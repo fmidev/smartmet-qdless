@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 17%{?dist}.fmi
+Release: 18%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -112,6 +112,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/transfoot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-18.fmi
+- 20 new "foot-substitution" exit effects — iconic scenes where the canonical object is replaced by Terry Gilliam's Monty Python foot. Atlas (foot as the globe), Cezanne Still (bowl of feet), Crown (foot on king's head), Crystal Ball (foot inside the orb), Damocles Foot (foot on a fraying thread), Eden (serpent offers foot), Excalibur (foot pulled from a stone), Indy Idol (foot on a temple pedestal), Liberty Torch (Statue of Liberty holds foot aloft), Moon Flag (Apollo plants foot as flag), Newton (foot falls from an orchard tree), Olympic Torch (runner carries flaming foot), Oscar Statue (gold-foot trophy on podium), Pandora Foot (foot rises from the opened box), Pulp Briefcase (glowing foot in an open case), Top Hat (magician pulls foot from hat), Trojan Foot (wooden horse spills tiny feet), Trophy (winner hoists foot on the podium), William Tell (arrow fired through foot balanced on son's head), Yorick (Hamlet contemplates a foot, ALAS). New drawFootSprite + loadPythonFootSprite helpers so the rotation / chroma-key fallback math is shared. Total roster: 287 -> 307. Stomp-exclusion shifted to Foot Stomp 90, Monty Python 163, Python Wars 211.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-17.fmi
 - Python Cut placement: synchronise the match cut. The bone's parabola previously landed back on the savanna at the cut moment while the foot appeared mid-screen, breaking the splice. Replaced the half-period sine with a quarter-period rise so the bone arrives at its apex (around 0.70w, 0.23h) exactly at t = cutT, and the foot now starts at that point and eases toward screen centre — bone and foot occupy the same pixel at the moment of the edit.
 
