@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 15%{?dist}.fmi
+Release: 16%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -109,8 +109,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/palettes/*.json
 %{_datadir}/smartmet/qdless/cities1000.tsv
 %{_datadir}/smartmet/qdless/foot.png
+%{_datadir}/smartmet/qdless/transfoot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-16.fmi
+- New Python Cut exit effect: 2001 match-cut homage where the savanna bone tumbles up across the sky and at the cinematic edit becomes Terry Gilliam's Monty Python foot (data/transfoot.png — alpha-clean) rotating in space where the spaceship used to be. Falls back to a skin-tone chroma key on foot.png if the transparent PNG isn't installed; falls back to Bone Cut if neither is present. Ships data/transfoot.png alongside data/foot.png. Roster: 286 -> 287; Python Wars stomp-exclusion shifted to 196.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-15.fmi
 - 18 new globe-view exit effects. Weather & nature: ITCZ (cloud band drifting north/south of the equator), MJO (eastward-marching tropical convection envelope), Hadley Cell (meridional cross-section with rising-at-equator / sinking-at-30° arrows), Walker Cell (Pacific east-west circulation with Indonesian convection + Peruvian subsidence), AMOC (Gulf-Stream surface warm + cold deep return ribbons), Hurricane Tracks (Atlantic basin with curving recurving cyclone paths), Saharan Dust (plume drifting from Sahara to Amazon), Krakatoa (1883 eruption with ash plume circling the globe), Wildfire Smoke (continental plumes), Sea Ice (Arctic cap pulsing with seasons, top-down polar), Ozone Hole (Antarctic depleted region breathing wider/narrower), Auroral Oval (glowing ring around the magnetic pole), Tsunami (concentric wave fronts radiating from a Pacific epicentre). Maths & physics: Day Terminator (rotating Earth, day/night line + city lights), ISS Track (51.6° sinusoidal ground track with ISS dot), Magnetosphere (solar wind compresses dayside, magnetotail stretches downstream, bow shock + dipole field lines), Pangaea (supercontinent splits into modern continents), Ring of Fire (Pacific rim volcano chain with occasional eruptions). All share a new globePxToLatLon / globeLatLonToPx helper pair. Total roster: 286 effects.
 
