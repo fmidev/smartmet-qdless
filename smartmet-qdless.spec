@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 1%{?dist}.fmi
+Release: 2%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-2.fmi
+- 40 new exit effects across two themes. Chemistry: Acid Trip, Avogadro, Benzene, Brownian, Buckyball, Catalyst, Chromatography, DNA, Electrolysis, Flame Test, Glow Stick, Lava Lamp, Liesegang, Mendeleev, Mentos, NaCl Lattice, Periodic Table, Phase Transition, pH Strip, Soap Bubble. Evolution: Beagle, Cambrian, Cell Divides, Cetacean, Co-evolution, Darwin, Endosymbiosis, Finches, Galapagos, Lucy, March of Progress, Mendel, Mitochondrial Eve, Mutation, Out of Africa, Peacock, Peppered Moth, Punctuated, Selection, Tree of Life. Balls and large surfaces (lava blobs, NaCl ions, soap bubble, buckyball atoms, Earth globe in Out of Africa, cells in Cell Divides + Endosymbiosis, peacock eye-spots, etc.) carry the data via drawDataDisk / sample, in line with the project's data-integral principle.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-1.fmi
 - Warning-clean build over the previous release; no behaviour change
 

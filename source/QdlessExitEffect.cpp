@@ -13230,9 +13230,2482 @@ void effectStandingWave(const Renderer& renderer, const std::vector<Rgb>& src, i
       });
 }
 
+// ---------------------------------------------------------------------------
+// CHEMISTRY THEME -----------------------------------------------------------
+// ---------------------------------------------------------------------------
+
+// DNA double helix: two strands wind up the screen, rungs are sampled from
+// the underlying data so the base-pair colours echo the weather as they
+// snap into place.
+void effectDNA(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.20F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(18 + l * 0.10F * dim), u8(22 + l * 0.10F * dim),
+                          u8(40 + l * 0.14F * dim), false};
+                }
+              const float cx = w * 0.5F;
+              const float R = mn * 0.13F;
+              const Rgb strandA{230, 120, 130, false};
+              const Rgb strandB{120, 210, 220, false};
+              const int nTurns = 5;
+              for (int k = 0; k < h; ++k)
+              {
+                const float u = k / static_cast<float>(h);
+                const float ang = u * nTurns * 6.2832F + t * 2.5F;
+                const float xA = cx + std::cos(ang) * R;
+                const float xB = cx + std::cos(ang + 3.14159F) * R;
+                plotDot(dst, w, h, xA, k, std::max(1.0F, mn * 0.010F), ya, strandA);
+                plotDot(dst, w, h, xB, k, std::max(1.0F, mn * 0.010F), ya, strandB);
+                if (k % 5 == 0 && std::sin(ang) > 0)
+                {
+                  for (int rr = 1; rr < 12; ++rr)
+                  {
+                    const float ux = xA + (xB - xA) * rr / 12.0F;
+                    const Rgb d = sample(src, w, h, ux, static_cast<float>(k));
+                    const float dr = d.transparent ? 180.0F : d.r;
+                    const float dg = d.transparent ? 180.0F : d.g;
+                    const float db = d.transparent ? 200.0F : d.b;
+                    plotDot(dst, w, h, ux, k, std::max(1.0F, mn * 0.005F), ya,
+                            Rgb{u8(dr * 0.7F + 60), u8(dg * 0.7F + 60), u8(db * 0.7F + 60),
+                                false});
+                  }
+                }
+              }
+            });
+}
+
+// Benzene ring: six carbons + six hydrogens hang off a rotating hex with
+// alternating double bonds. Carbon and hydrogen atoms are data-textured
+// spheres so the molecule wears the data.
+void effectBenzene(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.15F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 36.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(16 + l * 0.08F * dim), u8(20 + l * 0.08F * dim),
+                          u8(28 + l * 0.10F * dim), false};
+                }
+              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float R = mn * 0.26F;
+              const float aRot = t * 1.2F;
+              const Rgb cTint{200, 200, 210, false};
+              const Rgb hTint{220, 110, 110, false};
+              for (int i = 0; i < 6; ++i)
+              {
+                const float a1 = aRot + i * 6.2832F / 6.0F;
+                const float a2 = aRot + (i + 1) * 6.2832F / 6.0F;
+                const float c1x = cx + std::cos(a1) * R;
+                const float c1y = cy + std::sin(a1) * R / ya;
+                const float c2x = cx + std::cos(a2) * R;
+                const float c2y = cy + std::sin(a2) * R / ya;
+                drawSeg(dst, w, h, c1x, c1y, c2x, c2y, std::max(1.0F, mn * 0.005F), ya,
+                        Rgb{210, 210, 210, false});
+                if (i % 2 == 0)
+                {
+                  const float dx = c2x - c1x, dy = c2y - c1y;
+                  const float nl = std::hypot(dx, dy);
+                  const float nx = -dy / nl, ny = dx / nl;
+                  const float oo = mn * 0.020F;
+                  drawSeg(dst, w, h, c1x + nx * oo, c1y + ny * oo, c2x + nx * oo,
+                          c2y + ny * oo, std::max(1.0F, mn * 0.004F), ya,
+                          Rgb{200, 200, 200, false});
+                }
+                drawDataDisk(dst, w, h, src, c1x, c1y, mn * 0.035F, ya, 0.75F, t * 0.6F, cTint);
+                const float hx = cx + std::cos(a1) * (R + mn * 0.10F);
+                const float hy = cy + std::sin(a1) * (R + mn * 0.10F) / ya;
+                drawDataDisk(dst, w, h, src, hx, hy, mn * 0.020F, ya, 0.70F, t * 0.6F, hTint);
+              }
+              for (float a = 0; a < 6.2832F; a += 0.04F)
+                plotDot(dst, w, h, cx + std::cos(a) * R * 0.62F,
+                        cy + std::sin(a) * R * 0.62F / ya, std::max(1.0F, mn * 0.003F), ya,
+                        Rgb{160, 180, 230, false});
+            });
+}
+
+// Buckminsterfullerene (C60): icosahedral soccer-ball cage rotating in 3D;
+// each of the 60 vertex carbons is a data-textured sphere.
+void effectBuckyball(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  // 60 vertices of a truncated icosahedron — generated via the golden ratio
+  // construction. Three cyclic permutations of (0, ±1, ±3φ), (±1, ±(2+φ),
+  // ±2φ), (±φ, ±2, ±(2φ+1)) give all 60.
+  constexpr float phi = 1.618033988F;
+  std::vector<std::array<float, 3>> verts;
+  auto pm = [](float v, int s) { return s == 0 ? v : -v; };
+  for (int sa = 0; sa < 2; ++sa)
+    for (int sb = 0; sb < 2; ++sb)
+    {
+      verts.push_back({0, pm(1, sa), pm(3 * phi, sb)});
+      verts.push_back({pm(3 * phi, sb), 0, pm(1, sa)});
+      verts.push_back({pm(1, sa), pm(3 * phi, sb), 0});
+    }
+  for (int sa = 0; sa < 2; ++sa)
+    for (int sb = 0; sb < 2; ++sb)
+      for (int sc = 0; sc < 2; ++sc)
+      {
+        verts.push_back({pm(1, sa), pm(2 + phi, sb), pm(2 * phi, sc)});
+        verts.push_back({pm(2 * phi, sc), pm(1, sa), pm(2 + phi, sb)});
+        verts.push_back({pm(2 + phi, sb), pm(2 * phi, sc), pm(1, sa)});
+        verts.push_back({pm(phi, sa), pm(2, sb), pm(2 * phi + 1, sc)});
+        verts.push_back({pm(2 * phi + 1, sc), pm(phi, sa), pm(2, sb)});
+        verts.push_back({pm(2, sb), pm(2 * phi + 1, sc), pm(phi, sa)});
+      }
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.10F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 20.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(10 + l * 0.06F * dim), u8(14 + l * 0.06F * dim),
+                          u8(24 + l * 0.10F * dim), false};
+                }
+              const float cyw = std::cos(t * 1.0F), syw = std::sin(t * 1.0F);
+              const float cp = std::cos(t * 0.7F), sp = std::sin(t * 0.7F);
+              const float scale = mn / 12.0F;
+              const float cx = w * 0.5F, cy = h * 0.5F;
+              struct Pt { float sx, sy, z; };
+              std::vector<Pt> pts(verts.size());
+              for (std::size_t i = 0; i < verts.size(); ++i)
+              {
+                const float x = verts[i][0], yv = verts[i][1], z = verts[i][2];
+                const float x1 = x * cyw - z * syw, z1 = x * syw + z * cyw;
+                const float y2 = yv * cp - z1 * sp, z2 = yv * sp + z1 * cp;
+                pts[i] = {cx + x1 * scale, cy + y2 * scale / ya, z2};
+              }
+              for (const auto& p : pts)
+              {
+                const float depth = std::clamp((p.z + 6.0F) / 12.0F, 0.2F, 1.0F);
+                drawDataDisk(dst, w, h, src, p.sx, p.sy, mn * 0.022F, ya, 0.7F * depth,
+                             t * 0.5F, Rgb{u8(120 * depth + 40), u8(160 * depth + 40),
+                                            u8(180 * depth + 40), false});
+              }
+            });
+}
+
+// Periodic Table: a sweeping render of all 118 cells fills the screen, each
+// cell tinted by the data sampled at its position so the table reads as a
+// data-tinted Mendeleev grid.
+void effectPeriodicTable(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  // Position table (row, col) for each Z=1..118. 0 means "no cell."
+  // Simplified: just lay out the standard short form for visual punch.
+  constexpr int kCols = 18, kRows = 7;
+  static const char* const kSyms[kRows][kCols] = {
+      {"H",  "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "He"},
+      {"Li", "Be", "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "B",  "C",  "N",  "O",  "F",  "Ne"},
+      {"Na", "Mg", "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "Al", "Si", "P",  "S",  "Cl", "Ar"},
+      {"K",  "Ca", "Sc", "Ti", "V",  "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr"},
+      {"Rb", "Sr", "Y",  "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te", "I",  "Xe"},
+      {"Cs", "Ba", "*",  "Hf", "Ta", "W",  "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl", "Pb", "Bi", "Po", "At", "Rn"},
+      {"Fr", "Ra", "*",  "Rf", "Db", "Sg", "Bh", "Hs", "Mt", "Ds", "Rg", "Cn", "Nh", "Fl", "Mc", "Lv", "Ts", "Og"}};
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.10F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      s.transparent ? Rgb{16, 16, 22, false}
+                                    : Rgb{u8(s.r * dim), u8(s.g * dim + 4), u8(s.b * dim + 8), false};
+                }
+              const float cellW = std::min(w * 0.9F / kCols, h * 0.78F / kRows);
+              const float cellH = cellW;
+              const float startX = (w - cellW * kCols) * 0.5F;
+              const float startY = (h - cellH * kRows) * 0.5F;
+              const int total = kRows * kCols;
+              const int revealed = std::min(total, static_cast<int>(t * total * 1.2F));
+              for (int r = 0; r < kRows; ++r)
+                for (int c = 0; c < kCols; ++c)
+                {
+                  const int idx = r * kCols + c;
+                  if (idx >= revealed) continue;
+                  const char* sym = kSyms[r][c];
+                  if (sym[0] == '\0') continue;
+                  const float xa = startX + c * cellW, xb = xa + cellW * 0.94F;
+                  const float yya = startY + r * cellH, yyb = yya + cellH * 0.94F;
+                  // Tint: sample the data at the cell's anchor and blend with
+                  // a per-group hue.
+                  const Rgb d = sample(src, w, h, (xa + xb) * 0.5F, (yya + yyb) * 0.5F);
+                  const float dr = d.transparent ? 80.0F : d.r;
+                  const float dg = d.transparent ? 80.0F : d.g;
+                  const float db = d.transparent ? 120.0F : d.b;
+                  const Rgb fill{u8(80 + dr * 0.45F), u8(80 + dg * 0.45F), u8(110 + db * 0.40F),
+                                 false};
+                  for (int yy = static_cast<int>(yya); yy <= static_cast<int>(yyb); ++yy)
+                    for (int xx = static_cast<int>(xa); xx <= static_cast<int>(xb); ++xx)
+                      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                        dst[static_cast<std::size_t>(yy) * w + xx] = fill;
+                  // Symbol text (1-2 chars).
+                  const int sc = std::max(1, static_cast<int>(cellW / 14.0F));
+                  for (int ci = 0; ci < 2 && sym[ci]; ++ci)
+                  {
+                    const auto g = glyph5x7(sym[ci]);
+                    for (int fy = 0; fy < 7; ++fy)
+                      for (int fx = 0; fx < 5; ++fx)
+                        if (g[fy][fx] == '1')
+                          plotDot(dst, w, h, xa + cellW * 0.15F + (ci * 6 + fx) * sc,
+                                  yya + cellH * 0.25F + fy * sc,
+                                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                                  Rgb{240, 240, 240, false});
+                  }
+                }
+            });
+}
+
+// Flame Tests: a Bunsen burner cycles through Li (crimson), Na (yellow),
+// K (lilac), Cu (green), Sr (red) flames. The flame body is sampled from
+// the data and tinted by the element's characteristic colour.
+void effectFlameTest(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  static const std::array<Rgb, 5> kFlames = {Rgb{230, 60, 70, false},
+                                             Rgb{255, 220, 60, false},
+                                             Rgb{200, 100, 220, false},
+                                             Rgb{60, 230, 90, false},
+                                             Rgb{220, 30, 60, false}};
+  static const std::array<const char*, 5> kLabels = {"LI", "NA", "K", "CU", "SR"};
+  runFrames(
+      renderer, w, h, 5600,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+            dst[static_cast<std::size_t>(y) * w + x] = Rgb{12, 14, 22, false};
+        const int stage = std::min(4, static_cast<int>(t * 5.0F));
+        const float local = t * 5.0F - stage;
+        const Rgb& flameCol = kFlames[stage];
+        const float burnerCx = w * 0.5F;
+        const float burnerTop = h * 0.78F;
+        // Burner shaft
+        for (int yy = static_cast<int>(burnerTop); yy <= static_cast<int>(h * 0.95F); ++yy)
+        {
+          const int half = static_cast<int>(mn * 0.020F);
+          for (int xo = -half; xo <= half; ++xo)
+          {
+            const int xx = static_cast<int>(burnerCx + xo);
+            if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+              dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{60, 60, 70, false};
+          }
+        }
+        // Flame: a teardrop shape with the data sampled inside and tinted.
+        const float flameH = mn * 0.50F;
+        const float flameW = mn * 0.18F;
+        for (int yy = static_cast<int>(burnerTop - flameH); yy < static_cast<int>(burnerTop); ++yy)
+        {
+          const float yf = (burnerTop - yy) / flameH;  // 0 at base, 1 at tip
+          const float half = flameW * std::sin(yf * 3.14159F) * (0.9F + 0.1F * std::sin(t * 30.0F + yf * 6.0F));
+          for (int xo = -static_cast<int>(half); xo <= static_cast<int>(half); ++xo)
+          {
+            const int xx = static_cast<int>(burnerCx + xo);
+            if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+            const Rgb d = sample(src, w, h, xx, yy);
+            const float dr = d.transparent ? 100.0F : d.r;
+            const float dg = d.transparent ? 100.0F : d.g;
+            const float db = d.transparent ? 100.0F : d.b;
+            const float mix = 0.60F;
+            dst[static_cast<std::size_t>(yy) * w + xx] =
+                Rgb{u8(flameCol.r * mix + dr * (1 - mix) * 0.7F),
+                    u8(flameCol.g * mix + dg * (1 - mix) * 0.7F),
+                    u8(flameCol.b * mix + db * (1 - mix) * 0.7F), false};
+          }
+        }
+        // Label
+        const std::string lab(kLabels[stage]);
+        const int sc = std::max(3, static_cast<int>(mn / 25.0F));
+        const float lineW = static_cast<float>(lab.size()) * 6 * sc;
+        for (int ci = 0; ci < static_cast<int>(lab.size()); ++ci)
+        {
+          const auto g = glyph5x7(lab[ci]);
+          for (int fy = 0; fy < 7; ++fy)
+            for (int fx = 0; fx < 5; ++fx)
+              if (g[fy][fx] == '1')
+                plotDot(dst, w, h, burnerCx - lineW * 0.5F + (ci * 6 + fx) * sc,
+                        h * 0.12F + fy * sc, std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                        flameCol);
+        }
+        (void)local;
+      });
+}
+
+// Lava Lamp: buoyant wax blobs rise, cool, sink; each blob is a data-tinted
+// disk so the wax wears the data while jostling.
+void effectLavaLamp(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 5600,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              // Glass envelope with warm orange backlight.
+              const float cxw = w * 0.5F;
+              const float lampW = mn * 0.32F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const float dx = std::fabs(x - cxw);
+                  const float sf = static_cast<float>(y) / h;
+                  if (dx < lampW)
+                  {
+                    const float glow = 1.0F - dx / lampW;
+                    dst[static_cast<std::size_t>(y) * w + x] =
+                        Rgb{u8(80 + 150 * glow * (1 - sf * 0.5F)),
+                            u8(40 + 60 * glow * (1 - sf * 0.5F)),
+                            u8(20 + 20 * glow * (1 - sf * 0.5F)), false};
+                  }
+                  else
+                  {
+                    const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                    const float l =
+                        s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                    dst[static_cast<std::size_t>(y) * w + x] =
+                        Rgb{u8(20 + l * 0.10F), u8(20 + l * 0.10F), u8(28 + l * 0.10F), false};
+                  }
+                }
+              const Rgb wax{240, 110, 40, false};
+              for (int i = 0; i < 7; ++i)
+              {
+                const float phase = hash(i) * 6.2832F;
+                const float speed = 0.4F + hash(i * 3) * 0.4F;
+                const float bx = cxw + (hash(i * 7) - 0.5F) * lampW * 0.7F;
+                const float by = h * (0.85F - 0.65F * (0.5F + 0.5F * std::sin(t * speed + phase)));
+                const float bR = mn * (0.025F + 0.020F * hash(i * 11));
+                drawDataDisk(dst, w, h, src, bx, by, bR, ya, 0.85F, t * 0.5F + i, wax);
+              }
+              // Lamp cap + base.
+              for (int yy = 0; yy <= static_cast<int>(mn * 0.03F); ++yy)
+              {
+                const int xa = static_cast<int>(cxw - lampW * 1.05F);
+                const int xb = static_cast<int>(cxw + lampW * 1.05F);
+                for (int xx = xa; xx <= xb; ++xx)
+                  if (xx >= 0 && xx < w && yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{60, 50, 40, false};
+              }
+              for (int yy = h - static_cast<int>(mn * 0.04F); yy < h; ++yy)
+              {
+                const int xa = static_cast<int>(cxw - lampW * 1.05F);
+                const int xb = static_cast<int>(cxw + lampW * 1.05F);
+                for (int xx = xa; xx <= xb; ++xx)
+                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{60, 50, 40, false};
+              }
+            });
+}
+
+// NaCl Lattice: an alternating Na+ / Cl- ion grid grows outward from the
+// centre, both ion species rendered as data-textured spheres so the salt
+// crystal carries the data.
+void effectNaClLattice(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.10F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      s.transparent
+                          ? Rgb{12, 12, 18, false}
+                          : Rgb{u8(s.r * dim), u8(s.g * dim), u8(s.b * dim + 6), false};
+                }
+              const float cyw = std::cos(t * 0.8F), syw = std::sin(t * 0.8F);
+              const float cp = std::cos(0.4F), sp = std::sin(0.4F);
+              const float spacing = mn * 0.06F;
+              const float cx = w * 0.5F, cy = h * 0.5F;
+              const int extent = 3;
+              const float grow = std::clamp(t * 1.5F, 0.0F, 1.0F);
+              for (int ix = -extent; ix <= extent; ++ix)
+                for (int iy = -extent; iy <= extent; ++iy)
+                  for (int iz = -extent; iz <= extent; ++iz)
+                  {
+                    const float r0 = std::sqrt(static_cast<float>(ix * ix + iy * iy + iz * iz));
+                    if (r0 > grow * (extent + 1)) continue;
+                    const float wx = ix * spacing;
+                    const float wy = iy * spacing;
+                    const float wz = iz * spacing;
+                    const float rx = wx * cyw - wz * syw;
+                    const float rz = wx * syw + wz * cyw;
+                    const float ry = wy * cp - rz * sp;
+                    const float rz2 = wy * sp + rz * cp;
+                    const float sx = cx + rx;
+                    const float sy = cy + ry / ya;
+                    const float depth = std::clamp((rz2 + extent * spacing) / (2 * extent * spacing),
+                                                   0.2F, 1.0F);
+                    const bool na = ((ix + iy + iz) & 1) == 0;
+                    const Rgb tint = na ? Rgb{u8(200 * depth), u8(80 * depth), u8(220 * depth), false}
+                                         : Rgb{u8(70 * depth), u8(220 * depth), u8(120 * depth), false};
+                    drawDataDisk(dst, w, h, src, sx, sy, mn * 0.025F * depth, ya, 0.85F, t * 0.5F,
+                                 tint);
+                  }
+            });
+}
+
+// pH Strip: a universal-indicator strip dips into solution; the colour
+// gradient runs red (acid) → yellow → green → blue → purple (base) as the
+// dye floods upward. The strip itself samples the data so the gradient
+// blends with what was on screen.
+void effectPhStrip(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  static const std::array<Rgb, 7> kRamp = {Rgb{220, 30, 30, false},   Rgb{240, 130, 30, false},
+                                           Rgb{240, 220, 30, false}, Rgb{60, 200, 60, false},
+                                           Rgb{40, 130, 220, false}, Rgb{100, 30, 200, false},
+                                           Rgb{60, 0, 110, false}};
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(40 + l * 0.20F), u8(40 + l * 0.20F), u8(48 + l * 0.20F), false};
+                }
+              const float cxw = w * 0.5F;
+              const float stripW = mn * 0.18F;
+              const float stripTop = h * 0.10F;
+              const float stripBot = h * 0.90F;
+              const float dyeFront = stripBot - (stripBot - stripTop) * std::clamp(t * 1.2F, 0.0F, 1.0F);
+              for (int yy = static_cast<int>(stripTop); yy <= static_cast<int>(stripBot); ++yy)
+              {
+                // Strip colour: dyed below dyeFront, pale above.
+                const float yf = (yy - stripTop) / (stripBot - stripTop);
+                Rgb tint;
+                if (static_cast<float>(yy) > dyeFront)
+                {
+                  const float seg = yf * 6.0F;
+                  const int i = std::clamp(static_cast<int>(seg), 0, 5);
+                  const float f = seg - i;
+                  const Rgb& a = kRamp[i];
+                  const Rgb& b = kRamp[i + 1];
+                  tint = Rgb{u8(a.r + (b.r - a.r) * f), u8(a.g + (b.g - a.g) * f),
+                             u8(a.b + (b.b - a.b) * f), false};
+                }
+                else
+                {
+                  tint = Rgb{240, 232, 200, false};
+                }
+                for (int xo = -static_cast<int>(stripW * 0.5F);
+                     xo <= static_cast<int>(stripW * 0.5F); ++xo)
+                {
+                  const int xx = static_cast<int>(cxw + xo);
+                  if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+                  const Rgb d = sample(src, w, h, xx, yy);
+                  const float dr = d.transparent ? 200.0F : d.r;
+                  const float dg = d.transparent ? 200.0F : d.g;
+                  const float db = d.transparent ? 200.0F : d.b;
+                  dst[static_cast<std::size_t>(yy) * w + xx] =
+                      Rgb{u8(tint.r * 0.62F + dr * 0.30F), u8(tint.g * 0.62F + dg * 0.30F),
+                          u8(tint.b * 0.62F + db * 0.30F), false};
+                }
+              }
+            });
+}
+
+// Chromatography: solvent climbs filter paper, three dye spots separate by
+// retention factor. Paper itself is sampled-data-tinted so the lab bench
+// shows through.
+void effectChromatography(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float paperLeft = w * 0.30F, paperRight = w * 0.70F;
+              const float paperTop = h * 0.05F, paperBot = h * 0.92F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const bool onPaper = x >= paperLeft && x <= paperRight && y >= paperTop &&
+                                       y <= paperBot;
+                  const Rgb d = sample(src, w, h, x, y);
+                  const float dr = d.transparent ? 220.0F : d.r;
+                  const float dg = d.transparent ? 220.0F : d.g;
+                  const float db = d.transparent ? 200.0F : d.b;
+                  if (onPaper)
+                    dst[static_cast<std::size_t>(y) * w + x] =
+                        Rgb{u8(220 + dr * 0.10F), u8(212 + dg * 0.10F),
+                            u8(190 + db * 0.10F), false};
+                  else
+                    dst[static_cast<std::size_t>(y) * w + x] =
+                        Rgb{u8(30 + dr * 0.10F), u8(30 + dg * 0.10F),
+                            u8(38 + db * 0.10F), false};
+                }
+              // Solvent front rises from the bottom.
+              const float startY = paperBot - mn * 0.04F;
+              const float frontY = startY - (startY - paperTop) * std::clamp(t * 1.1F, 0.0F, 1.0F);
+              for (int x = static_cast<int>(paperLeft); x <= static_cast<int>(paperRight); ++x)
+              {
+                const float yf = frontY + std::sin(x * 0.4F + t * 5.0F) * mn * 0.005F;
+                for (int yy = static_cast<int>(yf); yy <= static_cast<int>(startY); ++yy)
+                  if (yy >= 0 && yy < h)
+                  {
+                    Rgb& c = dst[static_cast<std::size_t>(yy) * w + x];
+                    c = Rgb{u8(c.r * 0.8F), u8(c.g * 0.85F), u8(c.b * 0.95F + 30), false};
+                  }
+              }
+              // Three dye spots, each with its own Rf.
+              static const std::array<Rgb, 3> kDyes = {Rgb{200, 30, 30, false},
+                                                       Rgb{220, 200, 30, false},
+                                                       Rgb{30, 60, 220, false}};
+              static const std::array<float, 3> kRf = {0.55F, 0.40F, 0.25F};
+              for (int d = 0; d < 3; ++d)
+              {
+                const float cx = paperLeft + (paperRight - paperLeft) * (0.30F + 0.20F * d);
+                const float climbedY =
+                    startY - (startY - paperTop) * std::clamp(t * 1.1F, 0.0F, 1.0F) * kRf[d];
+                plotDot(dst, w, h, cx, climbedY, mn * 0.022F, ya, kDyes[d]);
+              }
+            });
+}
+
+// Brownian motion: a single visible particle traces a jagged random walk
+// over the data, leaving a fading dotted history. The particle itself is
+// data-textured so it carries the field it's swimming in.
+void effectBrownian(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  // Pre-walk the path so it's deterministic.
+  constexpr int N = 240;
+  std::vector<std::pair<float, float>> path(N);
+  float px = w * 0.5F, py = h * 0.5F;
+  for (int i = 0; i < N; ++i)
+  {
+    const float a = hash(i * 3) * 6.2832F;
+    const float r = mn * 0.025F * hash(i * 7);
+    px = std::clamp(px + std::cos(a) * r, w * 0.05F, w * 0.95F);
+    py = std::clamp(py + std::sin(a) * r, h * 0.05F, h * 0.95F);
+    path[i] = {px, py};
+  }
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.30F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(30 + l * 0.15F * dim), u8(30 + l * 0.15F * dim),
+                          u8(40 + l * 0.20F * dim), false};
+                }
+              const int head = std::min(N - 1, static_cast<int>(t * N));
+              for (int i = 1; i <= head; ++i)
+              {
+                const float ageF = 1.0F - static_cast<float>(head - i) / N;
+                drawSeg(dst, w, h, path[i - 1].first, path[i - 1].second, path[i].first,
+                        path[i].second, std::max(1.0F, mn * 0.004F * ageF), ya,
+                        Rgb{u8(180 * ageF), u8(200 * ageF), u8(240 * ageF), false});
+              }
+              if (head < N)
+              {
+                drawDataDisk(dst, w, h, src, path[head].first, path[head].second, mn * 0.020F, ya,
+                             0.80F, t * 2.0F, Rgb{240, 240, 255, false});
+              }
+              // Many tiny invisible "molecules" hinted as flecks.
+              for (int i = 0; i < 60; ++i)
+              {
+                const float fx = std::fmod(hash(i) * w + t * 80, static_cast<float>(w));
+                const float fy = std::fmod(hash(i * 3) * h + t * 50, static_cast<float>(h));
+                plotDot(dst, w, h, fx, fy, std::max(1.0F, mn * 0.002F), ya,
+                        Rgb{120, 120, 160, false});
+              }
+            });
+}
+
+// Acid Trip: the data does a violent palette warp — psychedelic chromatic
+// shifts, channel swapping, sinusoidal hue rotation — the chemical "acid"
+// pun in pure colour.
+void effectAcidTrip(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  (void)renderer;
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float br = s.transparent ? 100.0F : s.r;
+                  const float bg = s.transparent ? 100.0F : s.g;
+                  const float bb = s.transparent ? 120.0F : s.b;
+                  const float wob = std::sin(x * 0.06F + y * 0.08F + t * 8.0F);
+                  const float swap = 0.5F + 0.5F * std::sin(t * 4.0F);
+                  const float r = br * (1 - swap) + bg * swap + 60 * wob;
+                  const float g = bg * (1 - swap) + bb * swap + 60 * std::sin(t * 7.0F + x * 0.05F);
+                  const float b = bb * (1 - swap) + br * swap + 60 * std::sin(t * 5.0F + y * 0.05F);
+                  dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(r), u8(g), u8(b), false};
+                }
+            });
+}
+
+// Catalyst surface: molecules zip around, collide on a catalytic surface
+// at the bottom, and emerge as paired products. The molecule discs are
+// data-textured so the substrate carries the data.
+void effectCatalyst(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 5200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.20F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(28 + l * 0.10F * dim), u8(30 + l * 0.10F * dim),
+                          u8(36 + l * 0.10F * dim), false};
+                }
+              const float surfaceY = h * 0.80F;
+              for (int x = 0; x < w; ++x)
+                for (int yo = 0; yo <= static_cast<int>(mn * 0.04F); ++yo)
+                {
+                  const int yy = static_cast<int>(surfaceY) + yo;
+                  if (yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + x] = Rgb{120, 100, 60, false};
+                }
+              // Molecules bounce against the surface.
+              for (int i = 0; i < 14; ++i)
+              {
+                const float phase = hash(i) * 6.2832F;
+                const float bounce = std::fabs(std::sin(t * 3.0F + phase));
+                const float bx = w * (0.1F + 0.8F * hash(i * 3));
+                const float by = surfaceY - mn * 0.06F - bounce * mn * 0.25F;
+                const Rgb tint =
+                    (i & 1) ? Rgb{210, 120, 80, false} : Rgb{80, 180, 210, false};
+                drawDataDisk(dst, w, h, src, bx, by, mn * 0.022F, ya, 0.75F, t + i, tint);
+              }
+            });
+}
+
+// Glow Stick: a long horizontal capsule is snapped (kinked once) and then
+// chemiluminescent green fills it from the snap outward. The tube interior
+// is data-sampled so the glow blends with the data.
+void effectGlowStick(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.15F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(14 + l * 0.06F * dim), u8(18 + l * 0.08F * dim),
+                          u8(20 + l * 0.06F * dim), false};
+                }
+              const float midY = h * 0.5F;
+              const float tubeLen = w * 0.7F;
+              const float tubeR = mn * 0.04F;
+              const float snapX = w * 0.5F;
+              const float snapT = 0.18F;
+              const float snapAng = std::clamp((t - snapT) / 0.05F, 0.0F, 1.0F) * 0.18F;
+              const float spread = std::clamp((t - snapT) / 0.50F, 0.0F, 1.0F);
+              const float L = tubeLen * 0.5F;
+              for (float u = -1.0F; u <= 1.0F; u += 1.0F / (tubeLen * 0.5F))
+              {
+                const float bend = (u < 0) ? -snapAng : snapAng;
+                const float xx = w * 0.5F + u * L;
+                const float yy = midY + std::sin(bend) * std::fabs(u) * mn * 0.04F;
+                const float yLo = yy - tubeR, yHi = yy + tubeR;
+                const bool inGlow = std::fabs(xx - snapX) / L < spread;
+                for (int iy = static_cast<int>(yLo); iy <= static_cast<int>(yHi); ++iy)
+                {
+                  if (iy < 0 || iy >= h) continue;
+                  const int ix = static_cast<int>(xx);
+                  if (ix < 0 || ix >= w) continue;
+                  if (inGlow)
+                  {
+                    const Rgb d = sample(src, w, h, xx, iy);
+                    const float dg = d.transparent ? 200.0F : d.g;
+                    dst[static_cast<std::size_t>(iy) * w + ix] =
+                        Rgb{u8(120 + dg * 0.20F), u8(255), u8(140 + dg * 0.20F), false};
+                  }
+                  else
+                  {
+                    dst[static_cast<std::size_t>(iy) * w + ix] = Rgb{200, 200, 210, false};
+                  }
+                }
+              }
+            });
+}
+
+// Mentos & Coke geyser: silhouette of a bottle, Mentos drop in, foam fountain
+// erupts upward. Mentos are data-tinted balls, the bottle fill is sampled
+// data so the prank carries the weather.
+void effectMentos(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(16 + l * 0.10F), u8(20 + l * 0.10F), u8(24 + l * 0.10F), false};
+                }
+              const float cxw = w * 0.5F;
+              const float bottleTop = h * 0.40F;
+              const float bottleBot = h * 0.92F;
+              // Bottle body (data-filled).
+              for (int yy = static_cast<int>(bottleTop); yy <= static_cast<int>(bottleBot); ++yy)
+              {
+                const float yf = (yy - bottleTop) / (bottleBot - bottleTop);
+                const int half = static_cast<int>(mn * (0.05F + 0.04F * yf));
+                for (int xo = -half; xo <= half; ++xo)
+                {
+                  const int xx = static_cast<int>(cxw + xo);
+                  if (xx < 0 || xx >= w || yy >= h) continue;
+                  const Rgb d = sample(src, w, h, xx, yy);
+                  const float dr = d.transparent ? 90.0F : d.r;
+                  const float dg = d.transparent ? 40.0F : d.g;
+                  const float db = d.transparent ? 30.0F : d.b;
+                  dst[static_cast<std::size_t>(yy) * w + xx] =
+                      Rgb{u8(90 + dr * 0.30F), u8(40 + dg * 0.20F), u8(30 + db * 0.15F), false};
+                }
+              }
+              // Bottle cap.
+              for (int yy = static_cast<int>(bottleTop - mn * 0.04F); yy < static_cast<int>(bottleTop);
+                   ++yy)
+              {
+                const int half = static_cast<int>(mn * 0.04F);
+                for (int xo = -half; xo <= half; ++xo)
+                {
+                  const int xx = static_cast<int>(cxw + xo);
+                  if (xx >= 0 && xx < w && yy >= 0)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{160, 30, 30, false};
+                }
+              }
+              // Drop a few Mentos in early.
+              if (t < 0.25F)
+              {
+                for (int i = 0; i < 3; ++i)
+                {
+                  const float my = bottleTop - mn * 0.10F + (t / 0.25F) * mn * 0.15F + i * mn * 0.04F;
+                  drawDataDisk(dst, w, h, src, cxw + (i - 1) * mn * 0.02F, my, mn * 0.020F, ya,
+                               0.75F, t * 2.0F, Rgb{230, 230, 220, false});
+                }
+              }
+              // Erupting foam fountain.
+              if (t > 0.25F)
+              {
+                const float ft = (t - 0.25F) / 0.75F;
+                const Rgb foam{220, 220, 230, false};
+                for (int i = 0; i < 40; ++i)
+                {
+                  const float ph = hash(i) * 6.2832F;
+                  const float vx = std::cos(ph) * mn * 0.04F;
+                  const float vy = -mn * (0.20F + hash(i * 3) * 0.30F);
+                  const float fx = cxw + vx * ft * 5.0F;
+                  const float fy = bottleTop + vy * ft + 9.8F * mn * 0.5F * ft * ft;
+                  if (fy < bottleTop + mn * 0.05F)
+                    drawDataDisk(dst, w, h, src, fx, fy, mn * 0.015F, ya, 0.85F, t + i, foam);
+                }
+              }
+            });
+}
+
+// Avogadro Mole: the chemistry-mole pun — a small burrowing mole pokes out
+// of a hole carrying a sign "6.022 × 10^23". The mole body is data-textured.
+void effectAvogadro(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  const float sf = static_cast<float>(y) / h;
+                  if (y > h * 0.78F)
+                    dst[static_cast<std::size_t>(y) * w + x] =
+                        Rgb{u8(80 + l * 0.10F), u8(60 + l * 0.08F), u8(40 + l * 0.06F), false};
+                  else
+                    dst[static_cast<std::size_t>(y) * w + x] =
+                        Rgb{u8(140 + 50 * (1 - sf) + l * 0.10F),
+                            u8(180 + 50 * (1 - sf) + l * 0.10F),
+                            u8(220 - 30 * sf + l * 0.10F), false};
+                }
+              const float groundY = h * 0.78F;
+              const float cxw = w * 0.5F;
+              // Hole — dark ellipse.
+              plotDot(dst, w, h, cxw, groundY, mn * 0.08F, ya, Rgb{20, 14, 10, false});
+              // Mole pokes up.
+              const float rise = std::clamp(t / 0.5F, 0.0F, 1.0F);
+              const float my = groundY - rise * mn * 0.10F;
+              drawDataDisk(dst, w, h, src, cxw, my, mn * 0.07F, ya, 0.7F, 0.0F,
+                           Rgb{80, 60, 50, false});
+              // Tiny eyes + pink nose.
+              plotDot(dst, w, h, cxw - mn * 0.020F, my - mn * 0.020F, std::max(1.0F, mn * 0.005F), ya,
+                      Rgb{20, 10, 10, false});
+              plotDot(dst, w, h, cxw + mn * 0.020F, my - mn * 0.020F, std::max(1.0F, mn * 0.005F), ya,
+                      Rgb{20, 10, 10, false});
+              plotDot(dst, w, h, cxw, my, std::max(1.0F, mn * 0.008F), ya,
+                      Rgb{220, 130, 150, false});
+              // Sign hovering above.
+              if (rise >= 1.0F)
+              {
+                const std::string line = "6.022 X 10^23";
+                const int sc = std::max(2, static_cast<int>(mn / 60.0F));
+                const float lineW = static_cast<float>(line.size()) * 6 * sc;
+                const float signX = cxw - lineW * 0.5F;
+                const float signY = my - mn * 0.20F;
+                for (int xo = -static_cast<int>(lineW * 0.55F);
+                     xo <= static_cast<int>(lineW * 0.55F); ++xo)
+                  for (int yo = -static_cast<int>(sc * 5); yo <= static_cast<int>(sc * 5); ++yo)
+                  {
+                    const int xx = static_cast<int>(cxw + xo);
+                    const int yy = static_cast<int>(signY + yo);
+                    if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                      dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{240, 235, 200, false};
+                  }
+                for (int ci = 0; ci < static_cast<int>(line.size()); ++ci)
+                {
+                  const auto g = glyph5x7(line[ci]);
+                  for (int fy = 0; fy < 7; ++fy)
+                    for (int fx = 0; fx < 5; ++fx)
+                      if (g[fy][fx] == '1')
+                        plotDot(dst, w, h, signX + (ci * 6 + fx) * sc,
+                                signY - sc * 3 + fy * sc,
+                                std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                                Rgb{40, 30, 20, false});
+                }
+              }
+            });
+}
+
+// Mendeleev's dream: element symbols rain into their grid positions over an
+// outline of the periodic table.
+void effectMendeleev(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  constexpr int kCols = 18, kRows = 7;
+  static const char* const kSyms[kRows][kCols] = {
+      {"H",  "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "He"},
+      {"Li", "Be", "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "B",  "C",  "N",  "O",  "F",  "Ne"},
+      {"Na", "Mg", "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "Al", "Si", "P",  "S",  "Cl", "Ar"},
+      {"K",  "Ca", "Sc", "Ti", "V",  "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr"},
+      {"Rb", "Sr", "Y",  "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te", "I",  "Xe"},
+      {"Cs", "Ba", "*",  "Hf", "Ta", "W",  "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl", "Pb", "Bi", "Po", "At", "Rn"},
+      {"Fr", "Ra", "*",  "Rf", "Db", "Sg", "Bh", "Hs", "Mt", "Ds", "Rg", "Cn", "Nh", "Fl", "Mc", "Lv", "Ts", "Og"}};
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(20 + l * 0.10F), u8(22 + l * 0.10F), u8(36 + l * 0.14F), false};
+                }
+              const float cellW = std::min(w * 0.9F / kCols, h * 0.78F / kRows);
+              const float cellH = cellW;
+              const float startX = (w - cellW * kCols) * 0.5F;
+              const float startY = (h - cellH * kRows) * 0.5F;
+              for (int r = 0; r < kRows; ++r)
+                for (int c = 0; c < kCols; ++c)
+                {
+                  const char* sym = kSyms[r][c];
+                  if (sym[0] == '\0') continue;
+                  const float tx = startX + c * cellW + cellW * 0.5F;
+                  const float ty = startY + r * cellH + cellH * 0.5F;
+                  const int seed = r * kCols + c;
+                  const float startSx = hash(seed) * w;
+                  const float startSy = -mn * 0.1F;
+                  const float dropT = std::clamp(t - hash(seed * 3) * 0.4F, 0.0F, 1.0F);
+                  const float ease = 1.0F - (1.0F - dropT) * (1.0F - dropT);
+                  const float px = startSx + (tx - startSx) * ease;
+                  const float py = startSy + (ty - startSy) * ease;
+                  if (dropT <= 0.0F) continue;
+                  const int sc = std::max(1, static_cast<int>(cellW / 12.0F));
+                  for (int ci = 0; ci < 2 && sym[ci]; ++ci)
+                  {
+                    const auto g = glyph5x7(sym[ci]);
+                    for (int fy = 0; fy < 7; ++fy)
+                      for (int fx = 0; fx < 5; ++fx)
+                        if (g[fy][fx] == '1')
+                          plotDot(dst, w, h, px - sc * 3 + (ci * 6 + fx) * sc,
+                                  py - sc * 3 + fy * sc,
+                                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                                  Rgb{u8(180 + 75 * dropT), u8(180 + 60 * dropT),
+                                      u8(120 + 40 * dropT), false});
+                  }
+                }
+            });
+}
+
+// Electrolysis: two electrodes in solution, bubbles rise from each at the
+// stoichiometric 2:1 ratio (H2 : O2). Bubbles are data-textured spheres.
+void effectElectrolysis(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              // Solution: data dimmed and shifted toward sky-blue.
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(20 + l * 0.18F), u8(40 + l * 0.20F), u8(80 + l * 0.30F), false};
+                }
+              const float cxl = w * 0.35F, cxr = w * 0.65F;
+              const float botY = h * 0.85F;
+              // Electrodes (vertical bars).
+              for (int yy = static_cast<int>(h * 0.20F); yy <= static_cast<int>(botY); ++yy)
+              {
+                for (int xo = -2; xo <= 2; ++xo)
+                {
+                  const int xL = static_cast<int>(cxl + xo), xR = static_cast<int>(cxr + xo);
+                  if (yy >= 0 && yy < h)
+                  {
+                    if (xL >= 0 && xL < w) dst[static_cast<std::size_t>(yy) * w + xL] = Rgb{220, 220, 220, false};
+                    if (xR >= 0 && xR < w) dst[static_cast<std::size_t>(yy) * w + xR] = Rgb{220, 220, 220, false};
+                  }
+                }
+              }
+              // Bubbles: more from left (cathode → H2), fewer from right (anode → O2).
+              for (int i = 0; i < 40; ++i)
+              {
+                const float lifetime = hash(i) * 2.0F;
+                const float bt = std::fmod(t + lifetime, 1.0F);
+                const float bx = cxl + (hash(i * 3) - 0.5F) * mn * 0.04F;
+                const float by = botY - bt * (botY - h * 0.15F);
+                drawDataDisk(dst, w, h, src, bx, by, mn * 0.014F, ya, 0.50F, t + i,
+                             Rgb{220, 220, 240, false});
+              }
+              for (int i = 0; i < 20; ++i)
+              {
+                const float lifetime = hash(i * 17) * 2.0F;
+                const float bt = std::fmod(t + lifetime, 1.0F);
+                const float bx = cxr + (hash(i * 5) - 0.5F) * mn * 0.04F;
+                const float by = botY - bt * (botY - h * 0.15F);
+                drawDataDisk(dst, w, h, src, bx, by, mn * 0.014F, ya, 0.50F, t + i,
+                             Rgb{220, 220, 240, false});
+              }
+              // + / - labels.
+              const int sc = std::max(2, static_cast<int>(mn / 40.0F));
+              const auto gp = glyph5x7('+');
+              const auto gm = glyph5x7('-');
+              for (int fy = 0; fy < 7; ++fy)
+                for (int fx = 0; fx < 5; ++fx)
+                {
+                  if (gm[fy][fx] == '1')
+                    plotDot(dst, w, h, cxl + (fx - 2.5F) * sc, h * 0.10F + fy * sc,
+                            std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                            Rgb{240, 240, 240, false});
+                  if (gp[fy][fx] == '1')
+                    plotDot(dst, w, h, cxr + (fx - 2.5F) * sc, h * 0.10F + fy * sc,
+                            std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                            Rgb{240, 240, 240, false});
+                }
+            });
+}
+
+// Soap bubble: a single large iridescent bubble fills the screen; the data
+// shows through the soap film with rainbow thin-film interference fringes.
+// The bubble pops at the end.
+void effectSoapBubble(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(
+      renderer, w, h, 5400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(20 + l * 0.10F), u8(22 + l * 0.10F), u8(30 + l * 0.10F), false};
+          }
+        const float pop = std::clamp((t - 0.85F) / 0.15F, 0.0F, 1.0F);
+        const float cx = w * 0.5F + std::sin(t * 1.5F) * mn * 0.04F;
+        const float cy = h * 0.5F + std::cos(t * 1.3F) * mn * 0.03F;
+        const float R = mn * 0.35F * (1.0F + pop * 0.3F);
+        // Fill the bubble interior with sampled data, modulated by iridescent
+        // fringes.
+        for (int yy = static_cast<int>(cy - R / ya); yy <= static_cast<int>(cy + R / ya); ++yy)
+        {
+          if (yy < 0 || yy >= h) continue;
+          for (int xx = static_cast<int>(cx - R); xx <= static_cast<int>(cx + R); ++xx)
+          {
+            if (xx < 0 || xx >= w) continue;
+            const float dx = xx - cx, dy = (yy - cy) * ya;
+            const float r = std::hypot(dx, dy);
+            if (r > R) continue;
+            const Rgb d = sample(src, w, h, xx, yy);
+            const float dr = d.transparent ? 200.0F : d.r;
+            const float dg = d.transparent ? 200.0F : d.g;
+            const float db = d.transparent ? 220.0F : d.b;
+            const float fringe = std::sin(r / mn * 30.0F + t * 6.0F);
+            const float hue = fringe * 0.5F + 0.5F;
+            const float fr = (std::sin(hue * 6.2832F) + 1) * 60;
+            const float fg = (std::sin(hue * 6.2832F + 2.094F) + 1) * 60;
+            const float fb = (std::sin(hue * 6.2832F + 4.189F) + 1) * 60;
+            const float edge = 1.0F - std::clamp((R - r) / (R * 0.20F), 0.0F, 1.0F);
+            const float alpha = 1.0F - pop;
+            dst[static_cast<std::size_t>(yy) * w + xx] =
+                Rgb{u8((dr * 0.55F + fr + edge * 80) * alpha + dr * (1 - alpha)),
+                    u8((dg * 0.55F + fg + edge * 80) * alpha + dg * (1 - alpha)),
+                    u8((db * 0.55F + fb + edge * 80) * alpha + db * (1 - alpha)), false};
+          }
+        }
+        // Specular highlight.
+        if (pop < 0.5F)
+          plotDot(dst, w, h, cx - R * 0.35F, cy - R * 0.40F / ya, R * 0.08F, ya,
+                  Rgb{255, 255, 255, false});
+      });
+}
+
+// Liesegang rings: concentric coloured precipitation bands grow outward from
+// a centre, each ring carrying a slice of the data so the periodic
+// precipitation reads as a data-painted Petri dish.
+void effectLiesegang(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float maxR = std::min(w, h) * 0.42F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const float dx = x - cx, dy = (y - cy) * ya;
+                  const float r = std::hypot(dx, dy);
+                  const Rgb d = sample(src, w, h, x, y);
+                  const float dr = d.transparent ? 100.0F : d.r;
+                  const float dg = d.transparent ? 100.0F : d.g;
+                  const float db = d.transparent ? 120.0F : d.b;
+                  if (r > maxR)
+                    dst[static_cast<std::size_t>(y) * w + x] =
+                        Rgb{u8(20 + dr * 0.08F), u8(24 + dg * 0.08F), u8(30 + db * 0.10F), false};
+                  else
+                  {
+                    const float band = std::sin(r / mn * 22.0F - t * 5.0F);
+                    const float front = std::clamp(t * maxR * 1.3F - r, 0.0F, 1.0F);
+                    const float intensity = front * (0.5F + 0.5F * band);
+                    dst[static_cast<std::size_t>(y) * w + x] =
+                        Rgb{u8(220 + dr * 0.20F - intensity * 120),
+                            u8(180 + dg * 0.20F - intensity * 60),
+                            u8(80 + db * 0.20F + intensity * 100), false};
+                  }
+                }
+              // Dish rim.
+              for (float a = 0; a < 6.2832F; a += 0.02F)
+                plotDot(dst, w, h, cx + std::cos(a) * maxR, cy + std::sin(a) * maxR / ya,
+                        std::max(1.0F, mn * 0.005F), ya, Rgb{200, 200, 200, false});
+            });
+}
+
+// Phase Transition: scattered "gas" molecules (small data balls) condense
+// into close-packed "liquid" then snap into a regular "solid" lattice.
+void effectPhaseTransition(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  constexpr int N = 56;
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.20F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(20 + l * 0.10F * dim), u8(20 + l * 0.10F * dim),
+                          u8(30 + l * 0.10F * dim), false};
+                }
+              const float gasT = 0.35F, liqT = 0.65F;
+              for (int i = 0; i < N; ++i)
+              {
+                const int gx = i % 8, gy = i / 8;
+                const float latticeX = w * 0.18F + gx * w * 0.09F;
+                const float latticeY = h * 0.25F + gy * mn * 0.10F;
+                float px = latticeX + (hash(i) - 0.5F) * w * 0.6F * std::sin(t * 4.0F + i);
+                float py = latticeY + (hash(i * 3) - 0.5F) * h * 0.6F * std::cos(t * 4.0F + i);
+                if (t > gasT)
+                {
+                  const float mix = std::clamp((t - gasT) / (liqT - gasT), 0.0F, 1.0F);
+                  px = px * (1 - mix) + latticeX * mix;
+                  py = py * (1 - mix) + latticeY * mix;
+                }
+                if (t > liqT)
+                {
+                  px = latticeX;
+                  py = latticeY;
+                }
+                drawDataDisk(dst, w, h, src, px, py, mn * 0.020F, ya, 0.75F, t + i,
+                             Rgb{180, 220, 240, false});
+              }
+              // Phase label.
+              const char* lab = t < gasT ? "GAS" : (t < liqT ? "LIQUID" : "SOLID");
+              const int sc = std::max(3, static_cast<int>(mn / 25.0F));
+              const std::string s(lab);
+              const float lineW = static_cast<float>(s.size()) * 6 * sc;
+              for (int ci = 0; ci < static_cast<int>(s.size()); ++ci)
+              {
+                const auto g = glyph5x7(s[ci]);
+                for (int fy = 0; fy < 7; ++fy)
+                  for (int fx = 0; fx < 5; ++fx)
+                    if (g[fy][fx] == '1')
+                      plotDot(dst, w, h, w * 0.5F - lineW * 0.5F + (ci * 6 + fx) * sc,
+                              h * 0.85F + fy * sc, std::max(1.0F, static_cast<float>(sc) * 0.5F),
+                              ya, Rgb{240, 240, 240, false});
+              }
+            });
+}
+
+// ---------------------------------------------------------------------------
+// EVOLUTION THEME -----------------------------------------------------------
+// ---------------------------------------------------------------------------
+
+// March of Progress: silhouettes walking left-to-right, ape → australopithecine
+// → erectus → sapiens, each progressively more upright.
+void effectMarchOfProgress(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              // Sepia background.
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 100.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(190 + l * 0.10F), u8(160 + l * 0.10F), u8(110 + l * 0.08F), false};
+                }
+              const float groundY = h * 0.88F;
+              for (int x = 0; x < w; ++x)
+                dst[static_cast<std::size_t>(groundY) * w + x] = Rgb{60, 50, 40, false};
+              const int N = 5;
+              for (int i = 0; i < N; ++i)
+              {
+                const float frac = static_cast<float>(i) / (N - 1);
+                const float cx = w * 0.12F + frac * w * 0.76F;
+                const float ht = mn * (0.30F + 0.10F * frac);
+                // Hunch decreases as i increases.
+                const float hunch = (1.0F - frac) * 0.6F;
+                const float walk = std::sin(t * 12.0F + i) * 0.3F;
+                const Rgb fig{30, 22, 18, false};
+                // Head.
+                plotDot(dst, w, h, cx + hunch * ht * 0.3F, groundY - ht + hunch * ht * 0.2F,
+                        ht * 0.10F, ya, fig);
+                // Torso.
+                drawSeg(dst, w, h, cx + hunch * ht * 0.2F, groundY - ht * 0.85F + hunch * ht * 0.15F,
+                        cx, groundY - ht * 0.40F, ht * 0.10F, ya, fig);
+                // Legs.
+                drawSeg(dst, w, h, cx, groundY - ht * 0.40F, cx - ht * 0.15F + walk * ht * 0.1F,
+                        groundY, ht * 0.08F, ya, fig);
+                drawSeg(dst, w, h, cx, groundY - ht * 0.40F, cx + ht * 0.15F - walk * ht * 0.1F,
+                        groundY, ht * 0.08F, ya, fig);
+                // Arms.
+                drawSeg(dst, w, h, cx, groundY - ht * 0.70F, cx - ht * 0.20F + walk * ht * 0.15F,
+                        groundY - ht * 0.40F, ht * 0.06F, ya, fig);
+                drawSeg(dst, w, h, cx, groundY - ht * 0.70F, cx + ht * 0.20F - walk * ht * 0.15F,
+                        groundY - ht * 0.40F, ht * 0.06F, ya, fig);
+              }
+              // Time arrow.
+              drawSeg(dst, w, h, w * 0.08F, h * 0.95F, w * 0.92F, h * 0.95F,
+                      std::max(1.0F, mn * 0.004F), ya, Rgb{40, 30, 20, false});
+              drawSeg(dst, w, h, w * 0.92F, h * 0.95F, w * 0.88F, h * 0.93F,
+                      std::max(1.0F, mn * 0.004F), ya, Rgb{40, 30, 20, false});
+            });
+}
+
+// Tree of Life: a radial phylogenetic tree branches outward from the centre,
+// labels on the leaf tips, growing over the duration.
+void effectTreeOfLife(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(20 + l * 0.10F), u8(22 + l * 0.10F), u8(20 + l * 0.06F), false};
+                }
+              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float maxR = std::min(w, h) * 0.40F;
+              // Recursive-ish branching: start at centre, fan out.
+              const Rgb branch{220, 200, 140, false};
+              const int rings = 5;
+              for (int r = 0; r < rings; ++r)
+              {
+                const float r0 = maxR * r / rings;
+                const float r1 = maxR * (r + 1) / rings;
+                const int n = (1 << (r + 1));
+                const float reveal = std::clamp(t * rings - r, 0.0F, 1.0F);
+                if (reveal <= 0.0F) continue;
+                for (int i = 0; i < n; ++i)
+                {
+                  const float a = i / static_cast<float>(n) * 6.2832F;
+                  const float x0 = cx + std::cos(a) * r0;
+                  const float y0 = cy + std::sin(a) * r0 / ya;
+                  const float x1 = cx + std::cos(a) * (r0 + (r1 - r0) * reveal);
+                  const float y1 = cy + std::sin(a) * (r0 + (r1 - r0) * reveal) / ya;
+                  drawSeg(dst, w, h, x0, y0, x1, y1, std::max(1.0F, mn * 0.004F), ya, branch);
+                }
+              }
+              // Leaf-tip dots.
+              const int leafN = 32;
+              for (int i = 0; i < leafN; ++i)
+              {
+                const float a = i / static_cast<float>(leafN) * 6.2832F;
+                const float lx = cx + std::cos(a) * maxR;
+                const float ly = cy + std::sin(a) * maxR / ya;
+                drawDataDisk(dst, w, h, src, lx, ly, mn * 0.012F, ya, 0.7F, 0.0F,
+                             Rgb{180, 220, 140, false});
+              }
+              // Centre LUCA dot.
+              plotDot(dst, w, h, cx, cy, mn * 0.020F, ya, Rgb{255, 240, 180, false});
+            });
+}
+
+// Darwin's finches: four beak silhouettes morph from a common ancestor,
+// arranged radially with arrows fanning out from the centre.
+void effectFinches(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  struct BeakShape { float length, depth; const char* name; };
+  static const std::array<BeakShape, 4> kBeaks = {
+      BeakShape{0.30F, 0.06F, "WARBLER"},
+      BeakShape{0.40F, 0.10F, "INSECT"},
+      BeakShape{0.50F, 0.20F, "GROUND"},
+      BeakShape{0.60F, 0.30F, "LARGE"}};
+  runFrames(
+      renderer, w, h, 5400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float dim = 0.20F;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(200 + l * 0.10F * dim), u8(220 + l * 0.10F * dim),
+                    u8(240 + l * 0.10F * dim), false};
+          }
+        // Common ancestor at centre.
+        const float cx = w * 0.5F, cy = h * 0.5F;
+        drawDataDisk(dst, w, h, src, cx, cy, mn * 0.05F, ya, 0.7F, 0.0F,
+                     Rgb{120, 80, 60, false});
+        // Four offspring at corners.
+        const std::array<std::pair<float, float>, 4> positions = {
+            std::make_pair(0.25F, 0.20F), std::make_pair(0.75F, 0.20F),
+            std::make_pair(0.25F, 0.80F), std::make_pair(0.75F, 0.80F)};
+        for (int i = 0; i < 4; ++i)
+        {
+          const float tx = w * positions[i].first;
+          const float tyy = h * positions[i].second;
+          const float reveal = std::clamp(t * 1.5F - i * 0.15F, 0.0F, 1.0F);
+          if (reveal <= 0.0F) continue;
+          drawSeg(dst, w, h, cx, cy, cx + (tx - cx) * reveal, cy + (tyy - cy) * reveal,
+                  std::max(1.0F, mn * 0.004F), ya, Rgb{40, 30, 20, false});
+          if (reveal > 0.8F)
+          {
+            // Beak silhouette = data-textured head + triangular beak.
+            const BeakShape& b = kBeaks[i];
+            const float headR = mn * 0.05F;
+            drawDataDisk(dst, w, h, src, tx, tyy, headR, ya, 0.7F, 0.0F,
+                         Rgb{180, 130, 90, false});
+            // Beak as triangle pointing right.
+            const float bx0 = tx + headR;
+            const float bx1 = bx0 + mn * b.length;
+            const float bd = mn * b.depth;
+            for (float u = 0; u < 1.0F; u += 0.02F)
+            {
+              const float bx = bx0 + (bx1 - bx0) * u;
+              const float byHalf = bd * (1.0F - u);
+              plotDot(dst, w, h, bx, tyy, std::max(1.0F, byHalf), ya, Rgb{160, 100, 60, false});
+            }
+            // Name label.
+            const int sc = std::max(1, static_cast<int>(mn / 60.0F));
+            const std::string name(b.name);
+            for (int ci = 0; ci < static_cast<int>(name.size()); ++ci)
+            {
+              const auto g = glyph5x7(name[ci]);
+              for (int fy = 0; fy < 7; ++fy)
+                for (int fx = 0; fx < 5; ++fx)
+                  if (g[fy][fx] == '1')
+                    plotDot(dst, w, h, tx + (ci * 6 + fx) * sc - name.size() * 3 * sc,
+                            tyy + headR + sc * 2 + fy * sc,
+                            std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                            Rgb{40, 30, 20, false});
+            }
+          }
+        }
+      });
+}
+
+// Peppered Moth: two moths against a tree trunk; trunk darkens (industrial
+// soot), the light moth fades away while the dark moth proliferates.
+void effectPepperedMoth(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(
+      renderer, w, h, 5400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        // Bark texture darkens with t.
+        const float darkness = std::clamp(t * 0.9F, 0.0F, 1.0F);
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 100.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            const float scratch = std::sin(x * 0.20F + y * 0.04F) * 30 + std::sin(y * 0.15F) * 20;
+            const float base = 200 - darkness * 180 + scratch * 0.3F;
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(base * 0.55F + l * 0.10F), u8(base * 0.50F + l * 0.08F),
+                    u8(base * 0.42F + l * 0.06F), false};
+          }
+        // Pale moths fade out as t increases; dark moths fade in.
+        const int nL = static_cast<int>((1.0F - darkness) * 8);
+        const int nD = static_cast<int>(darkness * 8);
+        for (int i = 0; i < nL; ++i)
+        {
+          const float mx = hash(i) * w;
+          const float my = hash(i * 3) * h;
+          const float mS = mn * 0.025F;
+          plotDot(dst, w, h, mx, my, mS, ya, Rgb{210, 200, 180, false});
+          plotDot(dst, w, h, mx - mS * 0.6F, my, mS * 0.5F, ya, Rgb{210, 200, 180, false});
+          plotDot(dst, w, h, mx + mS * 0.6F, my, mS * 0.5F, ya, Rgb{210, 200, 180, false});
+        }
+        for (int i = 0; i < nD; ++i)
+        {
+          const float mx = hash((i + 99) * 7) * w;
+          const float my = hash((i + 99) * 11) * h;
+          const float mS = mn * 0.025F;
+          plotDot(dst, w, h, mx, my, mS, ya, Rgb{40, 30, 20, false});
+          plotDot(dst, w, h, mx - mS * 0.6F, my, mS * 0.5F, ya, Rgb{40, 30, 20, false});
+          plotDot(dst, w, h, mx + mS * 0.6F, my, mS * 0.5F, ya, Rgb{40, 30, 20, false});
+        }
+      });
+}
+
+// Cambrian explosion: weird creatures (five-eyed, big-eyed) bloom from a
+// flat sea floor in the duration of a few seconds. Body discs are
+// data-textured so the explosion carries the field.
+void effectCambrian(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  const float sf = static_cast<float>(y) / h;
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(8 + 20 * sf + l * 0.08F), u8(30 + 30 * sf + l * 0.10F),
+                          u8(60 + 40 * sf + l * 0.12F), false};
+                }
+              const float floorY = h * 0.92F;
+              for (int x = 0; x < w; ++x)
+                for (int yo = 0; yo <= 2; ++yo)
+                {
+                  const int yy = static_cast<int>(floorY) + yo;
+                  if (yy < h) dst[static_cast<std::size_t>(yy) * w + x] = Rgb{100, 80, 60, false};
+                }
+              const int N = 12;
+              for (int i = 0; i < N; ++i)
+              {
+                const float reveal = std::clamp(t * 1.5F - hash(i) * 0.4F, 0.0F, 1.0F);
+                if (reveal <= 0.0F) continue;
+                const float bx = w * (0.08F + 0.84F * hash(i * 7));
+                const float by = floorY - mn * (0.05F + 0.20F * hash(i * 11)) * reveal;
+                const float bS = mn * (0.030F + 0.025F * hash(i * 13)) * reveal;
+                drawDataDisk(dst, w, h, src, bx, by, bS, ya, 0.75F, t + i,
+                             Rgb{u8(180 + hash(i * 19) * 75), u8(120 + hash(i * 23) * 100),
+                                 u8(100 + hash(i * 29) * 100), false});
+                // Eyes — varying numbers (1, 2, 5).
+                const int nEyes = 1 + static_cast<int>(hash(i * 31) * 5);
+                for (int e = 0; e < nEyes; ++e)
+                {
+                  const float ea = e / static_cast<float>(nEyes) * 6.2832F;
+                  plotDot(dst, w, h, bx + std::cos(ea) * bS * 0.6F,
+                          by + std::sin(ea) * bS * 0.6F, std::max(1.0F, bS * 0.18F), ya,
+                          Rgb{30, 20, 30, false});
+                }
+                // Tentacles.
+                for (int k = 0; k < 4; ++k)
+                {
+                  const float ka = k / 4.0F * 6.2832F + t;
+                  drawSeg(dst, w, h, bx, by, bx + std::cos(ka) * bS * 1.2F,
+                          by + std::sin(ka) * bS * 1.2F, std::max(1.0F, mn * 0.004F), ya,
+                          Rgb{180, 130, 100, false});
+                }
+              }
+            });
+}
+
+// Out of Africa: a 2D globe (data-textured!) with arrows fanning out from
+// East Africa across to Europe, Asia, Oceania, and the Americas.
+void effectOutOfAfrica(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                  dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 10, 22, false};
+              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float R = std::min(w, h) * 0.40F;
+              // Earth globe — data-textured.
+              drawDataDisk(dst, w, h, src, cx, cy, R, ya, 0.85F, t * 0.4F,
+                           Rgb{100, 180, 120, false});
+              // East Africa origin (relative to centre of globe).
+              const float ox = cx + R * 0.10F;
+              const float oy = cy + R * 0.05F;
+              plotDot(dst, w, h, ox, oy, mn * 0.022F, ya, Rgb{255, 80, 60, false});
+              // Migration arrows fanning out.
+              const std::array<std::pair<float, float>, 6> targets = {
+                  std::make_pair(-0.35F, -0.20F),  // Europe
+                  std::make_pair(0.20F, -0.20F),   // Asia
+                  std::make_pair(0.40F, 0.00F),    // SE Asia
+                  std::make_pair(0.55F, 0.25F),    // Australia
+                  std::make_pair(-0.65F, 0.00F),   // Americas (across Atlantic shortcut)
+                  std::make_pair(-0.50F, 0.20F)};  // South America
+              for (int i = 0; i < 6; ++i)
+              {
+                const float reveal = std::clamp(t * 1.5F - i * 0.18F, 0.0F, 1.0F);
+                if (reveal <= 0.0F) continue;
+                const float tx = cx + targets[i].first * R;
+                const float tyy = cy + targets[i].second * R / ya;
+                const float px = ox + (tx - ox) * reveal;
+                const float py = oy + (tyy - oy) * reveal;
+                drawSeg(dst, w, h, ox, oy, px, py, std::max(1.0F, mn * 0.005F), ya,
+                        Rgb{255, 200, 120, false});
+                // Arrowhead.
+                if (reveal > 0.8F)
+                  plotDot(dst, w, h, px, py, mn * 0.012F, ya, Rgb{255, 200, 120, false});
+              }
+            });
+}
+
+// Cell → Organism: a single cell divides repeatedly (1 → 2 → 4 → 8 → 16),
+// each cell a data-textured ball, reorganising into a multicellular blob.
+void effectCellDivides(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.18F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(30 + l * 0.10F * dim), u8(30 + l * 0.10F * dim),
+                          u8(38 + l * 0.10F * dim), false};
+                }
+              const int stage = std::min(5, static_cast<int>(t * 6.0F));
+              const int nCells = 1 << stage;  // 1, 2, 4, 8, 16, 32
+              const float cellR = mn * (0.30F / std::sqrt(static_cast<float>(nCells)));
+              const float cx = w * 0.5F, cy = h * 0.5F;
+              const Rgb tint{180, 200, 220, false};
+              for (int i = 0; i < nCells; ++i)
+              {
+                const float a = i / static_cast<float>(nCells) * 6.2832F;
+                const float ring = std::sqrt(static_cast<float>(i)) * cellR * 0.7F;
+                const float bx = cx + std::cos(a + t) * ring;
+                const float by = cy + std::sin(a + t) * ring / ya;
+                drawDataDisk(dst, w, h, src, bx, by, cellR, ya, 0.80F, t + i, tint);
+                // Nucleus dot.
+                plotDot(dst, w, h, bx, by, cellR * 0.25F, ya, Rgb{80, 60, 100, false});
+              }
+              // Generation label.
+              const int sc = std::max(2, static_cast<int>(mn / 50.0F));
+              const std::string lab = "N=" + std::to_string(nCells);
+              for (int ci = 0; ci < static_cast<int>(lab.size()); ++ci)
+              {
+                const auto g = glyph5x7(lab[ci]);
+                for (int fy = 0; fy < 7; ++fy)
+                  for (int fx = 0; fx < 5; ++fx)
+                    if (g[fy][fx] == '1')
+                      plotDot(dst, w, h, w * 0.08F + (ci * 6 + fx) * sc, h * 0.08F + fy * sc,
+                              std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                              Rgb{220, 240, 255, false});
+              }
+            });
+}
+
+// Punctuated equilibrium: step-line chart, long flat stretches interrupted by
+// sharp vertical jumps. Eldredge & Gould in one image.
+void effectPunctuated(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(
+      renderer, w, h, 5200,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float dim = 0.25F;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(24 + l * 0.10F * dim), u8(24 + l * 0.10F * dim),
+                    u8(32 + l * 0.10F * dim), false};
+          }
+        // Axes.
+        const float ax0 = w * 0.10F, ax1 = w * 0.92F;
+        const float ay0 = h * 0.85F, ay1 = h * 0.15F;
+        drawSeg(dst, w, h, ax0, ay0, ax1, ay0, std::max(1.0F, mn * 0.004F), ya,
+                Rgb{220, 220, 220, false});
+        drawSeg(dst, w, h, ax0, ay0, ax0, ay1, std::max(1.0F, mn * 0.004F), ya,
+                Rgb{220, 220, 220, false});
+        // Step-line: 4 plateaus separated by jumps.
+        struct Step { float fracX; float level; };
+        static const std::array<Step, 5> steps = {Step{0.00F, 0.15F}, Step{0.20F, 0.35F},
+                                                  Step{0.45F, 0.55F}, Step{0.70F, 0.75F},
+                                                  Step{0.90F, 0.90F}};
+        const float reveal = std::clamp(t * 1.2F, 0.0F, 1.0F);
+        float prevX = ax0, prevY = ay0 - (ay0 - ay1) * steps[0].level;
+        for (std::size_t i = 0; i < steps.size(); ++i)
+        {
+          const float sx = ax0 + (ax1 - ax0) * steps[i].fracX;
+          const float sy = ay0 - (ay0 - ay1) * steps[i].level;
+          if (sx / w > reveal) break;
+          // Flat plateau.
+          drawSeg(dst, w, h, prevX, prevY, sx, prevY, std::max(1.0F, mn * 0.006F), ya,
+                  Rgb{120, 200, 240, false});
+          // Vertical jump.
+          drawSeg(dst, w, h, sx, prevY, sx, sy, std::max(1.0F, mn * 0.006F), ya,
+                  Rgb{220, 120, 80, false});
+          prevX = sx;
+          prevY = sy;
+        }
+        // Continuation to current reveal.
+        const float revX = ax0 + (ax1 - ax0) * reveal;
+        if (revX > prevX)
+          drawSeg(dst, w, h, prevX, prevY, revX, prevY, std::max(1.0F, mn * 0.006F), ya,
+                  Rgb{120, 200, 240, false});
+        // Labels.
+        const int sc = std::max(1, static_cast<int>(mn / 70.0F));
+        const std::string lab = "PUNCTUATED EQUILIBRIUM";
+        for (int ci = 0; ci < static_cast<int>(lab.size()); ++ci)
+        {
+          const char ch = lab[ci];
+          if (ch == ' ') continue;
+          const auto g = glyph5x7(ch);
+          for (int fy = 0; fy < 7; ++fy)
+            for (int fx = 0; fx < 5; ++fx)
+              if (g[fy][fx] == '1')
+                plotDot(dst, w, h, ax0 + (ci * 6 + fx) * sc, h * 0.04F + fy * sc,
+                        std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                        Rgb{200, 200, 220, false});
+        }
+      });
+}
+
+// Galápagos tortoise: slow silhouette of a giant tortoise crosses the screen,
+// dome shell and saddle neck. Shell uses drawDataDisk so the back carries
+// the data — the joke is the slowness.
+void effectGalapagos(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5800,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  const float sf = static_cast<float>(y) / h;
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(140 + 80 * (1 - sf) + l * 0.10F),
+                          u8(180 + 60 * (1 - sf) + l * 0.10F),
+                          u8(140 + 30 * sf + l * 0.08F), false};
+                }
+              const float groundY = h * 0.85F;
+              for (int x = 0; x < w; ++x)
+                dst[static_cast<std::size_t>(groundY) * w + x] = Rgb{80, 60, 40, false};
+              const float cx = -mn * 0.4F + t * (w + mn * 0.6F);
+              const float S = mn * 0.25F;
+              const Rgb skin{60, 80, 50, false};
+              // Shell — data-textured dome.
+              drawDataDisk(dst, w, h, src, cx, groundY - S * 0.4F, S * 0.7F, ya, 0.80F, 0.0F,
+                           Rgb{80, 110, 60, false});
+              // Underbody.
+              for (int yo = -static_cast<int>(S * 0.08F); yo <= static_cast<int>(S * 0.08F); ++yo)
+                for (int xo = -static_cast<int>(S * 0.65F); xo <= static_cast<int>(S * 0.65F); ++xo)
+                {
+                  const int xx = static_cast<int>(cx + xo);
+                  const int yy = static_cast<int>(groundY - S * 0.05F) + yo;
+                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = skin;
+                }
+              // Neck + head.
+              drawSeg(dst, w, h, cx - S * 0.55F, groundY - S * 0.45F, cx - S * 0.80F,
+                      groundY - S * 0.65F, S * 0.10F, ya, skin);
+              plotDot(dst, w, h, cx - S * 0.85F, groundY - S * 0.65F, S * 0.08F, ya, skin);
+              // Legs.
+              for (int leg = 0; leg < 4; ++leg)
+              {
+                const float lx = cx - S * 0.50F + leg * S * 0.30F;
+                drawSeg(dst, w, h, lx, groundY - S * 0.10F, lx, groundY, S * 0.07F, ya, skin);
+              }
+            });
+}
+
+// Darwin's portrait: bearded silhouette fades in; "On the Origin of Species"
+// types out below. Data settles into a marbled book-cover beige.
+void effectDarwin(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.30F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 100.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(170 + l * 0.10F * dim), u8(140 + l * 0.10F * dim),
+                          u8(95 + l * 0.10F * dim), false};
+                }
+              const float fade = std::clamp(t * 1.6F, 0.0F, 1.0F);
+              const float cx = w * 0.5F, cy = h * 0.42F;
+              const float S = mn * 0.30F;
+              const Rgb ink{30, 20, 14, false};
+              // Head (top dome).
+              plotDot(dst, w, h, cx, cy - S * 0.15F, S * 0.25F * fade, ya, ink);
+              // Beard (large oval below).
+              for (int yo = static_cast<int>(S * 0.05F); yo <= static_cast<int>(S * 0.55F); ++yo)
+              {
+                const float yf = (yo - S * 0.05F) / (S * 0.50F);
+                const int half = static_cast<int>(S * (0.30F + 0.10F * std::sin(yf * 3.14159F)) * fade);
+                for (int xo = -half; xo <= half; ++xo)
+                {
+                  const int xx = static_cast<int>(cx + xo);
+                  const int yy = static_cast<int>(cy + yo);
+                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = ink;
+                }
+              }
+              // Eyebrows.
+              if (fade > 0.6F)
+              {
+                drawSeg(dst, w, h, cx - S * 0.12F, cy - S * 0.20F, cx - S * 0.05F,
+                        cy - S * 0.22F, std::max(1.0F, mn * 0.005F), ya, Rgb{200, 200, 200, false});
+                drawSeg(dst, w, h, cx + S * 0.05F, cy - S * 0.22F, cx + S * 0.12F,
+                        cy - S * 0.20F, std::max(1.0F, mn * 0.005F), ya, Rgb{200, 200, 200, false});
+              }
+              // Type out "ON THE ORIGIN OF SPECIES".
+              const std::string text = "ON THE ORIGIN OF SPECIES";
+              const float typeT = std::clamp((t - 0.45F) / 0.50F, 0.0F, 1.0F);
+              const int nReveal = static_cast<int>(typeT * text.size());
+              const int sc = std::max(2, static_cast<int>(mn / 50.0F));
+              const float lineW = static_cast<float>(text.size()) * 6 * sc;
+              for (int ci = 0; ci < nReveal && ci < static_cast<int>(text.size()); ++ci)
+              {
+                const char ch = text[ci];
+                if (ch == ' ') continue;
+                const auto g = glyph5x7(ch);
+                for (int fy = 0; fy < 7; ++fy)
+                  for (int fx = 0; fx < 5; ++fx)
+                    if (g[fy][fx] == '1')
+                      plotDot(dst, w, h, cx - lineW * 0.5F + (ci * 6 + fx) * sc,
+                              h * 0.85F + fy * sc,
+                              std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, ink);
+              }
+            });
+}
+
+// Peacock display: feather tail unfurls; many iridescent eye-spots, each a
+// data-textured disk so the tail wears the data.
+void effectPeacock(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(20 + l * 0.10F), u8(28 + l * 0.10F), u8(40 + l * 0.10F), false};
+                }
+              const float cx = w * 0.5F, cy = h * 0.82F;
+              const float spread = std::clamp(t * 1.2F, 0.0F, 1.0F);
+              const int N = 80;
+              for (int i = 0; i < N; ++i)
+              {
+                const float frac = i / static_cast<float>(N);
+                const float a = (frac - 0.5F) * 3.14159F * 0.9F;
+                const float r = mn * 0.55F * spread;
+                const float fx = cx + std::sin(a) * r;
+                const float fy = cy - std::cos(a) * r / ya;
+                // Feather quill.
+                drawSeg(dst, w, h, cx, cy, fx, fy, std::max(1.0F, mn * 0.002F), ya,
+                        Rgb{60, 90, 30, false});
+                // Eye spot.
+                drawDataDisk(dst, w, h, src, fx, fy, mn * 0.022F, ya, 0.85F, frac * 6.0F,
+                             Rgb{60, 100, 180, false});
+                plotDot(dst, w, h, fx, fy, mn * 0.010F, ya, Rgb{30, 50, 100, false});
+                plotDot(dst, w, h, fx, fy, mn * 0.005F, ya, Rgb{220, 180, 60, false});
+              }
+              // Body.
+              plotDot(dst, w, h, cx, cy, mn * 0.05F, ya, Rgb{20, 60, 100, false});
+              // Head + crest.
+              plotDot(dst, w, h, cx, cy - mn * 0.07F, mn * 0.020F, ya, Rgb{30, 100, 160, false});
+              for (int k = -2; k <= 2; ++k)
+              {
+                drawSeg(dst, w, h, cx + k * mn * 0.005F, cy - mn * 0.08F,
+                        cx + k * mn * 0.010F, cy - mn * 0.12F, std::max(1.0F, mn * 0.003F), ya,
+                        Rgb{30, 100, 160, false});
+              }
+            });
+}
+
+// Mendel's peas: a Punnett square fills in over 4 quadrants; below, four pea
+// pods grow showing wrinkled/smooth phenotypes per genotype.
+void effectMendel(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 80.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(220 + l * 0.08F), u8(212 + l * 0.08F), u8(186 + l * 0.06F), false};
+                }
+              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float S = std::min(w, h) * 0.30F;
+              // 2x2 grid.
+              const Rgb ink{40, 30, 20, false};
+              for (int g = 0; g < 3; ++g)
+              {
+                drawSeg(dst, w, h, cx - S, cy - S + g * S, cx + S, cy - S + g * S,
+                        std::max(1.0F, mn * 0.004F), ya, ink);
+                drawSeg(dst, w, h, cx - S + g * S, cy - S, cx - S + g * S, cy + S,
+                        std::max(1.0F, mn * 0.004F), ya, ink);
+              }
+              static const std::array<const char*, 4> kCells = {"YY", "Yy", "Yy", "yy"};
+              const int sc = std::max(2, static_cast<int>(mn / 40.0F));
+              for (int gr = 0; gr < 2; ++gr)
+                for (int gc = 0; gc < 2; ++gc)
+                {
+                  const int idx = gr * 2 + gc;
+                  const float reveal = std::clamp(t * 1.5F - idx * 0.15F, 0.0F, 1.0F);
+                  if (reveal <= 0.0F) continue;
+                  const float ccx = cx - S * 0.5F + gc * S;
+                  const float ccy = cy - S * 0.5F + gr * S;
+                  // Letters.
+                  const std::string ll(kCells[idx]);
+                  for (int ci = 0; ci < 2; ++ci)
+                  {
+                    const auto g = glyph5x7(ll[ci]);
+                    for (int fy = 0; fy < 7; ++fy)
+                      for (int fx = 0; fx < 5; ++fx)
+                        if (g[fy][fx] == '1')
+                          plotDot(dst, w, h, ccx - sc * 5 + (ci * 6 + fx) * sc,
+                                  ccy - sc * 3 + fy * sc,
+                                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, ink);
+                  }
+                  // Pea pod.
+                  const Rgb yellow{220, 200, 80, false};
+                  const Rgb green{120, 180, 80, false};
+                  const Rgb wrinkly{160, 130, 60, false};
+                  const bool dominant = idx != 3;
+                  drawDataDisk(dst, w, h, src, ccx, ccy + sc * 8, S * 0.20F, ya, 0.75F, 0.0F,
+                               dominant ? yellow : wrinkly);
+                  (void)green;
+                }
+              // Header.
+              const std::string hdr = "F2 GENERATION 3:1";
+              const int sh = std::max(2, static_cast<int>(mn / 40.0F));
+              for (int ci = 0; ci < static_cast<int>(hdr.size()); ++ci)
+              {
+                const char ch = hdr[ci];
+                if (ch == ' ') continue;
+                const auto g = glyph5x7(ch);
+                for (int fy = 0; fy < 7; ++fy)
+                  for (int fx = 0; fx < 5; ++fx)
+                    if (g[fy][fx] == '1')
+                      plotDot(dst, w, h, w * 0.5F - hdr.size() * 3 * sh + (ci * 6 + fx) * sh,
+                              h * 0.10F + fy * sh,
+                              std::max(1.0F, static_cast<float>(sh) * 0.5F), ya, ink);
+              }
+            });
+}
+
+// Mutation cascade: a long ACGT sequence scrolls across; somewhere mid-screen
+// a letter abruptly changes, the substitution ripples downstream.
+void effectMutation(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 5200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.20F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(20 + l * 0.10F * dim), u8(24 + l * 0.10F * dim),
+                          u8(20 + l * 0.06F * dim), false};
+                }
+              const int sc = std::max(2, static_cast<int>(mn / 30.0F));
+              const int cellW = 6 * sc;
+              const float scrollPx = t * cellW * 12;
+              const int charW = w / cellW + 2;
+              const char nts[] = {'A', 'C', 'G', 'T'};
+              const Rgb cols[4] = {Rgb{220, 90, 80, false}, Rgb{220, 200, 60, false},
+                                   Rgb{80, 200, 100, false}, Rgb{80, 160, 230, false}};
+              for (int row = 0; row < 6; ++row)
+              {
+                const float rowY = h * 0.18F + row * mn * 0.12F;
+                for (int i = 0; i < charW; ++i)
+                {
+                  const float px = w - (i * cellW + std::fmod(scrollPx, cellW)) - cellW;
+                  const int seed = row * 137 + i + static_cast<int>(scrollPx / cellW);
+                  int nti = static_cast<int>(hash(seed) * 4) % 4;
+                  // Mutation: at row 3, halfway through, force a colour shift.
+                  bool mutated = false;
+                  if (row >= 3 && i > 5 && t > 0.4F)
+                  {
+                    nti = (nti + 2) % 4;
+                    mutated = true;
+                  }
+                  const auto g = glyph5x7(nts[nti]);
+                  for (int fy = 0; fy < 7; ++fy)
+                    for (int fx = 0; fx < 5; ++fx)
+                      if (g[fy][fx] == '1')
+                        plotDot(dst, w, h, px + fx * sc, rowY + fy * sc,
+                                std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                                mutated ? Rgb{255, 80, 80, false} : cols[nti]);
+                }
+              }
+            });
+}
+
+// HMS Beagle: a tall ship silhouette sails across a starlit ocean; "1831-1836"
+// scrolls underneath. Sea surface is sampled from the data.
+void effectBeagle(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(
+      renderer, w, h, 5400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float horY = h * 0.62F;
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            if (y > horY)
+            {
+              const float ripple = std::sin(x * 0.3F + y * 0.15F + t * 6.0F);
+              dst[static_cast<std::size_t>(y) * w + x] =
+                  Rgb{u8(10 + l * 0.10F + ripple * 10), u8(30 + l * 0.12F + ripple * 14),
+                      u8(60 + l * 0.18F + ripple * 18), false};
+            }
+            else
+            {
+              const float sf = static_cast<float>(y) / horY;
+              dst[static_cast<std::size_t>(y) * w + x] =
+                  Rgb{u8(8 + 20 * (1 - sf) + l * 0.06F), u8(12 + 20 * (1 - sf) + l * 0.06F),
+                      u8(20 + 30 * (1 - sf) + l * 0.08F), false};
+            }
+          }
+        for (int i = 0; i < 60; ++i)
+        {
+          const int sx = static_cast<int>(hash(i) * w);
+          const int sy = static_cast<int>(hash(i * 3) * horY);
+          const float tw = 0.5F + 0.5F * std::sin(t * 10.0F + i);
+          dst[static_cast<std::size_t>(sy) * w + sx] = Rgb{u8(180 * tw), u8(180 * tw), u8(220 * tw), false};
+        }
+        // Ship moves left-to-right.
+        const float sx = -mn * 0.3F + t * (w + mn * 0.6F);
+        const float sy = horY - mn * 0.05F;
+        const float SS = mn * 0.18F;
+        const Rgb hull{20, 16, 14, false};
+        // Hull (trapezoid).
+        for (int yo = 0; yo <= static_cast<int>(SS * 0.18F); ++yo)
+        {
+          const float yf = yo / (SS * 0.18F);
+          const int half = static_cast<int>(SS * (0.32F - 0.10F * yf));
+          for (int xo = -half; xo <= half; ++xo)
+          {
+            const int xx = static_cast<int>(sx + xo);
+            const int yy = static_cast<int>(sy + yo);
+            if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+              dst[static_cast<std::size_t>(yy) * w + xx] = hull;
+          }
+        }
+        // Three masts.
+        for (int m = -1; m <= 1; ++m)
+        {
+          const float mx = sx + m * SS * 0.20F;
+          drawSeg(dst, w, h, mx, sy, mx, sy - SS * 0.55F, std::max(1.0F, mn * 0.004F), ya, hull);
+          // Sails.
+          for (int s2 = 0; s2 < 3; ++s2)
+          {
+            const float sy2 = sy - SS * (0.12F + s2 * 0.16F);
+            drawSeg(dst, w, h, mx - SS * 0.13F, sy2, mx + SS * 0.13F, sy2, SS * 0.05F, ya,
+                    Rgb{230, 220, 200, false});
+          }
+        }
+        // Years label.
+        const std::string lab = "1831 - 1836";
+        const int sc = std::max(2, static_cast<int>(mn / 50.0F));
+        for (int ci = 0; ci < static_cast<int>(lab.size()); ++ci)
+        {
+          const char ch = lab[ci];
+          if (ch == ' ') continue;
+          const auto g = glyph5x7(ch);
+          for (int fy = 0; fy < 7; ++fy)
+            for (int fx = 0; fx < 5; ++fx)
+              if (g[fy][fx] == '1')
+                plotDot(dst, w, h, w * 0.5F - lab.size() * 3 * sc + (ci * 6 + fx) * sc,
+                        h * 0.92F + fy * sc, std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                        Rgb{220, 200, 160, false});
+        }
+      });
+}
+
+// Endosymbiosis: a large host cell engulfs a smaller bacterium-like cell;
+// the smaller one settles inside and becomes a mitochondrion with cristae.
+// Both cells are data-textured spheres.
+void effectEndosymbiosis(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.25F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(40 + l * 0.10F * dim), u8(60 + l * 0.10F * dim),
+                          u8(50 + l * 0.10F * dim), false};
+                }
+              const float hostCx = w * 0.45F, hostCy = h * 0.5F;
+              const float hostR = mn * 0.22F;
+              // Host cell (data-textured).
+              drawDataDisk(dst, w, h, src, hostCx, hostCy, hostR, ya, 0.70F, t * 0.3F,
+                           Rgb{180, 200, 230, false});
+              // Nucleus.
+              plotDot(dst, w, h, hostCx + hostR * 0.20F, hostCy - hostR * 0.10F, hostR * 0.25F, ya,
+                      Rgb{100, 80, 140, false});
+              // Smaller bacterium approaches and enters.
+              const float approach = std::clamp(t * 1.5F, 0.0F, 1.0F);
+              const float bx = w * 0.85F - approach * (w * 0.85F - hostCx + hostR * 0.50F);
+              const float by = hostCy + std::sin(t * 2.0F) * mn * 0.04F * (1 - approach);
+              const float bR = mn * 0.08F;
+              drawDataDisk(dst, w, h, src, bx, by, bR, ya, 0.75F, t * 1.0F,
+                           Rgb{220, 130, 80, false});
+              // Cristae folds inside the bacterium when settled.
+              if (approach >= 0.7F)
+              {
+                const float inT = (approach - 0.7F) / 0.3F;
+                for (int k = -2; k <= 2; ++k)
+                {
+                  const float ky = by + k * bR * 0.30F;
+                  drawSeg(dst, w, h, bx - bR * 0.5F, ky, bx + bR * 0.5F, ky,
+                          std::max(1.0F, mn * 0.003F * inT), ya, Rgb{120, 50, 30, false});
+                }
+              }
+            });
+}
+
+// Lucy: a small bipedal hominid skeleton silhouette stands at the centre;
+// "3.2 MA" subtitle at the end. Australopithecus afarensis as one icon.
+void effectLucy(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 80.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(170 + l * 0.10F), u8(140 + l * 0.10F), u8(90 + l * 0.08F), false};
+                }
+              const float cx = w * 0.5F, baseY = h * 0.92F;
+              const float H = mn * 0.50F;
+              const Rgb bone{220, 215, 195, false};
+              // Skull.
+              plotDot(dst, w, h, cx, baseY - H * 0.92F, H * 0.10F, ya, bone);
+              // Jaw.
+              plotDot(dst, w, h, cx + H * 0.02F, baseY - H * 0.84F, H * 0.06F, ya, bone);
+              // Spine.
+              drawSeg(dst, w, h, cx, baseY - H * 0.80F, cx, baseY - H * 0.45F,
+                      std::max(1.0F, mn * 0.004F), ya, bone);
+              // Ribs.
+              for (int r = 0; r < 4; ++r)
+              {
+                const float yy = baseY - H * (0.75F - r * 0.05F);
+                drawSeg(dst, w, h, cx - H * (0.06F + r * 0.005F), yy,
+                        cx + H * (0.06F + r * 0.005F), yy, std::max(1.0F, mn * 0.003F), ya, bone);
+              }
+              // Pelvis.
+              for (int xo = -static_cast<int>(H * 0.10F); xo <= static_cast<int>(H * 0.10F); ++xo)
+                for (int yo = 0; yo <= static_cast<int>(H * 0.05F); ++yo)
+                {
+                  const int xx = static_cast<int>(cx + xo);
+                  const int yy = static_cast<int>(baseY - H * 0.45F) + yo;
+                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = bone;
+                }
+              // Legs (bent slightly, bipedal).
+              drawSeg(dst, w, h, cx - H * 0.05F, baseY - H * 0.40F, cx - H * 0.08F, baseY,
+                      std::max(1.0F, mn * 0.004F), ya, bone);
+              drawSeg(dst, w, h, cx + H * 0.05F, baseY - H * 0.40F, cx + H * 0.08F, baseY,
+                      std::max(1.0F, mn * 0.004F), ya, bone);
+              // Arms.
+              drawSeg(dst, w, h, cx, baseY - H * 0.72F, cx - H * 0.10F, baseY - H * 0.48F,
+                      std::max(1.0F, mn * 0.003F), ya, bone);
+              drawSeg(dst, w, h, cx, baseY - H * 0.72F, cx + H * 0.10F, baseY - H * 0.48F,
+                      std::max(1.0F, mn * 0.003F), ya, bone);
+              // Speech bubble at the end.
+              if (t > 0.5F)
+              {
+                const std::string line = "3.2 MA";
+                const int sc = std::max(3, static_cast<int>(mn / 25.0F));
+                const float lineW = static_cast<float>(line.size()) * 6 * sc;
+                const float bx = cx + H * 0.20F, by = baseY - H * 0.90F;
+                for (int xo = -static_cast<int>(lineW * 0.55F);
+                     xo <= static_cast<int>(lineW * 0.55F); ++xo)
+                  for (int yo = -static_cast<int>(sc * 5); yo <= static_cast<int>(sc * 5); ++yo)
+                  {
+                    const int xx = static_cast<int>(bx + xo);
+                    const int yy = static_cast<int>(by + yo);
+                    if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                      dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{240, 230, 200, false};
+                  }
+                for (int ci = 0; ci < static_cast<int>(line.size()); ++ci)
+                {
+                  const char ch = line[ci];
+                  if (ch == ' ') continue;
+                  const auto g = glyph5x7(ch);
+                  for (int fy = 0; fy < 7; ++fy)
+                    for (int fx = 0; fx < 5; ++fx)
+                      if (g[fy][fx] == '1')
+                        plotDot(dst, w, h, bx - lineW * 0.5F + (ci * 6 + fx) * sc,
+                                by - sc * 3 + fy * sc,
+                                std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                                Rgb{40, 30, 20, false});
+                }
+              }
+            });
+}
+
+// Mitochondrial Eve: a single central figure with descendant connections
+// fanning out — a graphical of common matrilineal ancestry.
+void effectMitochondrialEve(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(
+      renderer, w, h, 5400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(20 + l * 0.10F), u8(20 + l * 0.10F), u8(28 + l * 0.10F), false};
+          }
+        const float cx = w * 0.5F, cy = h * 0.5F;
+        const int N = 24;
+        for (int i = 0; i < N; ++i)
+        {
+          const float a = i / static_cast<float>(N) * 6.2832F;
+          const float R = std::min(w, h) * 0.4F;
+          const float reveal = std::clamp(t * 1.5F - i * 0.02F, 0.0F, 1.0F);
+          if (reveal <= 0.0F) continue;
+          const float dx = cx + std::cos(a) * R * reveal;
+          const float dy = cy + std::sin(a) * R * reveal / ya;
+          drawSeg(dst, w, h, cx, cy, dx, dy, std::max(1.0F, mn * 0.003F), ya,
+                  Rgb{240, 180, 200, false});
+          drawDataDisk(dst, w, h, src, dx, dy, mn * 0.018F, ya, 0.75F, 0.0F,
+                       Rgb{200, 140, 160, false});
+        }
+        // Eve at centre — data-textured.
+        drawDataDisk(dst, w, h, src, cx, cy, mn * 0.05F, ya, 0.85F, t * 0.2F,
+                     Rgb{255, 100, 140, false});
+        plotDot(dst, w, h, cx, cy, mn * 0.020F, ya, Rgb{255, 240, 240, false});
+      });
+}
+
+// Co-evolution: a giraffe + an acacia tree growing taller together.
+void effectCoEvolution(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  const float sf = static_cast<float>(y) / h;
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(200 - 30 * sf + l * 0.10F), u8(160 - 20 * sf + l * 0.10F),
+                          u8(110 - 30 * sf + l * 0.08F), false};
+                }
+              const float groundY = h * 0.92F;
+              for (int x = 0; x < w; ++x)
+                for (int yo = 0; yo <= 2; ++yo)
+                  if (groundY + yo < h)
+                    dst[static_cast<std::size_t>(groundY + yo) * w + x] = Rgb{120, 90, 50, false};
+              const float scale = t;
+              // Tree on the right (acacia umbrella).
+              const float treeX = w * 0.7F;
+              const float treeTop = groundY - mn * 0.65F * scale;
+              drawSeg(dst, w, h, treeX, groundY, treeX, treeTop, std::max(1.0F, mn * 0.012F), ya,
+                      Rgb{90, 60, 30, false});
+              for (int b = 0; b < 8; ++b)
+              {
+                const float a = (b - 3.5F) * 0.3F;
+                const float bx = treeX + std::sin(a) * mn * 0.18F;
+                const float by = treeTop - std::cos(a) * mn * 0.08F;
+                plotDot(dst, w, h, bx, by, mn * 0.055F, ya, Rgb{70, 130, 70, false});
+              }
+              // Giraffe on the left.
+              const float gx = w * 0.30F;
+              const float bodyY = groundY - mn * 0.18F;
+              const Rgb hide{220, 180, 110, false};
+              const Rgb spots{120, 80, 40, false};
+              // Body
+              for (int yo = -static_cast<int>(mn * 0.06F); yo <= static_cast<int>(mn * 0.06F); ++yo)
+                for (int xo = -static_cast<int>(mn * 0.12F); xo <= static_cast<int>(mn * 0.12F); ++xo)
+                {
+                  const int xx = static_cast<int>(gx + xo);
+                  const int yy = static_cast<int>(bodyY + yo);
+                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = hide;
+                }
+              // Spots
+              for (int i = 0; i < 12; ++i)
+              {
+                const float sa = i / 12.0F * 6.2832F;
+                plotDot(dst, w, h, gx + std::cos(sa) * mn * 0.08F,
+                        bodyY + std::sin(sa) * mn * 0.04F, std::max(1.0F, mn * 0.012F), ya, spots);
+              }
+              // Long neck — grows with t.
+              const float neckTop = groundY - mn * 0.40F - mn * 0.30F * scale;
+              drawSeg(dst, w, h, gx + mn * 0.08F, bodyY - mn * 0.04F, gx + mn * 0.20F, neckTop,
+                      std::max(1.0F, mn * 0.04F), ya, hide);
+              // Head + tongue.
+              plotDot(dst, w, h, gx + mn * 0.22F, neckTop, mn * 0.030F, ya, hide);
+              drawSeg(dst, w, h, gx + mn * 0.24F, neckTop, gx + mn * 0.34F, neckTop,
+                      std::max(1.0F, mn * 0.006F), ya, Rgb{220, 90, 130, false});
+              // Legs.
+              for (int leg = 0; leg < 4; ++leg)
+              {
+                const float lx = gx - mn * 0.10F + leg * mn * 0.07F;
+                drawSeg(dst, w, h, lx, bodyY + mn * 0.04F, lx, groundY, std::max(1.0F, mn * 0.014F),
+                        ya, hide);
+              }
+            });
+}
+
+// Selection pressure: a population of variable-sized dots; a predator culls
+// the larger ones; surviving smaller dots multiply. Dots are data-textured.
+void effectSelection(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  constexpr int N = 30;
+  runFrames(renderer, w, h, 5400,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float dim = 0.25F;
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(40 + l * 0.10F * dim), u8(50 + l * 0.10F * dim),
+                          u8(36 + l * 0.10F * dim), false};
+                }
+              for (int i = 0; i < N; ++i)
+              {
+                const float x0 = hash(i) * w;
+                const float y0 = hash(i * 3) * h;
+                const float sz = mn * (0.012F + 0.030F * hash(i * 7));
+                const bool large = sz > mn * 0.025F;
+                const bool culled = large && t > 0.4F;
+                if (culled && t > 0.4F + hash(i * 9) * 0.3F) continue;
+                drawDataDisk(dst, w, h, src, x0, y0, sz, ya, 0.75F, t + i,
+                             Rgb{160, 200, 120, false});
+              }
+              // Predator hint: a darting shadow.
+              if (t > 0.3F && t < 0.6F)
+              {
+                const float pt = (t - 0.3F) / 0.3F;
+                const float px = -mn * 0.2F + pt * (w + mn * 0.4F);
+                const float py = h * 0.5F + std::sin(pt * 6.0F) * mn * 0.15F;
+                plotDot(dst, w, h, px, py, mn * 0.06F, ya, Rgb{30, 20, 30, false});
+              }
+            });
+}
+
+// Cetacean transition: three sequential whale-like silhouettes — pakicetus
+// (legged land mammal) → ambulocetus (crocodile-like swimmer) → modern whale.
+void effectCetacean(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(
+      renderer, w, h, 5400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            const float sf = static_cast<float>(y) / h;
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(120 + 80 * (1 - sf) + l * 0.08F), u8(170 + 50 * (1 - sf) + l * 0.10F),
+                    u8(220 - 40 * sf + l * 0.12F), false};
+          }
+        const float groundY = h * 0.85F;
+        for (int x = 0; x < w; ++x)
+          for (int yo = 0; yo <= 1; ++yo)
+            dst[static_cast<std::size_t>(groundY + yo) * w + x] = Rgb{60, 100, 130, false};
+        // Three sequential silhouettes; each reveals over its portion of t.
+        const Rgb body{30, 30, 40, false};
+        for (int stage = 0; stage < 3; ++stage)
+        {
+          const float reveal = std::clamp(t * 3.0F - stage, 0.0F, 1.0F);
+          if (reveal <= 0.0F) continue;
+          const float cx = w * (0.20F + stage * 0.30F);
+          const float cy = groundY - mn * 0.10F;
+          const float bodyL = mn * 0.16F;
+          // Body = elongated ellipse.
+          for (int yo = -static_cast<int>(mn * 0.03F); yo <= static_cast<int>(mn * 0.03F); ++yo)
+            for (int xo = -static_cast<int>(bodyL); xo <= static_cast<int>(bodyL); ++xo)
+            {
+              const float nx = xo / bodyL, ny = yo / (mn * 0.03F);
+              if (nx * nx + ny * ny > 1.0F) continue;
+              const int xx = static_cast<int>(cx + xo);
+              const int yy = static_cast<int>(cy + yo);
+              if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                dst[static_cast<std::size_t>(yy) * w + xx] = body;
+            }
+          // Legs (stage 0 + 1) or flippers (stage 2).
+          if (stage == 0)
+          {
+            for (int leg = 0; leg < 4; ++leg)
+            {
+              const float lx = cx + (leg - 1.5F) * bodyL * 0.4F;
+              drawSeg(dst, w, h, lx, cy, lx, groundY, std::max(1.0F, mn * 0.010F), ya, body);
+            }
+          }
+          else if (stage == 1)
+          {
+            for (int leg = 0; leg < 4; ++leg)
+            {
+              const float lx = cx + (leg - 1.5F) * bodyL * 0.4F;
+              drawSeg(dst, w, h, lx, cy + mn * 0.02F, lx + mn * 0.025F, cy + mn * 0.06F,
+                      std::max(1.0F, mn * 0.008F), ya, body);
+            }
+          }
+          else
+          {
+            // Flippers + tail fluke
+            drawSeg(dst, w, h, cx - bodyL * 0.4F, cy + mn * 0.02F, cx - bodyL * 0.6F,
+                    cy + mn * 0.07F, std::max(1.0F, mn * 0.010F), ya, body);
+            drawSeg(dst, w, h, cx + bodyL, cy, cx + bodyL * 1.4F, cy - mn * 0.05F,
+                    std::max(1.0F, mn * 0.014F), ya, body);
+            drawSeg(dst, w, h, cx + bodyL, cy, cx + bodyL * 1.4F, cy + mn * 0.05F,
+                    std::max(1.0F, mn * 0.014F), ya, body);
+          }
+          // Eye.
+          plotDot(dst, w, h, cx - bodyL * 0.7F, cy - mn * 0.005F, std::max(1.0F, mn * 0.005F), ya,
+                  Rgb{220, 220, 220, false});
+        }
+      });
+}
+
 // Effect roster. Keep in sync with the dispatch switch below and with the
 // names in exitEffectName().
-constexpr int kEffectCount = 151;
+constexpr int kEffectCount = 191;
 }  // namespace
 
 int exitEffectCount()
@@ -13245,157 +15718,55 @@ const char* exitEffectName(int effectIndex)
   // Alphabetical roster (movie/book title case: short prepositions/articles
   // lowercased mid-string; acronyms preserved). The switch in playExitEffect
   // is dispatched by this index, so the two lists must stay in lockstep.
-  static const char* const kNames[kEffectCount] = {"ACME Anvil",
-                                                   "Akira",
-                                                   "Apocalypse",
-                                                   "Aurora",
-                                                   "Ballet",
-                                                   "Banksy Balloon",
-                                                   "Bass Spiral",
-                                                   "Big Keyboard",
-                                                   "Black Hole",
-                                                   "Bohr Atom",
-                                                   "Bond Barrel",
-                                                   "Bone Chandelier",
-                                                   "Bone Cut",
-                                                   "Bouncing Ball",
-                                                   "Boulder",
-                                                   "Brachistochrone",
-                                                   "Butterfly",
-                                                   "Ceci n'est pas",
-                                                   "Chladni",
-                                                   "Clockwork",
-                                                   "Close Encounters",
-                                                   "Countdown",
-                                                   "Crab",
-                                                   "CRT Off",
-                                                   "DeLorean",
-                                                   "Dial M",
-                                                   "Dictator Globe",
-                                                   "Dissolve",
-                                                   "Dodecahedron",
-                                                   "Double Slit",
-                                                   "Doves",
-                                                   "E.T.",
-                                                   "End Card",
-                                                   "Euler Identity",
-                                                   "Explode",
-                                                   "Eye Wink",
-                                                   "Fade",
-                                                   "Fall to Pieces",
-                                                   "Feather",
-                                                   "Film Burn",
-                                                   "Fire",
-                                                   "Fireworks",
-                                                   "Fish",
-                                                   "Flatland",
-                                                   "Foot Stomp",
-                                                   "Foucault Pendulum",
-                                                   "Fourier",
-                                                   "Galileo Tower",
-                                                   "Game of Life",
-                                                   "Golden Spiral",
-                                                   "Gotcha",
-                                                   "Greek Dance",
-                                                   "Gunshot",
-                                                   "HAL 9000",
-                                                   "HAL Stare",
-                                                   "Hitchcock",
-                                                   "Hokusai Wave",
-                                                   "Implode + Ring",
-                                                   "Inception",
-                                                   "Interstellar",
-                                                   "Iris Out",
-                                                   "Jaws",
-                                                   "Jellyfish",
-                                                   "Jurassic",
-                                                   "King Kong",
-                                                   "Koyaanisqatsi",
-                                                   "Lawrence",
-                                                   "Lebowski",
-                                                   "Lorenz Attractor",
-                                                   "Macarena",
-                                                   "Magritte Bowler",
-                                                   "Mandelbrot",
-                                                   "Mary Poppins",
-                                                   "Matrix Drop",
-                                                   "Memento",
-                                                   "Mobius",
-                                                   "Monolith",
-                                                   "Monty Python",
-                                                   "Moon Rocket",
-                                                   "Munch Scream",
-                                                   "Neo",
-                                                   "Newspaper",
-                                                   "Newton Cradle",
-                                                   "Nosferatu",
-                                                   "Pac-Man",
-                                                   "Pac-Man Duel",
-                                                   "Pendulum Waves",
-                                                   "Pi",
-                                                   "Pink Panther",
-                                                   "Pleasantville",
-                                                   "Pride Rock",
-                                                   "Psycho",
-                                                   "Pulp Fiction",
-                                                   "Pythagoras",
-                                                   "Python Wars",
-                                                   "Red Balloon",
-                                                   "Riverdance",
-                                                   "Rocky",
-                                                   "Rosebud",
-                                                   "Rubik",
-                                                   "Russian Dance",
-                                                   "Saturn",
-                                                   "Schrodinger",
-                                                   "Shawshank",
-                                                   "Shining",
-                                                   "Shiver",
-                                                   "Sierpinski",
-                                                   "Silly Walk",
-                                                   "Singin'",
-                                                   "Skeleton Wave",
-                                                   "Snowfall",
-                                                   "Solar System",
-                                                   "Sound of Music",
-                                                   "Spider",
-                                                   "Spiral",
-                                                   "Spirited Train",
-                                                   "Standing Wave",
-                                                   "Standoff",
-                                                   "Star Gate",
-                                                   "Star Wars",
-                                                   "Stingray",
-                                                   "Strangelove",
-                                                   "Submarine",
-                                                   "Tatooine",
-                                                   "Teardrop",
-                                                   "Tears in Rain",
-                                                   "Test Card",
-                                                   "Thanos Snap",
-                                                   "That's All Folks",
-                                                   "The Birds",
-                                                   "The End",
-                                                   "Thelma & Louise",
-                                                   "Thriller",
-                                                   "Thunderstorm",
-                                                   "Titanic",
-                                                   "Tornado",
-                                                   "Totoro",
-                                                   "Tracks",
-                                                   "Train",
-                                                   "Tron",
-                                                   "Truman",
-                                                   "Tunnel",
-                                                   "UFO",
-                                                   "Up",
-                                                   "Utopia",
-                                                   "Vertigo",
-                                                   "Warhol Banana",
-                                                   "Warp",
-                                                   "Wizard of Oz",
-                                                   "Word Reveal",
-                                                   "YMCA"};
+  static const char* const kNames[kEffectCount] = {
+      "ACME Anvil",         "Acid Trip",          "Akira",              "Apocalypse",
+      "Aurora",             "Avogadro",           "Ballet",             "Banksy Balloon",
+      "Bass Spiral",        "Beagle",             "Benzene",            "Big Keyboard",
+      "Black Hole",         "Bohr Atom",          "Bond Barrel",        "Bone Chandelier",
+      "Bone Cut",           "Bouncing Ball",      "Boulder",            "Brachistochrone",
+      "Brownian",           "Buckyball",          "Butterfly",          "Cambrian",
+      "Catalyst",           "Ceci n'est pas",     "Cell Divides",       "Cetacean",
+      "Chladni",            "Chromatography",     "Clockwork",          "Close Encounters",
+      "Co-evolution",       "Countdown",          "Crab",               "CRT Off",
+      "Darwin",             "DeLorean",           "Dial M",             "Dictator Globe",
+      "Dissolve",           "DNA",                "Dodecahedron",       "Double Slit",
+      "Doves",              "E.T.",               "Electrolysis",       "End Card",
+      "Endosymbiosis",      "Euler Identity",     "Explode",            "Eye Wink",
+      "Fade",               "Fall to Pieces",     "Feather",            "Film Burn",
+      "Finches",            "Fire",               "Fireworks",          "Fish",
+      "Flame Test",         "Flatland",           "Foot Stomp",         "Foucault Pendulum",
+      "Fourier",            "Galapagos",          "Galileo Tower",      "Game of Life",
+      "Glow Stick",         "Golden Spiral",      "Gotcha",             "Greek Dance",
+      "Gunshot",            "HAL 9000",           "HAL Stare",          "Hitchcock",
+      "Hokusai Wave",       "Implode + Ring",     "Inception",          "Interstellar",
+      "Iris Out",           "Jaws",               "Jellyfish",          "Jurassic",
+      "King Kong",          "Koyaanisqatsi",      "Lava Lamp",          "Lawrence",
+      "Lebowski",           "Liesegang",          "Lorenz Attractor",   "Lucy",
+      "Macarena",           "Magritte Bowler",    "Mandelbrot",         "March of Progress",
+      "Mary Poppins",       "Matrix Drop",        "Memento",            "Mendel",
+      "Mendeleev",          "Mentos",             "Mitochondrial Eve",  "Mobius",
+      "Monolith",           "Monty Python",       "Moon Rocket",        "Munch Scream",
+      "Mutation",           "NaCl Lattice",       "Neo",                "Newspaper",
+      "Newton Cradle",      "Nosferatu",          "Out of Africa",      "Pac-Man",
+      "Pac-Man Duel",       "Peacock",            "Pendulum Waves",     "Peppered Moth",
+      "Periodic Table",     "Phase Transition",   "pH Strip",           "Pi",
+      "Pink Panther",       "Pleasantville",      "Pride Rock",         "Psycho",
+      "Pulp Fiction",       "Punctuated",         "Pythagoras",         "Python Wars",
+      "Red Balloon",        "Riverdance",         "Rocky",              "Rosebud",
+      "Rubik",              "Russian Dance",      "Saturn",             "Schrodinger",
+      "Selection",          "Shawshank",          "Shining",            "Shiver",
+      "Sierpinski",         "Silly Walk",         "Singin'",            "Skeleton Wave",
+      "Snowfall",           "Soap Bubble",        "Solar System",       "Sound of Music",
+      "Spider",             "Spiral",             "Spirited Train",     "Standing Wave",
+      "Standoff",           "Star Gate",          "Star Wars",          "Stingray",
+      "Strangelove",        "Submarine",          "Tatooine",           "Teardrop",
+      "Tears in Rain",      "Test Card",          "Thanos Snap",        "That's All Folks",
+      "The Birds",          "The End",            "Thelma & Louise",    "Thriller",
+      "Thunderstorm",       "Titanic",            "Tornado",            "Totoro",
+      "Tracks",             "Train",              "Tree of Life",       "Tron",
+      "Truman",             "Tunnel",             "UFO",                "Up",
+      "Utopia",             "Vertigo",            "Warhol Banana",      "Warp",
+      "Wizard of Oz",       "Word Reveal",        "YMCA"};
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return "random";
   return kNames[effectIndex];
@@ -13471,9 +15842,9 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
   const bool stompRoll = (rng() % 5U) == 0U;
   const double stompDelayMs = 350.0 + static_cast<double>(rng() % 700U);
   std::unique_ptr<ImageSource> stompFoot;
-  // Foot Stomp (44), Monty Python (77), Python Wars (94) — these already end
-  // on a foot, so don't double-stomp them.
-  if (stompRoll && e != 44 && e != 77 && e != 94)
+  // Foot Stomp (62), Monty Python (105), Python Wars (131) — these already
+  // end on a foot, so don't double-stomp them.
+  if (stompRoll && e != 62 && e != 105 && e != 131)
   {
     std::size_t sfw = 0;
     std::size_t sfh = 0;
@@ -13494,156 +15865,196 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
   switch (e)
   {
     case 0: effectAcmeAnvil(renderer, frame, subW, subH); break;
-    case 1: effectAkira(renderer, frame, subW, subH); break;
-    case 2: effectApocalypse(renderer, frame, subW, subH); break;
-    case 3: effectAurora(renderer, frame, subW, subH, rng); break;
-    case 4: effectBallet(renderer, frame, subW, subH); break;
-    case 5: effectBanksyBalloon(renderer, frame, subW, subH); break;
-    case 6: effectBassSpiral(renderer, frame, subW, subH); break;
-    case 7: effectBigKeyboard(renderer, frame, subW, subH); break;
-    case 8: effectBlackHole(renderer, frame, subW, subH); break;
-    case 9: effectBohrAtom(renderer, frame, subW, subH); break;
-    case 10: effectBond(renderer, frame, subW, subH); break;
-    case 11: effectBoneChandelier(renderer, frame, subW, subH); break;
-    case 12: effectBoneCut(renderer, frame, subW, subH); break;
-    case 13: effectBall(renderer, frame, subW, subH); break;
-    case 14: effectBoulder(renderer, frame, subW, subH); break;
-    case 15: effectBrachistochrone(renderer, frame, subW, subH); break;
-    case 16: effectButterfly(renderer, frame, subW, subH); break;
-    case 17: effectCeciNestPas(renderer, frame, subW, subH); break;
-    case 18: effectChladni(renderer, frame, subW, subH); break;
-    case 19: effectClockwork(renderer, frame, subW, subH); break;
-    case 20: effectCloseEncounters(renderer, frame, subW, subH); break;
-    case 21: effectCountdown(renderer, frame, subW, subH); break;
-    case 22: effectCrab(renderer, frame, subW, subH); break;
-    case 23: effectCrtOff(renderer, frame, subW, subH); break;
-    case 24: effectDeLorean(renderer, frame, subW, subH); break;
-    case 25: effectDialM(renderer, frame, subW, subH); break;
-    case 26: effectGlobeDance(renderer, frame, subW, subH); break;
-    case 27: effectDissolve(renderer, frame, subW, subH, rng); break;
-    case 28: effectDodecahedron(renderer, frame, subW, subH); break;
-    case 29: effectDoubleSlit(renderer, frame, subW, subH); break;
-    case 30: effectDoves(renderer, frame, subW, subH, rng); break;
-    case 31: effectET(renderer, frame, subW, subH); break;
-    case 32: effectEndCard(renderer, frame, subW, subH); break;
-    case 33: effectEulerIdentity(renderer, frame, subW, subH); break;
-    case 34: effectExplode(renderer, frame, subW, subH); break;
-    case 35: effectEyewink(renderer, frame, subW, subH); break;
-    case 36: effectFade(renderer, frame, subW, subH); break;
-    case 37: effectFallToPieces(renderer, frame, subW, subH); break;
-    case 38: effectFeather(renderer, frame, subW, subH); break;
-    case 39: effectFilmBurn(renderer, frame, subW, subH); break;
-    case 40: effectFire(renderer, frame, subW, subH, rng); break;
-    case 41: effectFireworks(renderer, frame, subW, subH, rng); break;
-    case 42: effectFish(renderer, frame, subW, subH); break;
-    case 43: effectFlatland(renderer, frame, subW, subH, rng); break;
-    case 44: effectFoot(renderer, frame, subW, subH); break;
-    case 45: effectFoucaultPendulum(renderer, frame, subW, subH); break;
-    case 46: effectFourier(renderer, frame, subW, subH); break;
-    case 47: effectGalileoTower(renderer, frame, subW, subH); break;
-    case 48: effectGameOfLife(renderer, frame, subW, subH); break;
-    case 49: effectGoldenSpiral(renderer, frame, subW, subH); break;
-    case 50: effectGotcha(renderer, frame, subW, subH); break;
-    case 51: effectGreekDance(renderer, frame, subW, subH); break;
-    case 52: effectGunshot(renderer, frame, subW, subH, rng); break;
-    case 53: effectHal9000(renderer, frame, subW, subH); break;
-    case 54: effectHalStare(renderer, frame, subW, subH); break;
-    case 55: effectHitchcock(renderer, frame, subW, subH); break;
-    case 56: effectHokusaiWave(renderer, frame, subW, subH); break;
-    case 57: effectImplodeRing(renderer, frame, subW, subH); break;
-    case 58: effectInception(renderer, frame, subW, subH); break;
-    case 59: effectInterstellar(renderer, frame, subW, subH); break;
-    case 60: effectIrisOut(renderer, frame, subW, subH); break;
-    case 61: effectJaws(renderer, frame, subW, subH); break;
-    case 62: effectJellyfish(renderer, frame, subW, subH); break;
-    case 63: effectJurassic(renderer, frame, subW, subH); break;
-    case 64: effectKong(renderer, frame, subW, subH); break;
-    case 65: effectKoyaanisqatsi(renderer, frame, subW, subH); break;
-    case 66: effectLawrence(renderer, frame, subW, subH); break;
-    case 67: effectLebowski(renderer, frame, subW, subH); break;
-    case 68: effectLorenzAttractor(renderer, frame, subW, subH); break;
-    case 69: effectMacarena(renderer, frame, subW, subH); break;
-    case 70: effectMagritteBowler(renderer, frame, subW, subH); break;
-    case 71: effectMandelbrot(renderer, frame, subW, subH); break;
-    case 72: effectMaryPoppins(renderer, frame, subW, subH); break;
-    case 73: effectMatrix(renderer, frame, subW, subH, rng); break;
-    case 74: effectMemento(renderer, frame, subW, subH); break;
-    case 75: effectMobius(renderer, frame, subW, subH); break;
-    case 76: effectMonolith(renderer, frame, subW, subH); break;
-    case 77: effectMontyPython(renderer, frame, subW, subH); break;
-    case 78: effectMoonRocket(renderer, frame, subW, subH); break;
-    case 79: effectMunchScream(renderer, frame, subW, subH); break;
-    case 80: effectNeo(renderer, frame, subW, subH); break;
-    case 81: effectNewspaper(renderer, frame, subW, subH); break;
-    case 82: effectNewtonCradle(renderer, frame, subW, subH); break;
-    case 83: effectNosferatu(renderer, frame, subW, subH); break;
-    case 84: effectPacman(renderer, frame, subW, subH); break;
-    case 85: effectPacmanDuel(renderer, frame, subW, subH); break;
-    case 86: effectPendulumWaves(renderer, frame, subW, subH); break;
-    case 87: effectPi(renderer, frame, subW, subH); break;
-    case 88: effectPinkPanther(renderer, frame, subW, subH); break;
-    case 89: effectPleasantville(renderer, frame, subW, subH); break;
-    case 90: effectPrideRock(renderer, frame, subW, subH); break;
-    case 91: effectPsycho(renderer, frame, subW, subH); break;
-    case 92: effectPulp(renderer, frame, subW, subH); break;
-    case 93: effectPythagoras(renderer, frame, subW, subH); break;
-    case 94: effectPythonWars(renderer, frame, subW, subH); break;
-    case 95: effectRedBalloon(renderer, frame, subW, subH); break;
-    case 96: effectRiverdance(renderer, frame, subW, subH); break;
-    case 97: effectRocky(renderer, frame, subW, subH); break;
-    case 98: effectRosebud(renderer, frame, subW, subH, rng); break;
-    case 99: effectRubik(renderer, frame, subW, subH, rng); break;
-    case 100: effectRussianDance(renderer, frame, subW, subH); break;
-    case 101: effectSaturn(renderer, frame, subW, subH); break;
-    case 102: effectSchrodinger(renderer, frame, subW, subH); break;
-    case 103: effectShawshank(renderer, frame, subW, subH); break;
-    case 104: effectShining(renderer, frame, subW, subH); break;
-    case 105: effectShiver(renderer, frame, subW, subH, rng); break;
-    case 106: effectSierpinski(renderer, frame, subW, subH); break;
-    case 107: effectSillyWalk(renderer, frame, subW, subH); break;
-    case 108: effectSinginRain(renderer, frame, subW, subH); break;
-    case 109: effectSkeletonWave(renderer, frame, subW, subH); break;
-    case 110: effectSnowflakes(renderer, frame, subW, subH, rng); break;
-    case 111: effectSolarSystem(renderer, frame, subW, subH, rng); break;
-    case 112: effectSoundOfMusic(renderer, frame, subW, subH); break;
-    case 113: effectSpider(renderer, frame, subW, subH); break;
-    case 114: effectSpiral(renderer, frame, subW, subH); break;
-    case 115: effectSpiritedTrain(renderer, frame, subW, subH); break;
-    case 116: effectStandingWave(renderer, frame, subW, subH); break;
-    case 117: effectStandoff(renderer, frame, subW, subH); break;
-    case 118: effectStarGate(renderer, frame, subW, subH); break;
-    case 119: effectStarWars(renderer, frame, subW, subH); break;
-    case 120: effectStingray(renderer, frame, subW, subH); break;
-    case 121: effectStrangelove(renderer, frame, subW, subH); break;
-    case 122: effectSubmarine(renderer, frame, subW, subH, rng); break;
-    case 123: effectTatooine(renderer, frame, subW, subH); break;
-    case 124: effectTeardrop(renderer, frame, subW, subH); break;
-    case 125: effectTearsInRain(renderer, frame, subW, subH, rng); break;
-    case 126: effectTestCard(renderer, frame, subW, subH, rng); break;
-    case 127: effectThanos(renderer, frame, subW, subH, rng); break;
-    case 128: effectThatsAllFolks(renderer, frame, subW, subH); break;
-    case 129: effectBirds(renderer, frame, subW, subH); break;
-    case 130: effectTheEnd(renderer, frame, subW, subH, rng); break;
-    case 131: effectThelma(renderer, frame, subW, subH); break;
-    case 132: effectThriller(renderer, frame, subW, subH); break;
-    case 133: effectThunderstorm(renderer, frame, subW, subH, rng); break;
-    case 134: effectTitanic(renderer, frame, subW, subH); break;
-    case 135: effectTornado(renderer, frame, subW, subH); break;
-    case 136: effectTotoro(renderer, frame, subW, subH); break;
-    case 137: effectStandByMe(renderer, frame, subW, subH); break;
-    case 138: effectTrain(renderer, frame, subW, subH); break;
-    case 139: effectTron(renderer, frame, subW, subH); break;
-    case 140: effectTruman(renderer, frame, subW, subH); break;
-    case 141: effectTunnel(renderer, frame, subW, subH); break;
-    case 142: effectUFO(renderer, frame, subW, subH); break;
-    case 143: effectUp(renderer, frame, subW, subH); break;
-    case 144: effectUtopia(renderer, frame, subW, subH, rng, linesFrame, swedenMask); break;
-    case 145: effectVertigo(renderer, frame, subW, subH); break;
-    case 146: effectWarholBanana(renderer, frame, subW, subH); break;
-    case 147: effectWarp(renderer, frame, subW, subH); break;
-    case 148: effectOz(renderer, frame, subW, subH); break;
-    case 149: effectWordReveal(renderer, frame, subW, subH, rng, words); break;
-    case 150: effectYMCA(renderer, frame, subW, subH); break;
+    case 1: effectAcidTrip(renderer, frame, subW, subH); break;
+    case 2: effectAkira(renderer, frame, subW, subH); break;
+    case 3: effectApocalypse(renderer, frame, subW, subH); break;
+    case 4: effectAurora(renderer, frame, subW, subH, rng); break;
+    case 5: effectAvogadro(renderer, frame, subW, subH); break;
+    case 6: effectBallet(renderer, frame, subW, subH); break;
+    case 7: effectBanksyBalloon(renderer, frame, subW, subH); break;
+    case 8: effectBassSpiral(renderer, frame, subW, subH); break;
+    case 9: effectBeagle(renderer, frame, subW, subH); break;
+    case 10: effectBenzene(renderer, frame, subW, subH); break;
+    case 11: effectBigKeyboard(renderer, frame, subW, subH); break;
+    case 12: effectBlackHole(renderer, frame, subW, subH); break;
+    case 13: effectBohrAtom(renderer, frame, subW, subH); break;
+    case 14: effectBond(renderer, frame, subW, subH); break;
+    case 15: effectBoneChandelier(renderer, frame, subW, subH); break;
+    case 16: effectBoneCut(renderer, frame, subW, subH); break;
+    case 17: effectBall(renderer, frame, subW, subH); break;
+    case 18: effectBoulder(renderer, frame, subW, subH); break;
+    case 19: effectBrachistochrone(renderer, frame, subW, subH); break;
+    case 20: effectBrownian(renderer, frame, subW, subH); break;
+    case 21: effectBuckyball(renderer, frame, subW, subH); break;
+    case 22: effectButterfly(renderer, frame, subW, subH); break;
+    case 23: effectCambrian(renderer, frame, subW, subH); break;
+    case 24: effectCatalyst(renderer, frame, subW, subH); break;
+    case 25: effectCeciNestPas(renderer, frame, subW, subH); break;
+    case 26: effectCellDivides(renderer, frame, subW, subH); break;
+    case 27: effectCetacean(renderer, frame, subW, subH); break;
+    case 28: effectChladni(renderer, frame, subW, subH); break;
+    case 29: effectChromatography(renderer, frame, subW, subH); break;
+    case 30: effectClockwork(renderer, frame, subW, subH); break;
+    case 31: effectCloseEncounters(renderer, frame, subW, subH); break;
+    case 32: effectCoEvolution(renderer, frame, subW, subH); break;
+    case 33: effectCountdown(renderer, frame, subW, subH); break;
+    case 34: effectCrab(renderer, frame, subW, subH); break;
+    case 35: effectCrtOff(renderer, frame, subW, subH); break;
+    case 36: effectDarwin(renderer, frame, subW, subH); break;
+    case 37: effectDeLorean(renderer, frame, subW, subH); break;
+    case 38: effectDialM(renderer, frame, subW, subH); break;
+    case 39: effectGlobeDance(renderer, frame, subW, subH); break;
+    case 40: effectDissolve(renderer, frame, subW, subH, rng); break;
+    case 41: effectDNA(renderer, frame, subW, subH); break;
+    case 42: effectDodecahedron(renderer, frame, subW, subH); break;
+    case 43: effectDoubleSlit(renderer, frame, subW, subH); break;
+    case 44: effectDoves(renderer, frame, subW, subH, rng); break;
+    case 45: effectET(renderer, frame, subW, subH); break;
+    case 46: effectElectrolysis(renderer, frame, subW, subH); break;
+    case 47: effectEndCard(renderer, frame, subW, subH); break;
+    case 48: effectEndosymbiosis(renderer, frame, subW, subH); break;
+    case 49: effectEulerIdentity(renderer, frame, subW, subH); break;
+    case 50: effectExplode(renderer, frame, subW, subH); break;
+    case 51: effectEyewink(renderer, frame, subW, subH); break;
+    case 52: effectFade(renderer, frame, subW, subH); break;
+    case 53: effectFallToPieces(renderer, frame, subW, subH); break;
+    case 54: effectFeather(renderer, frame, subW, subH); break;
+    case 55: effectFilmBurn(renderer, frame, subW, subH); break;
+    case 56: effectFinches(renderer, frame, subW, subH); break;
+    case 57: effectFire(renderer, frame, subW, subH, rng); break;
+    case 58: effectFireworks(renderer, frame, subW, subH, rng); break;
+    case 59: effectFish(renderer, frame, subW, subH); break;
+    case 60: effectFlameTest(renderer, frame, subW, subH); break;
+    case 61: effectFlatland(renderer, frame, subW, subH, rng); break;
+    case 62: effectFoot(renderer, frame, subW, subH); break;
+    case 63: effectFoucaultPendulum(renderer, frame, subW, subH); break;
+    case 64: effectFourier(renderer, frame, subW, subH); break;
+    case 65: effectGalapagos(renderer, frame, subW, subH); break;
+    case 66: effectGalileoTower(renderer, frame, subW, subH); break;
+    case 67: effectGameOfLife(renderer, frame, subW, subH); break;
+    case 68: effectGlowStick(renderer, frame, subW, subH); break;
+    case 69: effectGoldenSpiral(renderer, frame, subW, subH); break;
+    case 70: effectGotcha(renderer, frame, subW, subH); break;
+    case 71: effectGreekDance(renderer, frame, subW, subH); break;
+    case 72: effectGunshot(renderer, frame, subW, subH, rng); break;
+    case 73: effectHal9000(renderer, frame, subW, subH); break;
+    case 74: effectHalStare(renderer, frame, subW, subH); break;
+    case 75: effectHitchcock(renderer, frame, subW, subH); break;
+    case 76: effectHokusaiWave(renderer, frame, subW, subH); break;
+    case 77: effectImplodeRing(renderer, frame, subW, subH); break;
+    case 78: effectInception(renderer, frame, subW, subH); break;
+    case 79: effectInterstellar(renderer, frame, subW, subH); break;
+    case 80: effectIrisOut(renderer, frame, subW, subH); break;
+    case 81: effectJaws(renderer, frame, subW, subH); break;
+    case 82: effectJellyfish(renderer, frame, subW, subH); break;
+    case 83: effectJurassic(renderer, frame, subW, subH); break;
+    case 84: effectKong(renderer, frame, subW, subH); break;
+    case 85: effectKoyaanisqatsi(renderer, frame, subW, subH); break;
+    case 86: effectLavaLamp(renderer, frame, subW, subH); break;
+    case 87: effectLawrence(renderer, frame, subW, subH); break;
+    case 88: effectLebowski(renderer, frame, subW, subH); break;
+    case 89: effectLiesegang(renderer, frame, subW, subH); break;
+    case 90: effectLorenzAttractor(renderer, frame, subW, subH); break;
+    case 91: effectLucy(renderer, frame, subW, subH); break;
+    case 92: effectMacarena(renderer, frame, subW, subH); break;
+    case 93: effectMagritteBowler(renderer, frame, subW, subH); break;
+    case 94: effectMandelbrot(renderer, frame, subW, subH); break;
+    case 95: effectMarchOfProgress(renderer, frame, subW, subH); break;
+    case 96: effectMaryPoppins(renderer, frame, subW, subH); break;
+    case 97: effectMatrix(renderer, frame, subW, subH, rng); break;
+    case 98: effectMemento(renderer, frame, subW, subH); break;
+    case 99: effectMendel(renderer, frame, subW, subH); break;
+    case 100: effectMendeleev(renderer, frame, subW, subH); break;
+    case 101: effectMentos(renderer, frame, subW, subH); break;
+    case 102: effectMitochondrialEve(renderer, frame, subW, subH); break;
+    case 103: effectMobius(renderer, frame, subW, subH); break;
+    case 104: effectMonolith(renderer, frame, subW, subH); break;
+    case 105: effectMontyPython(renderer, frame, subW, subH); break;
+    case 106: effectMoonRocket(renderer, frame, subW, subH); break;
+    case 107: effectMunchScream(renderer, frame, subW, subH); break;
+    case 108: effectMutation(renderer, frame, subW, subH); break;
+    case 109: effectNaClLattice(renderer, frame, subW, subH); break;
+    case 110: effectNeo(renderer, frame, subW, subH); break;
+    case 111: effectNewspaper(renderer, frame, subW, subH); break;
+    case 112: effectNewtonCradle(renderer, frame, subW, subH); break;
+    case 113: effectNosferatu(renderer, frame, subW, subH); break;
+    case 114: effectOutOfAfrica(renderer, frame, subW, subH); break;
+    case 115: effectPacman(renderer, frame, subW, subH); break;
+    case 116: effectPacmanDuel(renderer, frame, subW, subH); break;
+    case 117: effectPeacock(renderer, frame, subW, subH); break;
+    case 118: effectPendulumWaves(renderer, frame, subW, subH); break;
+    case 119: effectPepperedMoth(renderer, frame, subW, subH); break;
+    case 120: effectPeriodicTable(renderer, frame, subW, subH); break;
+    case 121: effectPhaseTransition(renderer, frame, subW, subH); break;
+    case 122: effectPhStrip(renderer, frame, subW, subH); break;
+    case 123: effectPi(renderer, frame, subW, subH); break;
+    case 124: effectPinkPanther(renderer, frame, subW, subH); break;
+    case 125: effectPleasantville(renderer, frame, subW, subH); break;
+    case 126: effectPrideRock(renderer, frame, subW, subH); break;
+    case 127: effectPsycho(renderer, frame, subW, subH); break;
+    case 128: effectPulp(renderer, frame, subW, subH); break;
+    case 129: effectPunctuated(renderer, frame, subW, subH); break;
+    case 130: effectPythagoras(renderer, frame, subW, subH); break;
+    case 131: effectPythonWars(renderer, frame, subW, subH); break;
+    case 132: effectRedBalloon(renderer, frame, subW, subH); break;
+    case 133: effectRiverdance(renderer, frame, subW, subH); break;
+    case 134: effectRocky(renderer, frame, subW, subH); break;
+    case 135: effectRosebud(renderer, frame, subW, subH, rng); break;
+    case 136: effectRubik(renderer, frame, subW, subH, rng); break;
+    case 137: effectRussianDance(renderer, frame, subW, subH); break;
+    case 138: effectSaturn(renderer, frame, subW, subH); break;
+    case 139: effectSchrodinger(renderer, frame, subW, subH); break;
+    case 140: effectSelection(renderer, frame, subW, subH); break;
+    case 141: effectShawshank(renderer, frame, subW, subH); break;
+    case 142: effectShining(renderer, frame, subW, subH); break;
+    case 143: effectShiver(renderer, frame, subW, subH, rng); break;
+    case 144: effectSierpinski(renderer, frame, subW, subH); break;
+    case 145: effectSillyWalk(renderer, frame, subW, subH); break;
+    case 146: effectSinginRain(renderer, frame, subW, subH); break;
+    case 147: effectSkeletonWave(renderer, frame, subW, subH); break;
+    case 148: effectSnowflakes(renderer, frame, subW, subH, rng); break;
+    case 149: effectSoapBubble(renderer, frame, subW, subH); break;
+    case 150: effectSolarSystem(renderer, frame, subW, subH, rng); break;
+    case 151: effectSoundOfMusic(renderer, frame, subW, subH); break;
+    case 152: effectSpider(renderer, frame, subW, subH); break;
+    case 153: effectSpiral(renderer, frame, subW, subH); break;
+    case 154: effectSpiritedTrain(renderer, frame, subW, subH); break;
+    case 155: effectStandingWave(renderer, frame, subW, subH); break;
+    case 156: effectStandoff(renderer, frame, subW, subH); break;
+    case 157: effectStarGate(renderer, frame, subW, subH); break;
+    case 158: effectStarWars(renderer, frame, subW, subH); break;
+    case 159: effectStingray(renderer, frame, subW, subH); break;
+    case 160: effectStrangelove(renderer, frame, subW, subH); break;
+    case 161: effectSubmarine(renderer, frame, subW, subH, rng); break;
+    case 162: effectTatooine(renderer, frame, subW, subH); break;
+    case 163: effectTeardrop(renderer, frame, subW, subH); break;
+    case 164: effectTearsInRain(renderer, frame, subW, subH, rng); break;
+    case 165: effectTestCard(renderer, frame, subW, subH, rng); break;
+    case 166: effectThanos(renderer, frame, subW, subH, rng); break;
+    case 167: effectThatsAllFolks(renderer, frame, subW, subH); break;
+    case 168: effectBirds(renderer, frame, subW, subH); break;
+    case 169: effectTheEnd(renderer, frame, subW, subH, rng); break;
+    case 170: effectThelma(renderer, frame, subW, subH); break;
+    case 171: effectThriller(renderer, frame, subW, subH); break;
+    case 172: effectThunderstorm(renderer, frame, subW, subH, rng); break;
+    case 173: effectTitanic(renderer, frame, subW, subH); break;
+    case 174: effectTornado(renderer, frame, subW, subH); break;
+    case 175: effectTotoro(renderer, frame, subW, subH); break;
+    case 176: effectStandByMe(renderer, frame, subW, subH); break;
+    case 177: effectTrain(renderer, frame, subW, subH); break;
+    case 178: effectTreeOfLife(renderer, frame, subW, subH); break;
+    case 179: effectTron(renderer, frame, subW, subH); break;
+    case 180: effectTruman(renderer, frame, subW, subH); break;
+    case 181: effectTunnel(renderer, frame, subW, subH); break;
+    case 182: effectUFO(renderer, frame, subW, subH); break;
+    case 183: effectUp(renderer, frame, subW, subH); break;
+    case 184: effectUtopia(renderer, frame, subW, subH, rng, linesFrame, swedenMask); break;
+    case 185: effectVertigo(renderer, frame, subW, subH); break;
+    case 186: effectWarholBanana(renderer, frame, subW, subH); break;
+    case 187: effectWarp(renderer, frame, subW, subH); break;
+    case 188: effectOz(renderer, frame, subW, subH); break;
+    case 189: effectWordReveal(renderer, frame, subW, subH, rng, words); break;
+    case 190: effectYMCA(renderer, frame, subW, subH); break;
     default: effectFade(renderer, frame, subW, subH); break;
   }
 
