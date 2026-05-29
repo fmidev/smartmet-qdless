@@ -83,6 +83,8 @@ int main(int argc, char* argv[])
          "start in 3D point-cloud mode (PVOL or multi-level QueryData with height field)") //
         ("globe", po::bool_switch(&opts.startGlobe),
          "start in globe view (orthographic 3D sphere; any gridded geographic source)") //
+        ("extrema", po::bool_switch(&opts.dumpExtrema),
+         "print persistent 3D local maxima/minima (per-level-median anomaly) and exit") //
         ("dir",
          po::value<std::string>(&dirArg),
          "directory whose files (sorted by filename) form the time series") //
@@ -220,7 +222,8 @@ int main(int argc, char* argv[])
       }
     }
 
-    bool dump = opts.dumpAndExit;
+    // --extrema is a one-shot text report; treat it like --dump (no curses).
+    bool dump = opts.dumpAndExit || opts.dumpExtrema;
     Qdless::App app(std::move(opts));
     return dump ? app.runOnce() : app.runInteractive();
   }

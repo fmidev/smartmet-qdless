@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace Qdless
@@ -537,6 +538,90 @@ bool QueryDataSource::sampleVolume(const std::function<void(const VolumeSample&)
       cb(VolumeSample{static_cast<double>(latlons[i].first),
                       static_cast<double>(latlons[i].second),
                       static_cast<double>(h) * heightScale, v});
+    }
+  }
+
+  itsInfo->ParamIndex(savedParam);
+  itsInfo->LevelIndex(savedLevel);
+  itsInfo->LocationIndex(savedLoc);
+  return true;
+}
+
+bool QueryDataSource::sampleVolumeGrid(std::size_t& nx,
+                                       std::size_t& ny,
+                                       std::size_t& nz,
+                                       std::vector<float>& values,
+                                       std::vector<float>& heights,
+                                       std::vector<float>& lats,
+                                       std::vector<float>& lons) const
+{
+  if (!itsInfo->IsGrid())
+    return false;
+  const auto nLevels = itsInfo->SizeLevels();
+  const auto nLoc = itsInfo->SizeLocations();
+  if (nLevels < 2 || nLoc == 0)
+    return false;
+  nx = itsInfo->GridXNumber();
+  ny = itsInfo->GridYNumber();
+  nz = nLevels;
+  if (nx * ny != nLoc)
+    return false;  // not a plain structured grid; bail rather than mis-index
+
+  const auto savedParam = itsInfo->ParamIndex();
+  const auto savedLevel = itsInfo->LevelIndex();
+  const auto savedLoc = itsInfo->LocationIndex();
+
+  bool useGeop = false;
+  if (!selectHeightParam(*itsInfo, useGeop))
+  {
+    itsInfo->ParamIndex(savedParam);
+    return false;
+  }
+  const auto heightParamIndex = itsInfo->ParamIndex();
+  const double heightScale = useGeop ? (1.0 / 9.80665) : 1.0;
+
+  constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
+
+  // Lat/lon per cell (level-invariant) — locationIndex = j*nx+i, matching
+  // VolumeGrid::idx's row-major slice layout.
+  lats.assign(nLoc, kNaN);
+  lons.assign(nLoc, kNaN);
+  itsInfo->FirstLocation();
+  for (std::size_t s = 0; s < nLoc; ++s)
+  {
+    const NFmiPoint ll = itsInfo->LatLon();
+    lats[s] = static_cast<float>(ll.Y());
+    lons[s] = static_cast<float>(ll.X());
+    if (!itsInfo->NextLocation())
+      break;
+  }
+
+  values.assign(static_cast<std::size_t>(nLoc) * nLevels, kNaN);
+  heights.assign(static_cast<std::size_t>(nLoc) * nLevels, kNaN);
+  for (std::size_t li = 0; li < nLevels; ++li)
+  {
+    const std::size_t base = li * nLoc;
+    itsInfo->ParamIndex(heightParamIndex);
+    itsInfo->LevelIndex(static_cast<unsigned long>(li));
+    itsInfo->FirstLocation();
+    for (std::size_t s = 0; s < nLoc; ++s)
+    {
+      const float h = itsInfo->FloatValue();
+      if (h != kFloatMissing && std::isfinite(h))
+        heights[base + s] = static_cast<float>(h * heightScale);
+      if (!itsInfo->NextLocation())
+        break;
+    }
+    itsInfo->ParamIndex(savedParam);
+    itsInfo->LevelIndex(static_cast<unsigned long>(li));
+    itsInfo->FirstLocation();
+    for (std::size_t s = 0; s < nLoc; ++s)
+    {
+      const float v = itsInfo->FloatValue();
+      if (v != kFloatMissing && std::isfinite(v))
+        values[base + s] = v;
+      if (!itsInfo->NextLocation())
+        break;
     }
   }
 

@@ -68,6 +68,7 @@ struct Options
   bool dumpAndExit = false;        // print one frame to stdout and exit (no curses)
   bool start3D = false;            // start in 3D point-cloud mode (e.g. --dump --3d)
   bool startGlobe = false;         // start in globe view (e.g. --dump --globe)
+  bool dumpExtrema = false;        // --extrema: print persistent 3D extrema and exit
   bool noExitEffect = false;       // skip the random quit animation
   // Text spelled out by the word-reveal exit effect. Empty (the default) means
   // the effect draws a random closing line from its built-in anthology;
@@ -603,6 +604,12 @@ class App
   // True if the active source can be drawn on the globe — any gridded
   // geographic source (images / vector layers have no scalar field).
   bool sourceSupportsGlobe() const;
+
+  // --extrema verification path: run the persistence / merge-tree extrema
+  // finder on the active volumetric QueryData parameter (per-level-median
+  // anomaly) and print the most persistent maxima / minima to stdout.
+  // Returns a process exit code. No rendering — headless analysis only.
+  int dumpExtremaReport() const;
   // Reset itsThreshold3D / itsThreshold3DUnit / itsVexagger3D to
   // source-appropriate defaults (dBZ for PVOL, % for QueryData). Called
   // each time 3D is toggled on so a switch between sources doesn't

@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 9%{?dist}.fmi
+Release: 10%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-10.fmi
+- New --extrema headless report: walks the active volumetric QueryData parameter, detrends each level by its area-weighted median (so the values are level-relative anomalies), runs a persistence / merge-tree finder, and prints the most persistent 3D maxima and minima with lat / lon / height / anomaly / persistence / blob size. No rendering — verification path for the upcoming on-globe extrema overlay.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-9.fmi
 - 44 new exit effects across four themes + a new Myth & legend theme (11 total). Weather & nature: Coriolis, Derecho, El Nino, Fogbow, Hurricane Eye, Ice Storm, Jet Stream, Mammatus, Monsoon, Polar Vortex, Sun Dogs, Supercell. Maths & physics (astronomy): Accretion Disk, Big Bang, CMB Glow, Comet Tail, Deep Field, Galaxy Collision, Gas Giant, Gravity Lens, JWST, Neutron Star, Pulsar, Supernova. Myth & legend: Anubis, Chinese Dragon, Garuda, Mjolnir, Pandora, Pegasus, Phoenix, Quetzalcoatl, Ragnarok, Yggdrasil. Music & dance: Beethoven Fifth, Conductor Baton, Hendrix Guitar, Opera Curtain, Piano Keys, Sheet Music, Stradivarius, Theremin, Valkyrie Ride, Vinyl Spin. Total roster now 255 effects in 11 themes. Mary Poppins gains a proper bell skirt (half-balloon, data-tinted) replacing the stick figure.
 

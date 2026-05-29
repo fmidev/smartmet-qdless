@@ -82,6 +82,21 @@ class QueryDataSource : public DataSource
   bool isVolumetric() const;
   bool sampleVolume(const std::function<void(const VolumeSample&)>& cb) const;
 
+  // Dense structured-grid variant for analyses that need the native (i,j,k)
+  // lattice topology (e.g. the persistence / merge-tree extrema finder).
+  // Fills nx/ny/nz and the flat arrays: values & heights are nz*ny*nx in
+  // level-outer, row-major (locationIndex = j*nx+i) order, matching
+  // VolumeGrid::idx; lats/lons are ny*nx. Missing or non-finite cells are
+  // written as NaN. Returns false (arrays untouched) when the file is not a
+  // multi-level grid with a height field. Param/level/loc indices restored.
+  bool sampleVolumeGrid(std::size_t& nx,
+                        std::size_t& ny,
+                        std::size_t& nz,
+                        std::vector<float>& values,
+                        std::vector<float>& heights,
+                        std::vector<float>& lats,
+                        std::vector<float>& lons) const;
+
   // True if the file carries the "surface stack" of layers used for the
   // synthetic 3D cloud + precipitation view: Precipitation1h,
   // FogIntensity, LowCloudCover, MediumCloudCover. HighCloudCover is

@@ -1,6 +1,7 @@
 #include "QdlessApp.h"
 
 #include "QdlessExitEffect.h"
+#include "QdlessExtrema.h"
 #include "QdlessMultiFileSource.h"
 #include "QdlessOdimVolumeSource.h"
 #include "QdlessQueryDataSource.h"
@@ -7168,6 +7169,55 @@ void App::apply3DDefaultsForSource()
   }
 }
 
+int App::dumpExtremaReport() const
+{
+  const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
+  if (qd == nullptr || !qd->isVolumetric())
+  {
+    std::cerr << "qdless: --extrema needs a multi-level QueryData file with a "
+                 "height field (hybrid / pressure levels)\n";
+    return 1;
+  }
+
+  VolumeGrid grid;
+  if (!qd->sampleVolumeGrid(
+          grid.nx, grid.ny, grid.nz, grid.values, grid.heights, grid.lats, grid.lons))
+  {
+    std::cerr << "qdless: --extrema: could not extract a structured volume grid\n";
+    return 1;
+  }
+
+  const std::string param = itsSource->paramShortName(itsSource->currentParamId());
+  const std::string units = itsSource->paramUnits(itsSource->currentParamId());
+
+  detrendPerLevelMedian(grid);
+
+  constexpr std::size_t kTopN = 12;
+  const auto maxima = findExtrema(grid, ExtremumKind::Max, 0.0F, kTopN);
+  const auto minima = findExtrema(grid, ExtremumKind::Min, 0.0F, kTopN);
+
+  std::cout << "[qdless --extrema] " << itsOpts.filename << " | param: " << param << " (" << units
+            << ") | time: " << currentTimeLabel() << " | grid: " << grid.nx << "x" << grid.ny << "x"
+            << grid.nz << " | detrend: per-level area-weighted median (values are anomalies)\n";
+
+  auto printOne = [&](const char* tag, const Feature& f)
+  {
+    std::cout << fmt::format(
+        "  {}  lat={:7.3f}  lon={:8.3f}  h={:6.2f} km  anom={:+9.3g} {}  persist={:8.3g} {}  "
+        "blob={}{} cells{}\n",
+        tag, f.lat, f.lon, f.heightMeters / 1000.0, f.value, units, f.persistence, units,
+        f.blob.size(), f.blobTruncated ? "+" : "", f.isGlobal ? "  [global]" : "");
+  };
+
+  std::cout << "Persistent maxima (" << maxima.size() << "):\n";
+  for (const auto& f : maxima)
+    printOne("MAX", f);
+  std::cout << "Persistent minima (" << minima.size() << "):\n";
+  for (const auto& f : minima)
+    printOne("MIN", f);
+  return 0;
+}
+
 int App::runOnce()
 {
   if (itsSource == nullptr)
@@ -7177,6 +7227,12 @@ int App::runOnce()
                  "concrete file or leaf directory.\n";
     return 1;
   }
+  // --extrema: persistence/merge-tree analysis of the active 3D parameter.
+  // Text report only (no raster) — the verification harness for the feature
+  // finder before it drives any rendering.
+  if (itsOpts.dumpExtrema)
+    return dumpExtremaReport();
+
   TerminalSize ts = terminalSize();
   int cellW = ts.cols;
   int cellH = std::max(1, ts.rows - 1);
