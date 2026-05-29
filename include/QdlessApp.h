@@ -8,6 +8,7 @@
 #include "QdlessRenderer.h"
 
 #include <array>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -66,6 +67,7 @@ struct Options
   double minIslandAreaKm2 = 10.0;  // drop sub-10 km² islets (Åland noise)
   bool dumpAndExit = false;        // print one frame to stdout and exit (no curses)
   bool start3D = false;            // start in 3D point-cloud mode (e.g. --dump --3d)
+  bool startGlobe = false;         // start in globe view (e.g. --dump --globe)
   bool noExitEffect = false;       // skip the random quit animation
   // Text spelled out by the word-reveal exit effect. Empty (the default) means
   // the effect draws a random closing line from its built-in anthology;
@@ -305,6 +307,16 @@ class App
   double itsCamYaw = 0.0;         // radians; 0 = looking north from south
   double itsCamPitch = 0.6;       // radians; 0 = horizontal, π/2 = top-down
   double itsCamZoom = 1.0;        // 1.0 = data extent fits the viewport
+
+  // Globe view (key [g]): orthographic 3D sphere with the data ray-cast onto
+  // the near hemisphere, coastlines / borders / graticule projected on top.
+  // Reuses itsCamYaw / itsCamPitch / itsCamZoom as the orbit camera, but here
+  // itsCamYaw is the centre longitude and itsCamPitch the centre latitude (so
+  // the poles can be brought into a natural view). Mutually exclusive with the
+  // point-cloud / curtain 3D modes. Available for any gridded geographic
+  // source — global data benefits most, but it also gives a distortion-free
+  // polar view of arctic data.
+  bool itsModeGlobe = false;
   float itsThreshold3D = -10.0F;  // drop bins below this threshold. Units
                                   // depend on the source: dBZ for PVOL
                                   // (default −10), percent for QueryData
@@ -344,15 +356,44 @@ class App
   // PgUp / PgDn change it.
   double itsCurtainHeightKm = 12.0;
   // Which endpoint the arrow keys move. Cycled with Tab.
+  // View is a fourth sub-mode where arrows orbit / pitch the camera and
+  // +/- zooms instead of moving endpoints — the user asked for a clean
+  // "edit vs view" split so the cursor keys never accidentally drag the
+  // curtain while you're framing the camera.
   enum class CurtainEnd : std::uint8_t
   {
     A,
     B,
     Both,
+    View,
   };
-  CurtainEnd itsCurtainActiveEnd = CurtainEnd::B;
+  CurtainEnd itsCurtainActiveEnd = CurtainEnd::Both;
   // Bbox-fraction step the arrow keys apply per press in mode 4.
   static constexpr double kCurtainStepFrac = 0.03;
+
+  // 3D curtain animations. Each flag is an independent toggle; any subset
+  // can be on at once. Phases are accumulated separately so toggling on /
+  // off doesn't snap the visible angle — the curtain resumes from where
+  // it stopped. AnimSpeed is a single multiplier the user steps with +/-
+  // while in an Edit sub-mode (View mode's +/- still zooms the camera).
+  bool itsCurtainTwoPlane = false;     // X-cross: render a second plane
+                                        // perpendicular through the centre
+  bool itsCurtainAutoSwing = false;    // swing azimuth back-and-forth
+  bool itsCurtainAutoRotate = false;   // continuously rotate azimuth
+  bool itsCurtainAutoOrbit = false;    // orbit the centre in a circle
+  bool itsCurtainAutoTilt = false;     // tilt the plane(s) about the long
+                                        // axis — combined with rotate this
+                                        // makes the X-cross tumble in 3D
+  double itsCurtainAnimSpeed = 1.0;
+  static constexpr double kCurtainSpeedStep = 1.25;
+  static constexpr double kCurtainSpeedMin = 0.05;
+  static constexpr double kCurtainSpeedMax = 20.0;
+  double itsCurtainSwingPhase = 0.0;
+  double itsCurtainRotatePhase = 0.0;
+  double itsCurtainOrbitPhase = 0.0;
+  double itsCurtainTiltPhase = 0.0;
+  std::chrono::steady_clock::time_point itsCurtainAnimLastTick{};
+  bool itsCurtainAnimTickValid = false;
 
   // Animation state.
   bool itsAnimating = false;
@@ -538,13 +579,29 @@ class App
   // interpolatedValueAtHeight. Both share one z-buffer, so the curtain
   // self-occludes against the ground and against the camera.
   void draw3DCrossSection(const Layout& layout);
+  // Globe renderer (key [g]). Inverse-orthographic: every output sub-pixel is
+  // ray-cast against a unit sphere; the near intersection's (lat,lon) is
+  // sampled via interpolatedValue and coloured through the active palette,
+  // with a shaded bare-sphere fill where the data has no value. Coastlines,
+  // borders and a lat/lon graticule are projected on top with back-face
+  // culling against the same z-buffer. Takes a Layout (not a UI) so
+  // `--dump --globe` can call it from runOnce without initscr.
+  void drawGlobe(const Layout& layout);
   // Initialise itsCurtainLat1/Lon1/Lat2/Lon2 from the current viewport
   // if they're still at their defaults. Called on the first [4] press
   // and any time the viewport changes substantially.
   void ensureCurtainEndpoints();
+  // Advance the curtain animation phases by the elapsed wall-clock time
+  // multiplied by itsCurtainAnimSpeed. No-op the first time it's called
+  // each session (no anchor yet) and resets the anchor whenever the user
+  // toggles a flag off — so re-enabling resumes from the same phase.
+  void tickCurtainAnimation();
   // True if the active source can be rendered in 3D. Tested by [3]
   // and by drawMap when deciding whether to honour itsMode3D.
   bool sourceSupports3D() const;
+  // True if the active source can be drawn on the globe — any gridded
+  // geographic source (images / vector layers have no scalar field).
+  bool sourceSupportsGlobe() const;
   // Reset itsThreshold3D / itsThreshold3DUnit / itsVexagger3D to
   // source-appropriate defaults (dBZ for PVOL, % for QueryData). Called
   // each time 3D is toggled on so a switch between sources doesn't

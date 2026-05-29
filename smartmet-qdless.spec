@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 3%{?dist}.fmi
+Release: 4%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-4.fmi
+- 3D curtain: X-cross + animations. Tab now cycles four sub-modes (A, B, A+B, View). In Edit modes arrow keys move endpoints and +/- changes animation speed; in View mode arrows orbit / pitch the camera and +/- zooms. Five animation toggles: x = X-cross (perpendicular second plane), s = swing (oscillate azimuth +/-45 deg), r = rotate (continuous azimuth spin), o = orbit (centre drifts in a circle), T = 3D tilt (planes rotate about their long axis). HUD shows the active flags and the speed multiplier.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-3.fmi
 - 20 new history-themed exit effects: Apollo 11, Berlin Wall, Columbus, Eiffel Tower, Galileo Telescope, Guillotine, Gutenberg, Magna Carta, Mona Lisa, Napoleon, Parthenon, Pompeii, Pyramids, Sistine, Sputnik, Stephenson, Stonehenge, Trojan Horse, Viking Longboat, Wright Flyer. Wonders and balls (Sphinx body, Sputnik sphere, Trojan horse body, Pompeii volcano, Berlin Wall slab, parchment, Mona Lisa dress, Apollo Earthrise, etc.) carry the data via drawDataDisk / sample, in line with the project's data-integral principle.
 

@@ -3743,8 +3743,23 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         itsCurtainLon2 += dlon;
       }
     };
+    const bool inView = itsCurtainActiveEnd == CurtainEnd::View;
+    auto subModeLabel = [&]()
+    {
+      switch (itsCurtainActiveEnd)
+      {
+        case CurtainEnd::A: return "A";
+        case CurtainEnd::B: return "B";
+        case CurtainEnd::Both: return "A+B";
+        case CurtainEnd::View: return "View";
+      }
+      return "?";
+    };
     switch (key)
     {
+      // hjkl always controls the camera so power users keep a direct
+      // shortcut regardless of which sub-mode the arrow keys are bound
+      // to. Arrow keys are the contextual binding.
       case 'h':
         itsCamYaw -= kYawStep;
         return true;
@@ -3759,11 +3774,33 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         return true;
       case '+':
       case '=':
-        itsCamZoom /= kZoomStep;
+        // View sub-mode: +/- zooms the camera (existing 3D behaviour).
+        // Edit sub-modes: +/- adjusts the curtain animation speed so
+        // the user can tune the rotation / swing without leaving the
+        // sub-mode. The speed only affects frames that are *animated*
+        // — toggling all animations off makes the keys do nothing
+        // visible, but the multiplier is still remembered.
+        if (inView)
+        {
+          itsCamZoom /= kZoomStep;
+        }
+        else
+        {
+          itsCurtainAnimSpeed = std::min(kCurtainSpeedMax, itsCurtainAnimSpeed * kCurtainSpeedStep);
+          itsLastMessage = fmt::format("Curtain anim speed: {:.2f}x", itsCurtainAnimSpeed);
+        }
         return true;
       case '-':
       case '_':
-        itsCamZoom *= kZoomStep;
+        if (inView)
+        {
+          itsCamZoom *= kZoomStep;
+        }
+        else
+        {
+          itsCurtainAnimSpeed = std::max(kCurtainSpeedMin, itsCurtainAnimSpeed / kCurtainSpeedStep);
+          itsLastMessage = fmt::format("Curtain anim speed: {:.2f}x", itsCurtainAnimSpeed);
+        }
         return true;
       case '0':
         itsCamYaw = 0;
@@ -3772,27 +3809,34 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         return true;
       case '\t':
       {
-        itsCurtainActiveEnd =
-            (itsCurtainActiveEnd == CurtainEnd::A)
-                ? CurtainEnd::B
-                : (itsCurtainActiveEnd == CurtainEnd::B ? CurtainEnd::Both : CurtainEnd::A);
-        const char* lbl = itsCurtainActiveEnd == CurtainEnd::A
-                              ? "A"
-                              : (itsCurtainActiveEnd == CurtainEnd::B ? "B" : "A+B");
-        itsLastMessage = fmt::format("Curtain endpoint: {}", lbl);
+        // Cycle A -> B -> Both -> View -> A. The four-way cycle keeps
+        // the original endpoint-edit modes available and adds a clean
+        // "camera-only" mode where arrows orbit the scene.
+        switch (itsCurtainActiveEnd)
+        {
+          case CurtainEnd::A: itsCurtainActiveEnd = CurtainEnd::B; break;
+          case CurtainEnd::B: itsCurtainActiveEnd = CurtainEnd::Both; break;
+          case CurtainEnd::Both: itsCurtainActiveEnd = CurtainEnd::View; break;
+          case CurtainEnd::View: itsCurtainActiveEnd = CurtainEnd::A; break;
+        }
+        itsLastMessage = fmt::format("Curtain sub-mode: {}", subModeLabel());
         return true;
       }
       case KEY_LEFT:
-        moveActive(0.0, -dLon);
+        if (inView) itsCamYaw -= kYawStep;
+        else moveActive(0.0, -dLon);
         return true;
       case KEY_RIGHT:
-        moveActive(0.0, dLon);
+        if (inView) itsCamYaw += kYawStep;
+        else moveActive(0.0, dLon);
         return true;
       case KEY_UP:
-        moveActive(dLat, 0.0);
+        if (inView) itsCamPitch = std::clamp(itsCamPitch + kPitchStep, 0.0, M_PI_2);
+        else moveActive(dLat, 0.0);
         return true;
       case KEY_DOWN:
-        moveActive(-dLat, 0.0);
+        if (inView) itsCamPitch = std::clamp(itsCamPitch - kPitchStep, 0.0, M_PI_2);
+        else moveActive(-dLat, 0.0);
         return true;
       case KEY_NPAGE:
         itsCurtainHeightKm = std::max(2.0, itsCurtainHeightKm - 1.0);
@@ -3802,8 +3846,85 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         itsCurtainHeightKm = std::min(30.0, itsCurtainHeightKm + 1.0);
         itsLastMessage = fmt::format("Curtain ceiling: {:g} km", itsCurtainHeightKm);
         return true;
+      // Animation toggles work in every sub-mode — they're properties
+      // of the curtain, not the camera. Lowercase x s r o T keep the
+      // single-letter mnemonics; uppercase T avoids shadowing the
+      // global 't' (corner-style cycle).
+      case 'x':
+      case 'X':
+        itsCurtainTwoPlane = !itsCurtainTwoPlane;
+        itsLastMessage = fmt::format("X-cross: {}", itsCurtainTwoPlane ? "on" : "off");
+        return true;
+      case 's':
+      case 'S':
+        itsCurtainAutoSwing = !itsCurtainAutoSwing;
+        itsLastMessage = fmt::format("Swing: {}", itsCurtainAutoSwing ? "on" : "off");
+        return true;
+      case 'r':
+      case 'R':
+        itsCurtainAutoRotate = !itsCurtainAutoRotate;
+        itsLastMessage = fmt::format("Rotate: {}", itsCurtainAutoRotate ? "on" : "off");
+        return true;
+      case 'o':
+      case 'O':
+        itsCurtainAutoOrbit = !itsCurtainAutoOrbit;
+        itsLastMessage = fmt::format("Orbit: {}", itsCurtainAutoOrbit ? "on" : "off");
+        return true;
+      case 'T':
+        itsCurtainAutoTilt = !itsCurtainAutoTilt;
+        itsLastMessage = fmt::format("Tilt: {}", itsCurtainAutoTilt ? "on" : "off");
+        return true;
       default:
         break;  // fall through to global keys (quit, menus, animation, ...)
+    }
+  }
+  if (itsModeGlobe)
+  {
+    constexpr double kSpinStep = 0.12;  // ≈ 6.9° per press
+    constexpr double kZoomStep = 0.8;
+    // Keep the centre latitude just shy of the poles so the east/up basis
+    // never degenerates while the user is tilting.
+    constexpr double kLatLimit = M_PI_2 - 0.01;
+    switch (key)
+    {
+      case 'h':
+      case KEY_LEFT:
+        itsCamYaw -= kSpinStep;  // spin west
+        return true;
+      case 'l':
+      case KEY_RIGHT:
+        itsCamYaw += kSpinStep;  // spin east
+        return true;
+      case 'k':
+      case KEY_UP:
+        itsCamPitch = std::clamp(itsCamPitch + kSpinStep, -kLatLimit, kLatLimit);
+        return true;
+      case 'j':
+      case KEY_DOWN:
+        itsCamPitch = std::clamp(itsCamPitch - kSpinStep, -kLatLimit, kLatLimit);
+        return true;
+      case '+':
+      case '=':
+        itsCamZoom = std::min(20.0, itsCamZoom / kZoomStep);
+        return true;
+      case '-':
+      case '_':
+        itsCamZoom = std::max(0.5, itsCamZoom * kZoomStep);
+        return true;
+      case '0':
+      {
+        // Re-centre on the data and reset zoom.
+        const auto bb = itsSource->boundingBox();
+        itsCamYaw = ((bb.minLon + bb.maxLon) * 0.5) * M_PI / 180.0;
+        itsCamPitch =
+            std::clamp(((bb.minLat + bb.maxLat) * 0.5) * M_PI / 180.0, -kLatLimit, kLatLimit);
+        itsCamZoom = 1.0;
+        return true;
+      }
+      case 'G':
+        break;  // fall through to the toggle handler below (lowercase g = legend)
+      default:
+        break;
     }
   }
   if (itsMode3D)
@@ -4135,7 +4256,6 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       return true;
 
     case 'g':
-    case 'G':
     {
       NFmiEnumConverter conv;
       std::string param = itsSource->paramShortName(itsSource->currentParamId());
@@ -4622,9 +4742,11 @@ bool App::handleKey(int key, UI& ui, bool& quit)
           itsMode3D = false;  // mutually exclusive with the point-cloud mode
           apply3DDefaultsForSource();
           ensureCurtainEndpoints();
+          itsCurtainAnimTickValid = false;  // first frame is the anchor
           itsLastMessage =
-              "3D curtain: arrows = move endpoint, Tab = A/B/both, "
-              "h/l yaw, j/k pitch, +/- zoom, PgUp/PgDn ceiling, 0 reset";
+              "3D curtain: Tab cycles A/B/Both/View, arrows act on current sub-mode, "
+              "+/- speed (Edit) or zoom (View), x/s/r/o/T toggle anims, "
+              "PgUp/PgDn ceiling, 0 reset";
         }
         else
         {
@@ -4634,6 +4756,35 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       else
       {
         itsLastMessage = "3D curtain: source has no native height axis";
+      }
+      return true;
+
+    case 'G':
+      // Toggle the orthographic globe view. Available for any gridded
+      // geographic source; centres on the data and resets zoom on entry.
+      if (sourceSupportsGlobe())
+      {
+        itsModeGlobe = !itsModeGlobe;
+        if (itsModeGlobe)
+        {
+          itsMode3D = false;  // mutually exclusive with the 3D point-cloud
+          itsMode3DCurtain = false;  // and the curtain
+          const auto bb = itsSource->boundingBox();
+          constexpr double kLatLimit = M_PI_2 - 0.01;
+          itsCamYaw = ((bb.minLon + bb.maxLon) * 0.5) * M_PI / 180.0;
+          itsCamPitch =
+              std::clamp(((bb.minLat + bb.maxLat) * 0.5) * M_PI / 180.0, -kLatLimit, kLatLimit);
+          itsCamZoom = 1.0;
+          itsLastMessage = "Globe: h/l spin, j/k tilt, +/- zoom, 0 recenter, G off";
+        }
+        else
+        {
+          itsLastMessage = "Globe off";
+        }
+      }
+      else
+      {
+        itsLastMessage = "Globe view: needs a gridded geographic source";
       }
       return true;
 
@@ -4848,6 +4999,17 @@ bool App::handleKey(int key, UI& ui, bool& quit)
 
 void App::drawMap(UI& ui)
 {
+  if (itsModeGlobe)
+  {
+    if (sourceSupportsGlobe())
+    {
+      drawGlobe(ui.layout());
+      return;
+    }
+    // Source can't be drawn on the globe (e.g. paged to an image in a
+    // batch); silently fall back to the 2D map.
+    itsModeGlobe = false;
+  }
   if (itsMode3DCurtain)
   {
     if (itsSource->hasNativeHeight())
@@ -6142,6 +6304,48 @@ void App::ensureCurtainEndpoints()
   itsCurtainEndpointsInitialised = true;
 }
 
+void App::tickCurtainAnimation()
+{
+  // Wall-clock dt since the last frame, scaled by the user's speed
+  // multiplier. The first call seeds the anchor and ticks zero so the
+  // animation doesn't snap by the entire startup delay. dt is also
+  // clamped to a sane upper bound — if the program stalled (debugger,
+  // popup, etc.) we don't want to skip half a rotation when it resumes.
+  const auto now = std::chrono::steady_clock::now();
+  if (!itsCurtainAnimTickValid)
+  {
+    itsCurtainAnimLastTick = now;
+    itsCurtainAnimTickValid = true;
+    return;
+  }
+  const std::chrono::duration<double> diff = now - itsCurtainAnimLastTick;
+  itsCurtainAnimLastTick = now;
+  const double dt = std::clamp(diff.count(), 0.0, 0.20) * itsCurtainAnimSpeed;
+  if (dt <= 0.0)
+    return;
+  // Base angular rates chosen so each animation has a visibly different
+  // pace at speed = 1: swing oscillates ~once per 5 s, rotate ~once per
+  // 10 s, orbit ~once per 10 s, tilt ~once per 5 s. All scale together
+  // with the speed multiplier so the user's mental model stays simple.
+  constexpr double kSwingHz = 0.20;
+  constexpr double kRotateHz = 0.10;
+  constexpr double kOrbitHz = 0.10;
+  constexpr double kTiltHz = 0.20;
+  constexpr double kTau = 2.0 * M_PI;
+  // Phases only advance for flags that are currently on. This means a
+  // user can park the rotation at a particular angle, switch swing on
+  // for a moment, then return to rotation without the rotate angle
+  // having drifted while swing was running.
+  if (itsCurtainAutoSwing)
+    itsCurtainSwingPhase = std::fmod(itsCurtainSwingPhase + dt * kTau * kSwingHz, kTau);
+  if (itsCurtainAutoRotate)
+    itsCurtainRotatePhase = std::fmod(itsCurtainRotatePhase + dt * kTau * kRotateHz, kTau);
+  if (itsCurtainAutoOrbit)
+    itsCurtainOrbitPhase = std::fmod(itsCurtainOrbitPhase + dt * kTau * kOrbitHz, kTau);
+  if (itsCurtainAutoTilt)
+    itsCurtainTiltPhase = std::fmod(itsCurtainTiltPhase + dt * kTau * kTiltHz, kTau);
+}
+
 void App::draw3DCrossSection(const Layout& layout)
 {
   // Inverse-projection raycaster + curtain. Same camera + flat-Earth
@@ -6293,67 +6497,139 @@ void App::draw3DCrossSection(const Layout& layout)
   }
   itsSource->selectLevelIndex(static_cast<std::size_t>(bottomIdx));
 
-  // Curtain geometry in flat-Earth world coords.
-  double ax = 0, ay = 0, bx = 0, by = 0;
-  latLonToXY(itsCurtainLat1, itsCurtainLon1, ax, ay);
-  latLonToXY(itsCurtainLat2, itsCurtainLon2, bx, by);
-  const double abx = bx - ax;
-  const double aby = by - ay;
-  const double abLen2 = abx * abx + aby * aby;
-  // Plane normal in xy (perpendicular to AB).
-  const double nx = aby;
-  const double ny = -abx;
+  // Animation tick + effective endpoints. The user's edit-mode arrow keys
+  // move itsCurtainLat1/Lon1/Lat2/Lon2 (the "base" curtain). Each enabled
+  // animation transforms the base into a different on-screen curtain:
+  //   orbit  - slides the centre around a circle in world coords
+  //   rotate - continuously rotates the half-vector about the centre
+  //   swing  - oscillates the half-vector +/-45° about its base azimuth
+  //   tilt   - tilts the plane(s) about their long axis (the AB line)
+  // The X-cross adds a second plane perpendicular to the first through
+  // the same centre. Toggles for each animation live on x s r o T.
+  tickCurtainAnimation();
+  double baseAx = 0, baseAy = 0, baseBx = 0, baseBy = 0;
+  latLonToXY(itsCurtainLat1, itsCurtainLon1, baseAx, baseAy);
+  latLonToXY(itsCurtainLat2, itsCurtainLon2, baseBx, baseBy);
+  const double baseCx = (baseAx + baseBx) * 0.5;
+  const double baseCy = (baseAy + baseBy) * 0.5;
+  const double baseHx = (baseBx - baseAx) * 0.5;
+  const double baseHy = (baseBy - baseAy) * 0.5;
+  double cxC = baseCx, cyC = baseCy;
+  if (itsCurtainAutoOrbit)
+  {
+    const double orbitR = std::max(extent * 0.20, std::hypot(baseHx, baseHy) * 0.40);
+    cxC = baseCx + orbitR * std::cos(itsCurtainOrbitPhase);
+    cyC = baseCy + orbitR * std::sin(itsCurtainOrbitPhase);
+  }
+  double dAz = 0.0;
+  if (itsCurtainAutoRotate) dAz += itsCurtainRotatePhase;
+  if (itsCurtainAutoSwing) dAz += (M_PI / 4.0) * std::sin(itsCurtainSwingPhase);
+  const double cosAz = std::cos(dAz);
+  const double sinAz = std::sin(dAz);
+  const double hxR = baseHx * cosAz - baseHy * sinAz;
+  const double hyR = baseHx * sinAz + baseHy * cosAz;
+  const double tiltAngle = itsCurtainAutoTilt ? itsCurtainTiltPhase : 0.0;
+  const double cosT = std::cos(tiltAngle);
+  const double sinT = std::sin(tiltAngle);
   const double curtainHmaxWorld = itsCurtainHeightKm * 1000.0 * vexagger;
 
-  // Pre-sample the curtain at N_cols columns along A->B. Each column's
-  // ColumnProfile carries (height_m, value) for every level at that
-  // (lat, lon). With the cache in place per-pixel sampling collapses to
-  // a binary search over nLevels and a lerp, instead of one O(nLevels)
-  // interpolatedValueAtHeight call per pixel — the difference between
-  // a usable animation rate and seconds-per-frame on a 65-level NWP.
-  const int nCols = std::max(64, subW);
-  std::vector<DataSource::ColumnProfile> profiles;
-  profiles.reserve(static_cast<std::size_t>(nCols));
-  for (int c = 0; c < nCols; ++c)
+  // One plane = one half of the X-cross. Both planes share the camera
+  // basis and the tilt angle; only the (A,B) endpoints differ.
+  struct Plane
   {
-    const double u = (nCols > 1) ? static_cast<double>(c) / (nCols - 1) : 0.0;
-    const double lat = itsCurtainLat1 + u * (itsCurtainLat2 - itsCurtainLat1);
-    const double lon = itsCurtainLon1 + u * (itsCurtainLon2 - itsCurtainLon1);
-    profiles.push_back(itsSource->sampleColumnProfile(lat, lon));
+    double ax, ay;
+    double abx, aby;
+    double abLen2;
+    double upx, upy, upz;
+    double nx, ny, nz;
+    double aDotN;
+    double rightDotN, upDotN, fwdDotN;
+    std::vector<DataSource::ColumnProfile> profiles;
+    double lat1, lon1, lat2, lon2;
+  };
+
+  auto buildPlane = [&](double Ax, double Ay, double Bx, double By, Plane& p)
+  {
+    p.ax = Ax;
+    p.ay = Ay;
+    p.abx = Bx - Ax;
+    p.aby = By - Ay;
+    p.abLen2 = p.abx * p.abx + p.aby * p.aby;
+    const double L = std::sqrt(std::max(p.abLen2, 1e-12));
+    // Tilt rotates the curtain's "up" about the AB axis by tiltAngle.
+    // right = (abx, aby, 0)/L; un-tilted up = (0,0,1).
+    // up_rotated = up*cos(t) + (right × up)*sin(t)
+    //            = (aby/L*sin(t), -abx/L*sin(t), cos(t))
+    p.upx = (p.aby / L) * sinT;
+    p.upy = (-p.abx / L) * sinT;
+    p.upz = cosT;
+    // Normal = right × up_rotated.
+    p.nx = (p.aby / L) * cosT;
+    p.ny = (-p.abx / L) * cosT;
+    p.nz = -sinT;
+    p.aDotN = p.ax * p.nx + p.ay * p.ny;  // A is at z = 0
+    p.rightDotN = rightX * p.nx + rightY * p.ny;  // rightZ = 0
+    p.upDotN = upX * p.nx + upY * p.ny + upZ * p.nz;
+    p.fwdDotN = fwdX * p.nx + fwdY * p.ny + fwdZ * p.nz;
+    // Column profile cache along A->B. The shear approximation samples
+    // the AB-column at u with the hit point's world-z as the altitude:
+    // exact for tilt = 0 and a useful approximation otherwise (the
+    // curtain leans, the along-track structure stays anchored to AB).
+    xyToLatLon(Ax, Ay, p.lat1, p.lon1);
+    xyToLatLon(Bx, By, p.lat2, p.lon2);
+    const int nCols = std::max(64, subW);
+    p.profiles.clear();
+    p.profiles.reserve(static_cast<std::size_t>(nCols));
+    for (int c = 0; c < nCols; ++c)
+    {
+      const double u = (nCols > 1) ? static_cast<double>(c) / (nCols - 1) : 0.0;
+      const double lat = p.lat1 + u * (p.lat2 - p.lat1);
+      const double lon = p.lon1 + u * (p.lon2 - p.lon1);
+      p.profiles.push_back(itsSource->sampleColumnProfile(lat, lon));
+    }
+  };
+
+  Plane plane1, plane2;
+  buildPlane(cxC - hxR, cyC - hyR, cxC + hxR, cyC + hyR, plane1);
+  if (itsCurtainTwoPlane)
+  {
+    const double hx2 = -hyR;  // perpendicular half-vector (rotated 90°)
+    const double hy2 = hxR;
+    buildPlane(cxC - hx2, cyC - hy2, cxC + hx2, cyC + hy2, plane2);
   }
-  // Sample one column profile at a given along-track u and metric height
-  // by lerping across the two flanking pre-sampled columns. Returns
-  // kFloatMissing if either column has no bracket or if either value is
-  // missing.
-  auto sampleCurtain = [&](double u, double heightM) -> float
+
+  // Sample one column profile at along-track u and metric height by
+  // lerping across two flanking pre-sampled columns. Pure function of
+  // (profiles, u, heightM) — same helper works for both planes.
+  auto sampleColumn =
+      [&](const std::vector<DataSource::ColumnProfile>& profiles, double u, double heightM) -> float
   {
+    const int nCols = static_cast<int>(profiles.size());
+    if (nCols == 0)
+      return kFloatMissing;
     const double cf = std::clamp(u, 0.0, 1.0) * (nCols - 1);
     const int c0 = std::clamp(static_cast<int>(std::floor(cf)), 0, nCols - 1);
     const int c1 = std::min(nCols - 1, c0 + 1);
     const float wc = static_cast<float>(cf - c0);
-    auto sampleAt = [&](const DataSource::ColumnProfile& p) -> float
+    auto sampleAt = [&](const DataSource::ColumnProfile& pp) -> float
     {
-      const std::size_t n = p.heightsM.size();
+      const std::size_t n = pp.heightsM.size();
       if (n < 2)
-        return n == 1 ? p.values[0] : kFloatMissing;
-      // Linear scan: nLevels is small (≤65 for MEPS, ≤137 for ERA5).
+        return n == 1 ? pp.values[0] : kFloatMissing;
       for (std::size_t i = 0; i + 1 < n; ++i)
       {
-        const float hA = p.heightsM[i];
-        const float hB = p.heightsM[i + 1];
+        const float hA = pp.heightsM[i];
+        const float hB = pp.heightsM[i + 1];
         if (hA == kFloatMissing || hB == kFloatMissing)
           continue;
         const float lo = std::min(hA, hB);
         const float hi = std::max(hA, hB);
         if (heightM < lo || heightM > hi)
           continue;
-        const float vA = p.values[i];
-        const float vB = p.values[i + 1];
+        const float vA = pp.values[i];
+        const float vB = pp.values[i + 1];
         if (vA == kFloatMissing || vB == kFloatMissing)
           return kFloatMissing;
-        // hA at level i, hB at level i+1. Lerp into [vA, vB] by where
-        // heightM falls in [hA, hB] (works regardless of which is the
-        // larger value).
         const float t = (hB != hA) ? (static_cast<float>(heightM) - hA) / (hB - hA) : 0.0F;
         return vA + (vB - vA) * t;
       }
@@ -6367,25 +6643,41 @@ void App::draw3DCrossSection(const Layout& layout)
       return v0;
     return v0 * (1.0F - wc) + v1 * wc;
   };
-  // Pre-compute terms used inside the per-pixel loop.
-  const double fwdDotN = fwdX * nx + fwdY * ny;
-  const double rightDotN = rightX * nx + rightY * ny;
-  const double upDotN = upX * nx + upY * ny;
-  const double aDotN = ax * nx + ay * ny;
 
-  // Per-pixel ray-cast.
+  auto rayHitsPlane = [&](const Plane& pl, double scx, double scy,
+                          double& uOut, double& zWorldOut, float& depthOut) -> bool
+  {
+    if (pl.abLen2 < 1e-6 || std::abs(pl.fwdDotN) < 1e-9)
+      return false;
+    const double tCurtain = (pl.aDotN - scx * pl.rightDotN - scy * pl.upDotN) / pl.fwdDotN;
+    const double px = scx * rightX + scy * upX + tCurtain * fwdX;
+    const double py = scx * rightY + scy * upY + tCurtain * fwdY;
+    const double pz = scy * upZ + tCurtain * fwdZ;
+    const double dx = px - pl.ax;
+    const double dy = py - pl.ay;
+    const double u = (dx * pl.abx + dy * pl.aby) / pl.abLen2;
+    if (u < 0.0 || u > 1.0)
+      return false;
+    // Height along the tilted "up" axis. With tilt=0 this reduces to pz.
+    const double hUp = dx * pl.upx + dy * pl.upy + pz * pl.upz;
+    if (hUp < 0.0 || hUp > curtainHmaxWorld)
+      return false;
+    uOut = u;
+    zWorldOut = pz;
+    depthOut = static_cast<float>(tCurtain * depthScale);
+    return true;
+  };
+
+  // Per-pixel ray-cast. Intersect against ground + active plane(s),
+  // paint nearest hit. One shared z-buffer so the planes occlude each
+  // other and the ground naturally.
   for (int sy = 0; sy < subH; ++sy)
   {
     for (int sx = 0; sx < subW; ++sx)
     {
-      // Screen → normalised camera-frame offsets.
       const double scx = (sx - subW / 2.0) / xscale;
       const double scy = (subH / 2.0 - sy) / yscale;
 
-      // Ground hit (z = 0 plane). With rightZ = 0 the equation
-      //   upZ*scy + fwdZ*t = 0
-      // gives t directly. fwdZ < 0 for any sane pitch (camera looks
-      // downwards onto the ground), so the division is well-conditioned.
       bool haveGround = false;
       double gx = 0, gy = 0;
       float gDepth = 0;
@@ -6394,8 +6686,6 @@ void App::draw3DCrossSection(const Layout& layout)
         const double tGround = -scy * upZ / fwdZ;
         gx = scx * rightX + scy * upX + tGround * fwdX;
         gy = scx * rightY + scy * upY + tGround * fwdY;
-        // Only paint ground inside the data bbox in world coords; outside
-        // it the source returns missing and we'd waste samples.
         if (gx > -extent * 1.1 && gx < extent * 1.1 && gy > -extent * 1.1 && gy < extent * 1.1)
         {
           gDepth = static_cast<float>(tGround * depthScale);
@@ -6403,43 +6693,36 @@ void App::draw3DCrossSection(const Layout& layout)
         }
       }
 
-      // Curtain hit. Solve (P(t) - A) · n = 0 for t.
-      bool haveCurtain = false;
-      double curtainU = 0;        // along-track parameter in [0,1]
-      double curtainHeightKm = 0; // sampling height
-      float cDepth = 0;
-      if (abLen2 > 1e-6 && std::abs(fwdDotN) > 1e-9)
-      {
-        const double tCurtain =
-            (aDotN - scx * rightDotN - scy * upDotN) / fwdDotN;
-        // World position at the curtain hit.
-        const double px = scx * rightX + scy * upX + tCurtain * fwdX;
-        const double py = scx * rightY + scy * upY + tCurtain * fwdY;
-        const double pz = scy * upZ + tCurtain * fwdZ;  // rightZ = 0 again
-        if (pz >= 0.0 && pz <= curtainHmaxWorld)
-        {
-          const double u = ((px - ax) * abx + (py - ay) * aby) / abLen2;
-          if (u >= 0.0 && u <= 1.0)
-          {
-            curtainU = u;
-            curtainHeightKm = pz / (vexagger * 1000.0);
-            cDepth = static_cast<float>(tCurtain * depthScale);
-            haveCurtain = true;
-          }
-        }
-      }
+      double u1 = 0, z1 = 0;
+      float d1 = 0;
+      const bool hit1 = rayHitsPlane(plane1, scx, scy, u1, z1, d1);
 
-      // Pick whichever hit is closer to the camera and paint that.
-      if (haveCurtain && (!haveGround || cDepth < gDepth))
+      bool hit2 = false;
+      double u2 = 0, z2 = 0;
+      float d2 = 0;
+      if (itsCurtainTwoPlane)
+        hit2 = rayHitsPlane(plane2, scx, scy, u2, z2, d2);
+
+      enum class Pick : std::uint8_t { None, Ground, P1, P2 };
+      Pick pick = Pick::None;
+      float bestD = std::numeric_limits<float>::infinity();
+      if (haveGround && gDepth < bestD) { bestD = gDepth; pick = Pick::Ground; }
+      if (hit1 && d1 < bestD)           { bestD = d1;     pick = Pick::P1; }
+      if (hit2 && d2 < bestD)           { bestD = d2;     pick = Pick::P2; }
+
+      if (pick == Pick::P1 || pick == Pick::P2)
       {
-        const float raw = sampleCurtain(curtainU, curtainHeightKm * 1000.0);
+        const Plane& pl = (pick == Pick::P1) ? plane1 : plane2;
+        const double u = (pick == Pick::P1) ? u1 : u2;
+        const double zw = (pick == Pick::P1) ? z1 : z2;
+        const float raw = sampleColumn(pl.profiles, u, zw / vexagger);
         if (raw != kFloatMissing && std::isfinite(raw))
         {
           const float val = transform(raw);
-          plot(sx, sy, cDepth, activePanel().palette.lookup(val));
+          plot(sx, sy, bestD, activePanel().palette.lookup(val));
           continue;
         }
-        // Missing data on the curtain — let the ground show through if any.
+        // Curtain pixel had no data — fall through to ground if any.
       }
       if (haveGround)
       {
@@ -6482,26 +6765,53 @@ void App::draw3DCrossSection(const Layout& layout)
   if (itsBorderStyle != LineStyle::None)
     drawPolylinesThick(itsBorders, Rgb{120, 120, 120});
 
-  // Endpoint poles: vertical lines from the ground to the curtain top.
-  // Distinct colours so A and B stay identifiable as the camera orbits.
-  const Rgb colA{255, 220, 80};   // A = yellow
-  const Rgb colB{80, 200, 255};   // B = cyan
-  drawLine(ax, ay, 0, ax, ay, curtainHmaxWorld, colA);
-  drawLine(bx, by, 0, bx, by, curtainHmaxWorld, colB);
-  // Curtain rectangle outline so the slice's footprint is visible even
-  // when the surface and curtain colours blend.
-  drawLine(ax, ay, curtainHmaxWorld, bx, by, curtainHmaxWorld, Rgb{180, 180, 180});
-  drawLine(ax, ay, 0, bx, by, 0, Rgb{180, 180, 180});
+  // Endpoint poles + curtain rectangle outlines. Each plane shows its
+  // own poles in distinct colours so the camera orbit doesn't lose track
+  // of which is which. With tilt, the "top edge" follows the tilted up
+  // direction so the outline matches the rendered geometry.
+  auto drawCurtainOutline = [&](const Plane& pl, Rgb colA, Rgb colB, Rgb colTop)
+  {
+    const double H = curtainHmaxWorld;
+    const double topAx = pl.ax + H * pl.upx;
+    const double topAy = pl.ay + H * pl.upy;
+    const double topAz = H * pl.upz;
+    const double bx = pl.ax + pl.abx;
+    const double by = pl.ay + pl.aby;
+    const double topBx = bx + H * pl.upx;
+    const double topBy = by + H * pl.upy;
+    const double topBz = H * pl.upz;
+    drawLine(pl.ax, pl.ay, 0, topAx, topAy, topAz, colA);
+    drawLine(bx, by, 0, topBx, topBy, topBz, colB);
+    drawLine(topAx, topAy, topAz, topBx, topBy, topBz, colTop);
+    drawLine(pl.ax, pl.ay, 0, bx, by, 0, colTop);
+  };
+  drawCurtainOutline(plane1, Rgb{255, 220, 80}, Rgb{80, 200, 255}, Rgb{180, 180, 180});
+  if (itsCurtainTwoPlane)
+    drawCurtainOutline(plane2, Rgb{255, 140, 200}, Rgb{200, 255, 140}, Rgb{140, 140, 140});
 
-  // Status footer (matches the existing 3D modes' convention).
-  const std::string activeLbl =
-      itsCurtainActiveEnd == CurtainEnd::A
-          ? "A"
-          : (itsCurtainActiveEnd == CurtainEnd::B ? "B" : "A+B");
+  // Status footer. Show sub-mode, the rendered (animated) endpoints,
+  // active animation flags, and the speed multiplier so the user can
+  // see what the toggles are doing.
+  const char* subModeLbl = "?";
+  switch (itsCurtainActiveEnd)
+  {
+    case CurtainEnd::A: subModeLbl = "A"; break;
+    case CurtainEnd::B: subModeLbl = "B"; break;
+    case CurtainEnd::Both: subModeLbl = "A+B"; break;
+    case CurtainEnd::View: subModeLbl = "View"; break;
+  }
+  std::string flags;
+  flags.reserve(5);
+  flags.push_back(itsCurtainTwoPlane ? 'X' : '.');
+  flags.push_back(itsCurtainAutoSwing ? 'S' : '.');
+  flags.push_back(itsCurtainAutoRotate ? 'R' : '.');
+  flags.push_back(itsCurtainAutoOrbit ? 'O' : '.');
+  flags.push_back(itsCurtainAutoTilt ? 'T' : '.');
   const std::string hud = fmt::format(
-      "3D curtain  active:{}  A:{:.2f},{:.2f}  B:{:.2f},{:.2f}  ceil:{:g} km  zoom:{:.1f}x",
-      activeLbl, itsCurtainLat1, itsCurtainLon1, itsCurtainLat2, itsCurtainLon2,
-      itsCurtainHeightKm, itsCamZoom);
+      "3D curtain  mode:{}  A:{:.2f},{:.2f}  B:{:.2f},{:.2f}  ceil:{:g} km  zoom:{:.1f}x  "
+      "[{}] {:.2f}x",
+      subModeLbl, plane1.lat1, plane1.lon1, plane1.lat2, plane1.lon2,
+      itsCurtainHeightKm, itsCamZoom, flags, itsCurtainAnimSpeed);
 
   std::ostringstream os;
   cache3DRaster(pixels, subW, subH);
@@ -6519,6 +6829,238 @@ bool App::sourceSupports3D() const
   if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get()); qd != nullptr)
     return qd->isVolumetric() || qd->isSurfaceStack();
   return false;
+}
+
+bool App::sourceSupportsGlobe() const
+{
+  // The globe sampler only needs interpolatedValue(lat, lon), which every
+  // gridded geographic backend provides. Images (no scalar field) and
+  // vector layers (rasterised to feature ids) are excluded.
+  return itsSource != nullptr && itsSource->category() == SourceCategory::Gridded;
+}
+
+// ---------------------------------------------------------------------------
+// Globe renderer (key [g]). See the header comment on drawGlobe() for the
+// data flow. The maths:
+//   * The world is a unit sphere; geographic (lat,lon) maps to an ECEF unit
+//     vector  (cosφcosλ, cosφsinλ, sinφ).
+//   * The camera orbits the centre. itsCamYaw = centre longitude, itsCamPitch
+//     = centre latitude; the outward normal there is the vector pointing at
+//     the camera (n). Screen east = normalise(Z × n), screen up = n × east.
+//   * Orthographic projection: a surface point P projects to
+//        col = W/2 + xscale·(P·east),  row = H/2 − yscale·(P·up)
+//     and faces the camera iff (P·n) > 0. Depth = −(P·n): the near pole is
+//     closest, the limb is at depth 0, the far hemisphere is culled.
+//   * Data fill is the inverse: for each sub-pixel inside the disc we solve
+//     the orthographic ray for the near intersection and read its (lat,lon).
+// ---------------------------------------------------------------------------
+void App::drawGlobe(const Layout& layout)
+{
+  if (!sourceSupportsGlobe())
+  {
+    itsModeGlobe = false;
+    return;
+  }
+
+  const auto& l = layout;
+  if (l.map.height < 4 || l.map.width < 4)
+    return;
+
+  // Coastlines / borders are read globally; only the GSHHS resolution tracks
+  // the 2D viewport. Reload (cheap when unchanged) so the [c]/[b] off→on
+  // round-trip restores them, exactly as draw3D does.
+  loadCoastlines(l.map.width * 2, l.map.height * 4);
+
+  const int cellW = l.map.width;
+  const int cellH = l.map.height;
+  const int subRows = subRowsForStyle(itsCornerStyle);
+  const int subW = cellW * 2;
+  const int subH = cellH * subRows;
+  // Same cell-aspect correction as draw3D so the disc comes out round.
+  const double aspect = static_cast<double>(subRows) / 4.0;
+
+  // Camera basis from the centre (lat,lon).
+  const double cLon = itsCamYaw;
+  const double cLat = itsCamPitch;
+  auto ecef = [](double lat, double lon, double& x, double& y, double& z)
+  {
+    const double cl = std::cos(lat);
+    x = cl * std::cos(lon);
+    y = cl * std::sin(lon);
+    z = std::sin(lat);
+  };
+  double nx = 0, ny = 0, nz = 0;
+  ecef(cLat, cLon, nx, ny, nz);  // outward normal at the centre = toward camera
+  // east = normalise(Z × n) = normalise(-n.y, n.x, 0); falls back to the
+  // longitude tangent at the poles (where the cross product vanishes).
+  double ex = -std::sin(cLon);
+  double ey = std::cos(cLon);
+  double ez = 0.0;
+  {
+    const double cx = -ny;
+    const double cy = nx;
+    const double len = std::sqrt(cx * cx + cy * cy);
+    if (len > 1e-9)
+    {
+      ex = cx / len;
+      ey = cy / len;
+      ez = 0.0;
+    }
+  }
+  // up = n × east
+  const double ux = ny * ez - nz * ey;
+  const double uy = nz * ex - nx * ez;
+  const double uz = nx * ey - ny * ex;
+
+  // Orthographic scale: fit the unit sphere into the map with a 2-sub-pixel
+  // margin on the tighter axis, honouring the cell aspect.
+  const double radius = 1.0;
+  const double fitX = (subW / 2.0 - 2.0) / radius;
+  const double fitY = (subH / 2.0 - 2.0) / radius * aspect;
+  const double xscale = std::max(1.0, std::min(fitX, fitY)) * itsCamZoom;
+  const double yscale = xscale / aspect;
+  const double cx0 = subW / 2.0;
+  const double cy0 = subH / 2.0;
+
+  std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH, Rgb{0, 0, 0, true});
+  std::vector<float> zbuf(static_cast<std::size_t>(subW) * subH,
+                          std::numeric_limits<float>::infinity());
+
+  auto plot = [&](int c, int r, float depth, Rgb color)
+  {
+    if (c < 0 || c >= subW || r < 0 || r >= subH)
+      return;
+    const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
+    if (depth < zbuf[idx])
+    {
+      zbuf[idx] = depth;
+      pixels[idx] = color;
+    }
+  };
+
+  // --- Data fill: inverse-orthographic ray-cast onto the near hemisphere.
+  const Palette& pal = activePanel().palette;
+  const Rgb ocean{16, 26, 48};  // bare-sphere base, limb-darkened below
+  for (int r = 0; r < subH; ++r)
+  {
+    const double sy = (cy0 - (r + 0.5)) / yscale;
+    for (int c = 0; c < subW; ++c)
+    {
+      const double sx = ((c + 0.5) - cx0) / xscale;
+      const double rr = sx * sx + sy * sy;
+      if (rr > radius * radius)
+        continue;  // outside the disc → leave transparent (space)
+      const double d = std::sqrt(radius * radius - rr);  // depth toward camera
+      // Near intersection P = sx·east + sy·up + d·n (already a unit vector).
+      const double px = sx * ex + sy * ux + d * nx;
+      const double py = sx * ey + sy * uy + d * ny;
+      const double pz = sx * ez + sy * uz + d * nz;
+      const double lat = std::asin(std::clamp(pz, -1.0, 1.0)) * 180.0 / M_PI;
+      const double lon = std::atan2(py, px) * 180.0 / M_PI;
+
+      const float val = transform(itsSource->interpolatedValue(lat, lon));
+      Rgb color{};
+      bool painted = false;
+      if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e6F)
+      {
+        color = pal.lookup(val);
+        painted = !color.transparent;
+      }
+      if (!painted)
+      {
+        // No data here: shade the bare sphere so it still reads as a globe.
+        const double sh = 0.35 + 0.65 * d;  // 1 at the centre, 0.35 at the limb
+        color = Rgb{static_cast<std::uint8_t>(ocean.r * sh),
+                    static_cast<std::uint8_t>(ocean.g * sh),
+                    static_cast<std::uint8_t>(ocean.b * sh)};
+      }
+      const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
+      zbuf[idx] = static_cast<float>(-d);
+      pixels[idx] = color;
+    }
+  }
+
+  // --- Geographic overlays: project (lat,lon) lifted just above the surface
+  // so they win the z-test against the fill, and cull the far hemisphere.
+  constexpr double kLift = 1.004;
+  auto project = [&](double X, double Y, double Z, double& col, double& row, double& facing)
+  {
+    facing = X * nx + Y * ny + Z * nz;
+    col = cx0 + xscale * (X * ex + Y * ey + Z * ez);
+    row = cy0 - yscale * (X * ux + Y * uy + Z * uz);
+  };
+  auto drawGeoLine = [&](double lat0, double lon0, double lat1, double lon1, Rgb color)
+  {
+    double x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0;
+    ecef(lat0 * M_PI / 180.0, lon0 * M_PI / 180.0, x0, y0, z0);
+    ecef(lat1 * M_PI / 180.0, lon1 * M_PI / 180.0, x1, y1, z1);
+    double c0 = 0, r0 = 0, f0 = 0, c1 = 0, r1 = 0, f1 = 0;
+    project(kLift * x0, kLift * y0, kLift * z0, c0, r0, f0);
+    project(kLift * x1, kLift * y1, kLift * z1, c1, r1, f1);
+    if (f0 <= 0 && f1 <= 0)
+      return;  // entire segment on the far hemisphere
+    const int steps =
+        static_cast<int>(std::ceil(std::max(std::abs(c1 - c0), std::abs(r1 - r0))));
+    if (steps <= 0)
+    {
+      if (f0 > 0)
+        plot(static_cast<int>(std::round(c0)), static_cast<int>(std::round(r0)),
+             static_cast<float>(-f0), color);
+      return;
+    }
+    for (int i = 0; i <= steps; ++i)
+    {
+      const double t = static_cast<double>(i) / steps;
+      const double f = f0 + t * (f1 - f0);  // approximate facing along the chord
+      if (f <= 0)
+        continue;  // crossed the limb — drop the back-facing part
+      const int cc = static_cast<int>(std::round(c0 + t * (c1 - c0)));
+      const int rr = static_cast<int>(std::round(r0 + t * (r1 - r0)));
+      plot(cc, rr, static_cast<float>(-f), color);
+    }
+  };
+  auto drawPolys = [&](const std::vector<Polyline>& polys, Rgb color)
+  {
+    for (const auto& p : polys)
+      for (std::size_t i = 1; i < p.lats.size(); ++i)
+        drawGeoLine(p.lats[i - 1], p.lons[i - 1], p.lats[i], p.lons[i], color);
+  };
+
+  // Graticule first (dimmest), then borders, then coastlines on top.
+  if (itsGraticuleStyle != LineStyle::None)
+  {
+    const Rgb grat{70, 70, 82};
+    const Rgb equ{120, 110, 70};
+    for (int lat = -60; lat <= 60; lat += 30)
+      for (int lon = -180; lon < 180; lon += 5)
+        drawGeoLine(lat, lon, lat, lon + 5, lat == 0 ? equ : grat);
+    for (int lon = -180; lon < 180; lon += 30)
+      for (int lat = -85; lat < 85; lat += 5)
+        drawGeoLine(lat, lon, lat + 5, lon, grat);
+  }
+  if (itsBorderStyle != LineStyle::None)
+    drawPolys(itsBorders, Rgb{120, 120, 120});
+  if (itsCoastlineStyle != LineStyle::None)
+    drawPolys(itsCoastlines, Rgb{210, 210, 210});
+
+  // --- Emit. Cache the raster so playExitEffect can animate the globe too.
+  std::ostringstream os;
+  cache3DRaster(pixels, subW, subH);
+  itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
+
+  const std::string hud = fmt::format(" Globe  lat={:.0f}°  lon={:.0f}°  zoom={:.2f}×  [G] exit ",
+                                      cLat * 180.0 / M_PI,
+                                      cLon * 180.0 / M_PI,
+                                      itsCamZoom);
+  const int hudRow = l.map.row + l.map.height - 1;
+  const int hudCol =
+      std::max(l.map.col, l.map.col + l.map.width - static_cast<int>(hud.size()) - 1);
+  os << "\x1b[" << (hudRow + 1) << ';' << (hudCol + 1) << "H"
+     << "\x1b[48;5;235m\x1b[38;5;15m" << hud << "\x1b[0m";
+
+  const std::string s = os.str();
+  std::fwrite(s.data(), 1, s.size(), stdout);
+  std::fflush(stdout);
 }
 
 void App::apply3DDefaultsForSource()
@@ -6560,6 +7102,24 @@ int App::runOnce()
   int cellH = std::max(1, ts.rows - 1);
   int subWidth = cellW * 2;
   int subHeight = cellH * 2;
+
+  // --globe: build a UI-less Layout and route through the globe renderer.
+  // Falls back to the 2D dump if the source isn't gridded geographic.
+  if (itsOpts.startGlobe && sourceSupportsGlobe())
+  {
+    itsModeGlobe = true;
+    const auto bb = itsSource->boundingBox();
+    constexpr double kLatLimit = M_PI_2 - 0.01;
+    itsCamYaw = ((bb.minLon + bb.maxLon) * 0.5) * M_PI / 180.0;
+    itsCamPitch =
+        std::clamp(((bb.minLat + bb.maxLat) * 0.5) * M_PI / 180.0, -kLatLimit, kLatLimit);
+    itsCamZoom = 1.0;
+    Layout layout{};
+    layout.map = {0, 0, cellH, cellW};
+    drawGlobe(layout);
+    std::cout << "\x1b[" << ts.rows << ";1H\n";
+    return 0;
+  }
 
   // --3d: build a UI-less Layout and route through the 3D renderer.
   // Useful for CI snapshots / regression checks since the 3D code paths
@@ -6755,6 +7315,18 @@ int App::runInteractive()
   {
     itsMode3D = true;
     apply3DDefaultsForSource();
+  }
+  // --globe: boot straight into the globe view, centred on the data.
+  if (itsOpts.startGlobe && sourceSupportsGlobe())
+  {
+    itsModeGlobe = true;
+    itsMode3D = false;
+    const auto bb = itsSource->boundingBox();
+    constexpr double kLatLimit = M_PI_2 - 0.01;
+    itsCamYaw = ((bb.minLon + bb.maxLon) * 0.5) * M_PI / 180.0;
+    itsCamPitch =
+        std::clamp(((bb.minLat + bb.maxLat) * 0.5) * M_PI / 180.0, -kLatLimit, kLatLimit);
+    itsCamZoom = 1.0;
   }
 
   bool quit = false;

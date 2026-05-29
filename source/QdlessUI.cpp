@@ -975,11 +975,21 @@ void UI::popupHelp(HelpContext ctx)
     {
       add("", "");
       add("v", "Toggle 3D + cross-section curtain (vertical slice)");
-      add("arrows in v", "Move active endpoint A / B / both");
-      add("Tab in v", "Cycle active endpoint: A \xe2\x86\x92 B \xe2\x86\x92 A+B");
+      add("Tab in v",
+          "Cycle sub-mode: A \xe2\x86\x92 B \xe2\x86\x92 A+B \xe2\x86\x92 View");
+      add("arrows in v (Edit)", "Move active endpoint A / B / both");
+      add("arrows in v (View)", "Orbit / pitch the camera (no endpoint motion)");
+      add("+ - in v (Edit)", "Animation speed: faster / slower");
+      add("+ - in v (View)", "Zoom camera in / out");
+      add("h l j k", "Camera yaw / pitch (always, regardless of sub-mode)");
+      add("x in v", "Toggle X-cross: add a second perpendicular plane");
+      add("s in v", "Toggle swing: oscillate the plane azimuth +/-45\xc2\xb0");
+      add("r in v", "Toggle continuous rotation about the centre");
+      add("o in v", "Toggle centre orbit (the cross-section drifts in a circle)");
+      add("T in v", "Toggle 3D tilt: rotate the plane(s) about their long axis");
       add("PgUp PgDn in v", "Raise / lower curtain ceiling");
-      add("h l j k + - 0", "Camera controls (same as 3D)");
-      add("Space in v", "Animate over time — surface + curtain re-sample each step");
+      add("0 in v", "Reset camera");
+      add("Space in v", "Animate over time \xe2\x80\x94 surface + curtain re-sample each step");
     }
   }
   add("e", "Export PNG");
