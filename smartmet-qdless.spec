@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 16%{?dist}.fmi
+Release: 17%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -112,6 +112,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/transfoot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-17.fmi
+- Python Cut placement: synchronise the match cut. The bone's parabola previously landed back on the savanna at the cut moment while the foot appeared mid-screen, breaking the splice. Replaced the half-period sine with a quarter-period rise so the bone arrives at its apex (around 0.70w, 0.23h) exactly at t = cutT, and the foot now starts at that point and eases toward screen centre — bone and foot occupy the same pixel at the moment of the edit.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-16.fmi
 - New Python Cut exit effect: 2001 match-cut homage where the savanna bone tumbles up across the sky and at the cinematic edit becomes Terry Gilliam's Monty Python foot (data/transfoot.png — alpha-clean) rotating in space where the spaceship used to be. Falls back to a skin-tone chroma key on foot.png if the transparent PNG isn't installed; falls back to Bone Cut if neither is present. Ships data/transfoot.png alongside data/foot.png. Roster: 286 -> 287; Python Wars stomp-exclusion shifted to 196.
 

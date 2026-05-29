@@ -10095,9 +10095,14 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
                       : Rgb{u8(140 + 60 * sf + l * 0.15F), u8(95 + 60 * sf + l * 0.12F),
                             u8(70 + 40 * sf + l * 0.10F), false};
             }
+          // The bone rises monotonically to its apex right at the cut, so
+          // its on-screen position is the match point for the foot. (The
+          // original Bone Cut's parabola lands back on the ground at p=1 —
+          // fine for a 2001 jump cut, wrong when the next shot is meant to
+          // start at the bone's screen position.)
           const float p = t / cutT;
-          const float bx = w * (0.30F + 0.45F * p);
-          const float by = h * 0.78F - std::sin(p * 3.14159F) * h * 0.55F;
+          const float bx = w * (0.30F + 0.40F * p);
+          const float by = h * 0.78F - std::sin(p * 1.5708F) * h * 0.55F;
           const float ang = p * 18.0F + 0.6F;
           const float L = mn * 0.22F, R = mn * 0.022F;
           drawCapsule(dst, bx, by, L, R, ang, Rgb{240, 235, 222, false});
@@ -10106,7 +10111,7 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
           plotDot(dst, w, h, bx - std::cos(ang) * L * 0.5F, by - std::sin(ang) * L * 0.5F,
                   R * 1.6F, ya, Rgb{240, 235, 222, false});
         }
-        else  // the cut: foot tumbles in space where the satellite was
+        else  // the cut: foot tumbles in space where the bone reached apex
         {
           for (int y = 0; y < h; ++y)
             for (int x = 0; x < w; ++x)
@@ -10124,13 +10129,21 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
             dst[static_cast<std::size_t>(sy) * w + sx] =
                 Rgb{u8(190 + tw * 50), u8(190 + tw * 50), u8(210 + tw * 40), false};
           }
-          // Tumbling foot. Centre drifts slightly so it doesn't sit dead-still;
-          // angle accumulates linearly — slow, majestic, 2001-y.
+          // The foot picks up exactly where the bone reached apex.
+          // Bone end-point: bx = w*0.70, by = h*0.23 (sin(π/2)=1, with the
+          // multipliers above). Drift gently toward screen centre afterwards.
           const float p = (t - cutT) / (1.0F - cutT);
-          const float cx = w * (0.55F + 0.10F * std::sin(p * 2.0F));
-          const float cy = h * (0.48F + 0.06F * std::sin(p * 1.4F + 0.5F));
-          // Continue smoothly from the bone's spin rate so the match-cut sells.
-          const float ang = 0.6F + cutT * 18.0F + p * 4.0F;
+          const float startCx = w * 0.70F;
+          const float startCy = h * 0.23F;
+          const float targetCx = w * 0.55F;
+          const float targetCy = h * 0.42F;
+          // Ease in to the drift target (1 - (1 - p)^2 — fast at first, soft
+          // arrival), so the cut moment lands precisely on the bone.
+          const float ease = 1.0F - (1.0F - p) * (1.0F - p);
+          const float cx = startCx + (targetCx - startCx) * ease;
+          const float cy = startCy + (targetCy - startCy) * ease;
+          // Bone's spin rate continued, decaying as the foot slows down.
+          const float ang = 18.0F + 0.6F + p * 4.0F;
           // Image aspect-correct sizing — preserve the PNG's pixel aspect.
           const float scaleH = mn * 0.45F;
           const float aspect = (fh > 0) ? static_cast<float>(fw) / static_cast<float>(fh) : 1.5F;
