@@ -112,7 +112,8 @@ make %{_smp_mflags}
 
 %changelog
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-7.fmi
-- New --globe CLI flag: start in globe view (orthographic 3D sphere) when the source supports it.
+- New globe view (key [G], or --globe to start in it). Renders an orthographic 3D sphere: each map sub-pixel is ray-cast onto the near hemisphere and the hit's (lat,lon) is coloured through the active palette, with a limb-shaded bare sphere where the data has no value. Coastlines, borders and a lat/lon graticule are projected on top with back-face culling so the far hemisphere stays hidden. The camera orbits the globe (h/l spin, j/k tilt, +/- zoom, 0 recenter) and auto-centres on the data, so global data fills the sphere while regional / arctic data shows as a natural, distortion-free cap with the poles in a true view. Available for any gridded geographic source.
+- The globe disc is kept round by deriving the sub-pixel aspect from the terminal's actual reported cell size (the \e[16t probe) instead of assuming a 1:2 cell, so it stays circular regardless of font.
 
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-6.fmi
 - Curtain swing now translates the plane along its own normal back and forth (a parallel sweep through the data), instead of pivoting the azimuth. Amplitude is one bbox-extent so a full half-period traverses the data from one side to the other. With rotate also on, the swept axis spins with the plane.
