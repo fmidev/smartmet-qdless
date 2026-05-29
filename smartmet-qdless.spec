@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 4%{?dist}.fmi
+Release: 5%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-5.fmi
+- 3D curtain animations now actually run on their own. The event loop wakes every ~33 ms (30 FPS) while any of swing / rotate / orbit / tilt is on, so the phases advance in wall-clock time even without keypresses. Default tempos tuned to feel obvious: swing ~2.5 s per full back-and-forth, rotate and tilt ~2.5 s per revolution, orbit ~5 s per cycle. +/- in Edit mode still scales them all together.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-4.fmi
 - 3D curtain: X-cross + animations. Tab now cycles four sub-modes (A, B, A+B, View). In Edit modes arrow keys move endpoints and +/- changes animation speed; in View mode arrows orbit / pitch the camera and +/- zooms. Five animation toggles: x = X-cross (perpendicular second plane), s = swing (oscillate azimuth +/-45 deg), r = rotate (continuous azimuth spin), o = orbit (centre drifts in a circle), T = 3D tilt (planes rotate about their long axis). HUD shows the active flags and the speed multiplier.
 

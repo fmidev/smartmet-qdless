@@ -6323,14 +6323,17 @@ void App::tickCurtainAnimation()
   const double dt = std::clamp(diff.count(), 0.0, 0.20) * itsCurtainAnimSpeed;
   if (dt <= 0.0)
     return;
-  // Base angular rates chosen so each animation has a visibly different
-  // pace at speed = 1: swing oscillates ~once per 5 s, rotate ~once per
-  // 10 s, orbit ~once per 10 s, tilt ~once per 5 s. All scale together
-  // with the speed multiplier so the user's mental model stays simple.
-  constexpr double kSwingHz = 0.20;
-  constexpr double kRotateHz = 0.10;
-  constexpr double kOrbitHz = 0.10;
-  constexpr double kTiltHz = 0.20;
+  // Base angular rates. At speed = 1 a full swing back-and-forth takes
+  // ~2.5 s (so a left-to-right traverse of the data is ~1.2 s), rotate
+  // and tilt complete a full revolution in ~2.5 s, and the centre's
+  // orbit cycles every ~5 s — orbit is a meta-motion that should feel
+  // slower than the primary motions superimposed on it. All scale
+  // together with the speed multiplier, so +/- in Edit mode keeps the
+  // relative tempo consistent.
+  constexpr double kSwingHz = 0.40;
+  constexpr double kRotateHz = 0.40;
+  constexpr double kOrbitHz = 0.20;
+  constexpr double kTiltHz = 0.40;
   constexpr double kTau = 2.0 * M_PI;
   // Phases only advance for flags that are currently on. This means a
   // user can park the rotation at a particular angle, switch swing on
@@ -7356,13 +7359,35 @@ int App::runInteractive()
       needRedraw = false;
     }
 
-    int key = ui.waitInput(itsAnimating ? itsAnimationDelayMs : -1);
+    // While any curtain animation is on we need to redraw on a fixed
+    // cadence — the curtain's swing/rotate/orbit/tilt phases advance in
+    // wall-clock time, and without a periodic wake-up there's nothing to
+    // trigger a frame. ~33 ms ≈ 30 FPS, fast enough that a 2-3 s rotation
+    // looks smooth. Plain time-step animation (Space) keeps its own
+    // user-chosen delay; if both are on, take the faster of the two so
+    // the curtain still animates smoothly.
+    const bool curtainAnim = itsMode3DCurtain &&
+                             (itsCurtainAutoSwing || itsCurtainAutoRotate ||
+                              itsCurtainAutoOrbit || itsCurtainAutoTilt);
+    int waitMs = -1;
+    if (itsAnimating && curtainAnim)
+      waitMs = std::min(itsAnimationDelayMs, 33);
+    else if (itsAnimating)
+      waitMs = itsAnimationDelayMs;
+    else if (curtainAnim)
+      waitMs = 33;
+    int key = ui.waitInput(waitMs);
     if (key == ERR)
     {
-      // Timeout: advance to next frame.
-      auto idx = itsSource->currentTimeIndex();
-      const auto n = itsSource->timeCount();
-      itsSource->selectTimeIndex((idx + 1) % n);
+      // Timeout. With time-step animation: advance the time index. With
+      // a curtain animation but no time-step: just redraw — the next
+      // tick of the curtain phases happens inside draw3DCrossSection.
+      if (itsAnimating)
+      {
+        auto idx = itsSource->currentTimeIndex();
+        const auto n = itsSource->timeCount();
+        itsSource->selectTimeIndex((idx + 1) % n);
+      }
       needRedraw = true;
       continue;
     }
