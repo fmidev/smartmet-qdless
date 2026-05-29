@@ -6505,7 +6505,7 @@ void App::draw3DCrossSection(const Layout& layout)
   // animation transforms the base into a different on-screen curtain:
   //   orbit  - slides the centre around a circle in world coords
   //   rotate - continuously rotates the half-vector about the centre
-  //   swing  - oscillates the half-vector +/-45° about its base azimuth
+  //   swing  - slides the plane back and forth along its own normal
   //   tilt   - tilts the plane(s) about their long axis (the AB line)
   // The X-cross adds a second plane perpendicular to the first through
   // the same centre. Toggles for each animation live on x s r o T.
@@ -6524,13 +6524,29 @@ void App::draw3DCrossSection(const Layout& layout)
     cxC = baseCx + orbitR * std::cos(itsCurtainOrbitPhase);
     cyC = baseCy + orbitR * std::sin(itsCurtainOrbitPhase);
   }
-  double dAz = 0.0;
-  if (itsCurtainAutoRotate) dAz += itsCurtainRotatePhase;
-  if (itsCurtainAutoSwing) dAz += (M_PI / 4.0) * std::sin(itsCurtainSwingPhase);
-  const double cosAz = std::cos(dAz);
-  const double sinAz = std::sin(dAz);
+  // Rotate the half-vector about the (possibly orbit-shifted) centre.
+  const double rotAz = itsCurtainAutoRotate ? itsCurtainRotatePhase : 0.0;
+  const double cosAz = std::cos(rotAz);
+  const double sinAz = std::sin(rotAz);
   const double hxR = baseHx * cosAz - baseHy * sinAz;
   const double hyR = baseHx * sinAz + baseHy * cosAz;
+  // Swing translates the plane along its own normal — i.e. the perp
+  // direction to the (post-rotate) AB. Amplitude = one bbox-extent so a
+  // full half-period traverses the data from one side to the other.
+  // If rotate is also on, the swept axis spins with the plane, which
+  // is the natural "stays perpendicular to the plane" behaviour.
+  if (itsCurtainAutoSwing)
+  {
+    const double Lrot = std::hypot(hxR, hyR);
+    if (Lrot > 1e-9)
+    {
+      const double perpX = -hyR / Lrot;
+      const double perpY = hxR / Lrot;
+      const double offset = extent * std::sin(itsCurtainSwingPhase);
+      cxC += offset * perpX;
+      cyC += offset * perpY;
+    }
+  }
   const double tiltAngle = itsCurtainAutoTilt ? itsCurtainTiltPhase : 0.0;
   const double cosT = std::cos(tiltAngle);
   const double sinT = std::sin(tiltAngle);
@@ -6879,8 +6895,17 @@ void App::drawGlobe(const Layout& layout)
   const int subRows = subRowsForStyle(itsCornerStyle);
   const int subW = cellW * 2;
   const int subH = cellH * subRows;
-  // Same cell-aspect correction as draw3D so the disc comes out round.
-  const double aspect = static_cast<double>(subRows) / 4.0;
+
+  // Physical aspect of one sub-pixel, from the terminal's *actual* reported
+  // cell size (\e[16t probe, cached in itsCaps), not a hardcoded 1:2 guess —
+  // fonts vary, and an assumed ratio turns the globe into an ellipse. Each
+  // cell holds 2 sub-pixel columns and `subRows` rows, so a sub-column is
+  // cellPxW/2 wide and a sub-row cellPxH/subRows tall. For the disc to come
+  // out round, equal world distance must map to equal physical extent, i.e.
+  //   yscale / xscale = (sub-column width) / (sub-row height).
+  const double subColPx = std::max(1, itsCaps.cellPxW) / 2.0;
+  const double subRowPx = std::max(1, itsCaps.cellPxH) / static_cast<double>(subRows);
+  const double rowPerCol = subColPx / subRowPx;  // < 1 when sub-rows are taller
 
   // Camera basis from the centre (lat,lon).
   const double cLon = itsCamYaw;
@@ -6916,12 +6941,14 @@ void App::drawGlobe(const Layout& layout)
   const double uz = nx * ey - ny * ex;
 
   // Orthographic scale: fit the unit sphere into the map with a 2-sub-pixel
-  // margin on the tighter axis, honouring the cell aspect.
+  // margin on the tighter axis, honouring the physical sub-pixel aspect.
+  // Vertical extent in sub-rows is 2·radius·yscale = 2·radius·xscale·rowPerCol,
+  // so the vertical fit budget divides by rowPerCol.
   const double radius = 1.0;
   const double fitX = (subW / 2.0 - 2.0) / radius;
-  const double fitY = (subH / 2.0 - 2.0) / radius * aspect;
+  const double fitY = (subH / 2.0 - 2.0) / radius / rowPerCol;
   const double xscale = std::max(1.0, std::min(fitX, fitY)) * itsCamZoom;
-  const double yscale = xscale / aspect;
+  const double yscale = xscale * rowPerCol;
   const double cx0 = subW / 2.0;
   const double cy0 = subH / 2.0;
 
