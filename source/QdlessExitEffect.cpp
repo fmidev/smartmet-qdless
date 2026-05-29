@@ -20155,9 +20155,1116 @@ void effectHalley(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
     });
 }
 
+// ---------------------------------------------------------------------------
+// GLOBE-VIEW UTILITIES + EFFECTS --------------------------------------------
+// ---------------------------------------------------------------------------
+
+// Orthographic globe pixel ↔ lat/lon. The caller supplies precomputed
+// (cLat, sLat) = (cos, sin) of the centre latitude in radians so the math
+// can be hoisted out of inner loops.
+inline bool globePxToLatLon(float cx, float cy, float R, float ya,
+                            float cLat, float sLat, float centerLonDeg,
+                            float px, float py, float& lat, float& lon)
+{
+  const float u = (px - cx) / R;
+  const float v = (py - cy) * ya / R;
+  const float r2 = u * u + v * v;
+  if (r2 > 1.0F) return false;
+  const float nz = std::sqrt(1.0F - r2);
+  const float yE = v * cLat + nz * sLat;
+  const float zE = -v * sLat + nz * cLat;
+  lat = std::asin(std::clamp(yE, -1.0F, 1.0F)) * 180.0F / 3.14159F;
+  lon = centerLonDeg + std::atan2(u, zE) * 180.0F / 3.14159F;
+  return true;
+}
+
+inline bool globeLatLonToPx(float cx, float cy, float R, float ya,
+                            float cLat, float sLat, float centerLonDeg,
+                            float lat, float lon, float& px, float& py)
+{
+  const float latR = lat * 3.14159F / 180.0F;
+  const float lonR = (lon - centerLonDeg) * 3.14159F / 180.0F;
+  const float x3 = std::cos(latR) * std::sin(lonR);
+  const float y3 = std::sin(latR);
+  const float z3 = std::cos(latR) * std::cos(lonR);
+  const float yV = y3 * cLat - z3 * sLat;
+  const float zV = y3 * sLat + z3 * cLat;
+  if (zV < 0.0F) return false;
+  px = cx + x3 * R;
+  py = cy - yV * R / ya;
+  return true;
+}
+
+// AMOC: Atlantic Meridional Overturning Circulation. Globe centred on the
+// Atlantic. Warm Gulf-Stream / North-Atlantic-Drift surface flow heading
+// north (red ribbon); cold deep return flowing south (faded blue arrows).
+void effectAmoc(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLatDeg = 30.0F, centerLonDeg = -30.0F;
+      const float cLat = std::cos(centerLatDeg * 3.14159F / 180.0F);
+      const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const float u = (xx - cx) / R;
+          const float v = (yy - cy) * ya / R;
+          const float nz = std::sqrt(std::max(0.0F, 1.0F - u * u - v * v));
+          const float shade = 0.55F + 0.45F * nz;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8((20 + dl * 0.20F) * shade), u8((60 + dl * 0.25F) * shade),
+                  u8((110 + dl * 0.30F) * shade), false};
+        }
+      // Rough continent outlines (Americas, Europe/Africa).
+      auto plotLandPoly = [&](const std::vector<std::pair<float,float>>& pts, Rgb col) {
+        for (size_t i = 0; i + 1 < pts.size(); ++i) {
+          const int n = 30;
+          for (int k = 0; k <= n; ++k) {
+            const float f = k / static_cast<float>(n);
+            const float la = pts[i].first + f * (pts[i+1].first - pts[i].first);
+            const float lo = pts[i].second + f * (pts[i+1].second - pts[i].second);
+            float px, py;
+            if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, la, lo, px, py))
+              plotDot(dst, w, h, px, py, std::max(1.0F, mn * 0.003F), ya, col);
+          }
+        }
+      };
+      // Americas (rough east coast).
+      plotLandPoly({{60,-65},{50,-60},{40,-75},{30,-80},{25,-80},{10,-78},{0,-50},{-30,-50},{-50,-70}},
+                   Rgb{120, 130, 80, false});
+      // Europe + Africa (rough west coast).
+      plotLandPoly({{65,15},{45,-10},{35,-10},{20,-18},{0,-10},{-20,15},{-35,18}},
+                   Rgb{140, 130, 70, false});
+      // Surface warm conveyor: lat/lon waypoints from Gulf to Norwegian Sea.
+      const std::vector<std::pair<float,float>> warm = {
+          {25,-80},{30,-75},{35,-72},{40,-65},{45,-50},{50,-35},{55,-20},{60,-5},{65,5}};
+      for (int seg = 0; seg + 1 < static_cast<int>(warm.size()); ++seg) {
+        const int npt = 14;
+        for (int k = 0; k <= npt; ++k) {
+          const float f = k / static_cast<float>(npt);
+          const float phaseOff = (seg * npt + k) / static_cast<float>(warm.size() * npt);
+          const float pulse = 0.6F + 0.4F * std::sin((phaseOff - t) * 12.0F);
+          const float la = warm[seg].first + f * (warm[seg+1].first - warm[seg].first);
+          const float lo = warm[seg].second + f * (warm[seg+1].second - warm[seg].second);
+          float px, py;
+          if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, la, lo, px, py))
+            plotDot(dst, w, h, px, py, mn * 0.010F * pulse, ya,
+                    Rgb{u8(255 * pulse), u8(140 * pulse), u8(60), false});
+        }
+      }
+      // Cold deep return: south-bound dashes a bit further east.
+      const std::vector<std::pair<float,float>> cold = {
+          {65,-25},{55,-30},{45,-30},{30,-25},{10,-30},{-10,-25},{-30,-15}};
+      for (int seg = 0; seg + 1 < static_cast<int>(cold.size()); ++seg) {
+        const int npt = 10;
+        for (int k = 0; k <= npt; ++k) {
+          const float f = k / static_cast<float>(npt);
+          const float la = cold[seg].first + f * (cold[seg+1].first - cold[seg].first);
+          const float lo = cold[seg].second + f * (cold[seg+1].second - cold[seg].second);
+          const float phaseOff = (seg * npt + k) / static_cast<float>(cold.size() * npt);
+          const float dashOn = std::fmod(phaseOff + t * 0.5F, 0.15F) < 0.1F;
+          if (!dashOn) continue;
+          float px, py;
+          if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, la, lo, px, py))
+            plotDot(dst, w, h, px, py, mn * 0.006F, ya, Rgb{60, 120, 220, false});
+        }
+      }
+    });
+}
+
+// Auroral Oval: top-down view of the Arctic with a glowing oval around the
+// magnetic pole (offset from the geographic pole). Pulses green / violet.
+void effectAuroralOval(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 6, 22, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      // Polar projection (centre = North Pole). Lat = 90 - r * 90 / R.
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          const float u = xx - cx;
+          const float v = (yy - cy) * ya;
+          const float r = std::sqrt(u * u + v * v);
+          if (r > R) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          const float lat = 90.0F - r / R * 90.0F;
+          // Ocean blue baseline; whiter near pole.
+          const float ice = std::clamp((lat - 70.0F) / 20.0F, 0.0F, 1.0F);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(20 + 200 * ice + dl * 0.15F), u8(40 + 200 * ice + dl * 0.15F),
+                  u8(80 + 80 * ice + dl * 0.20F), false};
+        }
+      // Auroral oval around magnetic pole (offset to ~80°N, 72°W).
+      const float magLat = 80.0F, magLon = -72.0F;
+      // Translate magnetic pole into screen pixel via polar projection.
+      const float mlonR = magLon * 3.14159F / 180.0F;
+      const float mr = (90.0F - magLat) / 90.0F * R;
+      const float mpx = cx + std::cos(mlonR + 1.5708F) * mr;
+      const float mpy = cy + std::sin(mlonR + 1.5708F) * mr / ya;
+      // Pulsing oval.
+      const float pulse = 0.7F + 0.3F * std::sin(t * 4.0F);
+      const float ovalR = mn * 0.18F * pulse;
+      const float ovalE = 0.7F;  // ellipticity
+      for (float a = 0; a < 6.2832F; a += 0.01F) {
+        const float ang = a + magLon * 3.14159F / 180.0F;
+        const float xx = mpx + std::cos(ang) * ovalR;
+        const float yy = mpy + std::sin(ang) * ovalR * ovalE / ya;
+        // Aurora: green inner, violet outer.
+        for (float dR = -mn * 0.020F; dR <= mn * 0.020F; dR += mn * 0.004F) {
+          const float xx2 = mpx + std::cos(ang) * (ovalR + dR);
+          const float yy2 = mpy + std::sin(ang) * (ovalR + dR) * ovalE / ya;
+          const float fadeR = 1.0F - std::fabs(dR) / (mn * 0.020F);
+          const bool inner = dR < 0;
+          plotDot(dst, w, h, xx2, yy2, std::max(1.0F, mn * 0.002F), ya,
+                  inner ? Rgb{u8(60 * fadeR * pulse), u8(255 * fadeR * pulse), u8(120 * fadeR * pulse), false}
+                        : Rgb{u8(180 * fadeR * pulse), u8(80 * fadeR * pulse), u8(220 * fadeR * pulse), false});
+        }
+        (void)xx; (void)yy;
+      }
+      // Latitude rings.
+      for (float lat : {60.0F, 70.0F, 80.0F}) {
+        const float rr = (90.0F - lat) / 90.0F * R;
+        for (float a = 0; a < 6.2832F; a += 0.02F) {
+          const float xx = cx + std::cos(a) * rr;
+          const float yy = cy + std::sin(a) * rr / ya;
+          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+            dst[static_cast<std::size_t>(static_cast<int>(yy)) * w + static_cast<int>(xx)] =
+                Rgb{100, 140, 180, false};
+        }
+      }
+    });
+}
+
+// Day Terminator: Earth rotates; the day/night line races across the
+// visible disc. Cloud cover (data) over the lit side, dim over the dark.
+void effectDayTerminator(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 6500,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 12, false};
+      // Stars over the dark side.
+      for (int i = 0; i < 100; ++i)
+        dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
+            Rgb{180, 180, 220, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLatDeg = 15.0F;
+      const float centerLonDeg = std::fmod(t * 360.0F, 360.0F) - 180.0F;  // rotate east
+      const float cLat = std::cos(centerLatDeg * 3.14159F / 180.0F);
+      const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
+      // Solar direction (fixed in lon=0).
+      const float sunLat = 23.5F * std::sin(t * 6.2832F);  // axial tilt seasonal
+      const float sunLonAbs = 0.0F;
+      const float slatR = sunLat * 3.14159F / 180.0F;
+      const float slonR = sunLonAbs * 3.14159F / 180.0F;
+      const float sunDx3 = std::cos(slatR) * std::sin(slonR);
+      const float sunDy3 = std::sin(slatR);
+      const float sunDz3 = std::cos(slatR) * std::cos(slonR);
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const float latR = lat * 3.14159F / 180.0F;
+          const float lonR = lon * 3.14159F / 180.0F;
+          const float p3x = std::cos(latR) * std::sin(lonR);
+          const float p3y = std::sin(latR);
+          const float p3z = std::cos(latR) * std::cos(lonR);
+          // Lit if surface normal dotted with sun direction > 0.
+          const float lit = std::max(0.0F, p3x * sunDx3 + p3y * sunDy3 + p3z * sunDz3);
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          // Day = blue ocean + data; night = dim violet + city lights (random).
+          if (lit > 0.05F) {
+            dst[static_cast<std::size_t>(yy) * w + xx] =
+                Rgb{u8((60 + dl * 0.25F) * lit), u8((100 + dl * 0.30F) * lit),
+                    u8((160 + dl * 0.30F) * lit), false};
+          } else {
+            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{18, 14, 30, false};
+            if (hash(static_cast<int>(lat * 7 + lon * 11)) > 0.97F)
+              dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{240, 200, 80, false};  // city lights
+          }
+        }
+    });
+}
+
+// Hadley Cell: side cross-section view of Earth — equator at centre,
+// poles to top/bottom. Two cells visible (NH + SH) with arrows showing
+// rising at equator, poleward aloft, sinking at 30°, returning equatorward.
+void effectHadleyCell(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+          const Rgb d = sample(src, w, h, x, y);
+          const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          const float sf = static_cast<float>(y) / h;
+          dst[static_cast<std::size_t>(y) * w + x] =
+              Rgb{u8(40 + 40 * (1 - sf) + dl * 0.20F), u8(60 + 60 * (1 - sf) + dl * 0.25F),
+                  u8(120 + 60 * (1 - sf) + dl * 0.25F), false};
+        }
+      // Earth's curved surface across the bottom + sides — half-disc.
+      const float cx = w * 0.5F, cy = h * 1.20F;
+      const float R = mn * 1.10F;
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          const float dx = xx - cx;
+          const float dy = (yy - cy) * ya;
+          const float r = std::sqrt(dx * dx + dy * dy);
+          if (r > R) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 80.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(60 + dl * 0.30F), u8(120 + dl * 0.30F), u8(80), false};
+        }
+      // Latitude markers.
+      const float eqY = h * 0.65F;
+      const float nh30Y = h * 0.45F;
+      const float sh30Y = h * 0.85F;
+      const float topY = h * 0.18F;
+      for (int x = 0; x < w; ++x) {
+        if (eqY > 0 && eqY < h) dst[static_cast<std::size_t>(eqY) * w + x] = Rgb{220, 200, 100, false};
+        if (nh30Y > 0 && nh30Y < h) dst[static_cast<std::size_t>(nh30Y) * w + x] = Rgb{180, 160, 120, false};
+        if (sh30Y > 0 && sh30Y < h) dst[static_cast<std::size_t>(sh30Y) * w + x] = Rgb{180, 160, 120, false};
+        if (topY > 0 && topY < h) dst[static_cast<std::size_t>(topY) * w + x] = Rgb{100, 120, 160, false};
+      }
+      // Arrows for each cell.
+      auto cellArrows = [&](float botY, float topY2, float side) {
+        const float advance = std::fmod(t * 0.6F, 1.0F);
+        // 1: rising at equator. 2: poleward aloft. 3: sinking at 30°.
+        // 4: equatorward at surface.
+        const std::vector<std::tuple<float,float,float,float>> segs = {
+            {w * 0.5F, botY, w * 0.5F, topY2},                 // rise
+            {w * 0.5F, topY2, w * 0.5F + side * w * 0.30F, topY2 + side * 0},  // poleward aloft
+            {w * 0.5F + side * w * 0.30F, topY2, w * 0.5F + side * w * 0.30F, botY},  // sink
+            {w * 0.5F + side * w * 0.30F, botY, w * 0.5F, botY}  // return
+        };
+        for (size_t i = 0; i < segs.size(); ++i) {
+          const float x0 = std::get<0>(segs[i]), y0 = std::get<1>(segs[i]);
+          const float x1 = std::get<2>(segs[i]), y1 = std::get<3>(segs[i]);
+          // Animated dots flowing along this segment.
+          for (int k = 0; k < 12; ++k) {
+            const float f = std::fmod(k / 12.0F + advance + i * 0.10F, 1.0F);
+            const float fx = x0 + f * (x1 - x0);
+            const float fy = y0 + f * (y1 - y0);
+            plotDot(dst, w, h, fx, fy, mn * 0.008F, ya, Rgb{255, 240, 120, false});
+          }
+        }
+      };
+      cellArrows(eqY, nh30Y, +1.0F);
+      cellArrows(eqY, sh30Y, -1.0F);
+      // Don't forget the ascending branch at the equator (both cells share).
+    });
+}
+
+// Hurricane Tracks: Atlantic basin with multiple curving cyclone tracks
+// drawn progressively, data-tinted ocean.
+void effectHurricaneTracks(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLatDeg = 25.0F, centerLonDeg = -55.0F;
+      const float cLat = std::cos(centerLatDeg * 3.14159F / 180.0F);
+      const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(20 + dl * 0.20F), u8(60 + dl * 0.25F), u8(110 + dl * 0.30F), false};
+        }
+      // Continents (rough).
+      auto plotLand = [&](const std::vector<std::pair<float,float>>& pts) {
+        for (size_t i = 0; i + 1 < pts.size(); ++i) {
+          for (int k = 0; k <= 20; ++k) {
+            const float f = k / 20.0F;
+            const float la = pts[i].first + f * (pts[i+1].first - pts[i].first);
+            const float lo = pts[i].second + f * (pts[i+1].second - pts[i].second);
+            float px, py;
+            if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, la, lo, px, py))
+              plotDot(dst, w, h, px, py, std::max(1.0F, mn * 0.003F), ya, Rgb{130, 130, 80, false});
+          }
+        }
+      };
+      plotLand({{50,-80},{40,-75},{35,-80},{30,-82},{25,-80},{20,-90},{15,-85},{10,-78}});  // N+C America
+      plotLand({{30,-15},{15,-18},{0,-10},{-15,5}});                                         // Africa west
+      // Multiple tracks (lat, lon) sequences, each progressively drawn.
+      const std::vector<std::vector<std::pair<float,float>>> tracks = {
+          {{15,-25},{18,-40},{22,-55},{26,-65},{32,-72},{38,-72},{43,-65},{45,-55}},
+          {{12,-20},{15,-35},{20,-50},{25,-60},{30,-65},{35,-65}},
+          {{10,-30},{14,-45},{18,-60},{22,-70},{27,-75},{30,-78}},
+          {{18,-55},{22,-70},{28,-75},{35,-72},{40,-65},{45,-55},{50,-45}},
+      };
+      const float reveal = std::clamp(t * 1.3F, 0.0F, 1.0F);
+      for (size_t i = 0; i < tracks.size(); ++i) {
+        const float startDelay = i * 0.15F;
+        const float trackProg = std::clamp((reveal - startDelay) / 0.5F, 0.0F, 1.0F);
+        if (trackProg <= 0) continue;
+        const int nSeg = static_cast<int>(tracks[i].size()) - 1;
+        const int nSeg_drawn = static_cast<int>(trackProg * nSeg);
+        for (int seg = 0; seg <= nSeg_drawn && seg < nSeg; ++seg) {
+          for (int k = 0; k <= 12; ++k) {
+            const float f = k / 12.0F;
+            const float la = tracks[i][seg].first + f * (tracks[i][seg+1].first - tracks[i][seg].first);
+            const float lo = tracks[i][seg].second + f * (tracks[i][seg+1].second - tracks[i][seg].second);
+            float px, py;
+            if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, la, lo, px, py))
+              plotDot(dst, w, h, px, py, std::max(1.0F, mn * 0.003F), ya, Rgb{255, 80, 60, false});
+          }
+        }
+        // Head: cyclone symbol at current end.
+        const int seg = std::min(nSeg - 1, nSeg_drawn);
+        const float la = tracks[i][seg].first;
+        const float lo = tracks[i][seg].second;
+        float px, py;
+        if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, la, lo, px, py))
+          drawDataDisk(dst, w, h, src, px, py, mn * 0.015F, ya, 0.8F, t * 4.0F, Rgb{255, 200, 80, false});
+      }
+    });
+}
+
+// ISS Track: sinusoidal ground track at 51.6° inclination, ISS dot moves
+// along; multiple successive orbits shown as faded tracks.
+void effectIssTrack(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 14, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLatDeg = 20.0F, centerLonDeg = 0.0F;
+      const float cLat = std::cos(centerLatDeg * 3.14159F / 180.0F);
+      const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(30 + dl * 0.25F), u8(70 + dl * 0.25F), u8(120 + dl * 0.30F), false};
+        }
+      // Ground track: lat = 51.6° * sin(2π * phase). Each orbit takes 90 min,
+      // Earth rotates ~22.5° west per orbit. Draw 3 successive orbits.
+      const float inc = 51.6F;
+      for (int orbit = 0; orbit < 3; ++orbit) {
+        for (int k = 0; k <= 200; ++k) {
+          const float ph = k / 200.0F;
+          const float lat = inc * std::sin(ph * 6.2832F);
+          const float lon = std::fmod(ph * 360.0F - 22.5F * orbit + 540.0F, 360.0F) - 180.0F;
+          float px, py;
+          if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py))
+            plotDot(dst, w, h, px, py, std::max(1.0F, mn * 0.003F), ya,
+                    Rgb{u8(180 - orbit * 50), u8(180 - orbit * 50), u8(220 - orbit * 30), false});
+        }
+      }
+      // ISS dot on the current orbit (orbit 0).
+      const float ph = std::fmod(t * 2.0F, 1.0F);
+      const float lat = inc * std::sin(ph * 6.2832F);
+      const float lon = std::fmod(ph * 360.0F + 540.0F, 360.0F) - 180.0F;
+      float px, py;
+      if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py)) {
+        plotDot(dst, w, h, px, py, mn * 0.012F, ya, Rgb{255, 240, 160, false});
+        // Glint trail.
+        for (int k = 1; k < 8; ++k) {
+          const float ph2 = ph - k * 0.005F;
+          const float la2 = inc * std::sin(ph2 * 6.2832F);
+          const float lo2 = std::fmod(ph2 * 360.0F + 540.0F, 360.0F) - 180.0F;
+          float px2, py2;
+          if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, la2, lo2, px2, py2))
+            plotDot(dst, w, h, px2, py2, mn * 0.006F * (1 - k * 0.12F), ya, Rgb{220, 200, 100, false});
+        }
+      }
+    });
+}
+
+// ITCZ: Intertropical Convergence Zone. A band of deep convection drifts
+// north of the equator in summer, south in winter.
+void effectItcz(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 6500,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 14, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLonDeg = std::fmod(t * 60.0F, 360.0F) - 180.0F;
+      const float cLat = 1.0F, sLat = 0.0F;
+      // ITCZ latitude oscillates +/- 10° with season.
+      const float itczLat = 5.0F + 10.0F * std::sin(t * 6.2832F);
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          // Cloud band intensity: gaussian centred on itczLat, ±5° wide.
+          const float band = std::exp(-((lat - itczLat) * (lat - itczLat)) / 30.0F);
+          const float u2 = (xx - cx) / R, v2 = (yy - cy) * ya / R;
+          const float nz = std::sqrt(std::max(0.0F, 1.0F - u2 * u2 - v2 * v2));
+          const float shade = 0.55F + 0.45F * nz;
+          // Ocean + bright cloud band.
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8((30 + 200 * band + dl * 0.20F) * shade),
+                  u8((60 + 200 * band + dl * 0.25F) * shade),
+                  u8((120 + 200 * band + dl * 0.30F) * shade), false};
+          // Sprinkle convective spots inside the band.
+          if (band > 0.5F && hash(xx * 13 + yy * 7 + static_cast<int>(t * 20)) > 0.985F)
+            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{255, 255, 255, false};
+        }
+    });
+}
+
+// Krakatoa: 1883-style eruption. Indonesia globe; plume erupts and rings
+// the globe over time at the ~6°S latitude band.
+void effectKrakatoa(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLatDeg = -5.0F, centerLonDeg = 105.0F;
+      const float cLat = std::cos(centerLatDeg * 3.14159F / 180.0F);
+      const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
+      // Globe baseline.
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          const float u = (xx - cx) / R, v = (yy - cy) * ya / R;
+          const float nz = std::sqrt(std::max(0.0F, 1.0F - u * u - v * v));
+          const float shade = 0.55F + 0.45F * nz;
+          // Plume: at latitude ~-6, longitude band growing eastward and westward from 105°E.
+          const float plumeLat = -6.0F;
+          const float dLat = lat - plumeLat;
+          // Angular distance from eruption longitude.
+          float dLon = std::fmod(lon - 105.0F + 540.0F, 360.0F) - 180.0F;
+          const float spread = std::clamp(t * 180.0F, 0.0F, 180.0F);
+          const float band = (std::fabs(dLon) < spread) ? std::exp(-(dLat * dLat) / 50.0F) : 0.0F;
+          const float ash = band * std::clamp(t * 1.5F, 0.0F, 1.0F);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(((30 + 100 * ash) + dl * 0.20F) * shade),
+                  u8(((50 + 80 * ash) + dl * 0.20F) * shade),
+                  u8(((110 + 60 * ash) + dl * 0.20F) * shade), false};
+        }
+      // Initial volcanic flash + plume vertical at Krakatoa location.
+      const float erupt = std::clamp(1.0F - t * 3.0F, 0.0F, 1.0F);
+      if (erupt > 0) {
+        float px, py;
+        if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, -6.0F, 105.0F, px, py))
+          plotDot(dst, w, h, px, py, mn * 0.030F * erupt, ya, Rgb{255, 160, 60, false});
+      }
+      // Ash particles drifting.
+      for (int i = 0; i < 60; ++i) {
+        const float lon = std::fmod(105.0F - 180.0F * t + (hash(i) - 0.5F) * 90.0F * t + 540.0F, 360.0F) - 180.0F;
+        const float lat = -6.0F + (hash(i * 3) - 0.5F) * 10.0F;
+        float px, py;
+        if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py))
+          plotDot(dst, w, h, px, py, mn * 0.006F, ya, Rgb{120, 100, 90, false});
+      }
+    });
+}
+
+// Magnetosphere: Earth in side view; solar wind from the left compresses
+// the dayside, magnetotail stretches off to the right. Bow shock + field
+// lines visible.
+void effectMagnetosphere(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 14, false};
+      // Earth on the left-of-centre.
+      const float cx = w * 0.35F, cy = h * 0.5F;
+      const float Re = mn * 0.08F;
+      drawDataDisk(dst, w, h, src, cx, cy, Re, ya, 0.85F, t * 0.2F, Rgb{80, 120, 200, false});
+      // Solar wind from the left.
+      for (int i = 0; i < 80; ++i) {
+        const float swY = (hash(i) * h);
+        const float swX = std::fmod(hash(i * 3) * w + t * w * 1.0F, static_cast<float>(w));
+        plotDot(dst, w, h, swX, swY, mn * 0.005F, ya, Rgb{220, 220, 100, false});
+      }
+      // Bow shock: parabolic curve sunward of Earth (x < cx).
+      for (float ang = -1.5F; ang <= 1.5F; ang += 0.02F) {
+        const float bsX = cx - Re * 2.0F - std::sin(ang) * 0.5F * Re;
+        const float bsY = cy + ang * mn * 0.35F;
+        plotDot(dst, w, h, bsX, bsY, std::max(1.0F, mn * 0.003F), ya, Rgb{255, 180, 100, false});
+      }
+      // Magnetopause: similar but inside bow shock.
+      for (float ang = -1.4F; ang <= 1.4F; ang += 0.02F) {
+        const float mpX = cx - Re * 1.2F - std::sin(ang) * 0.2F * Re;
+        const float mpY = cy + ang * mn * 0.30F;
+        plotDot(dst, w, h, mpX, mpY, std::max(1.0F, mn * 0.002F), ya, Rgb{160, 180, 240, false});
+      }
+      // Magnetotail stretching to the right.
+      for (float xx = cx + Re * 1.5F; xx < w; xx += 2.0F) {
+        const float xf = (xx - cx) / (w - cx);
+        const float tailH = mn * (0.04F + 0.20F * xf);
+        for (int dy = -static_cast<int>(tailH); dy <= static_cast<int>(tailH); dy += 4) {
+          const int yy = static_cast<int>(cy + dy);
+          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+            dst[static_cast<std::size_t>(yy) * w + static_cast<int>(xx)] =
+                Rgb{u8(60 - 30 * xf), u8(60 + 60 * xf), u8(130 + 80 * xf), false};
+        }
+      }
+      // Dipole field lines.
+      for (int k = 0; k < 6; ++k) {
+        const float baseAng = (k - 2.5F) * 0.4F;
+        for (float pa = -1.5F; pa <= 1.5F; pa += 0.02F) {
+          const float lr = Re * (1.0F + 1.5F * std::cos(pa));
+          const float lx = cx + std::cos(pa + baseAng) * lr;
+          const float ly = cy + std::sin(pa + baseAng) * lr / ya;
+          plotDot(dst, w, h, lx, ly, std::max(1.0F, mn * 0.002F), ya, Rgb{180, 160, 240, false});
+        }
+      }
+    });
+}
+
+// MJO: Madden-Julian Oscillation. A convective envelope drifts east along
+// the equator, circumnavigating in 30-60 days (compressed to t).
+void effectMjo(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6500,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 14, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLonDeg = std::fmod(t * 40.0F, 360.0F) - 180.0F;
+      const float cLat = 1.0F, sLat = 0.0F;
+      // Envelope longitude marches east.
+      const float envLon = std::fmod(t * 720.0F + 540.0F, 360.0F) - 180.0F;
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          const float u = (xx - cx) / R, v = (yy - cy) * ya / R;
+          const float nz = std::sqrt(std::max(0.0F, 1.0F - u * u - v * v));
+          const float shade = 0.55F + 0.45F * nz;
+          // Wrap-aware longitude distance.
+          float dLon = std::fmod(lon - envLon + 540.0F, 360.0F) - 180.0F;
+          const float env = std::exp(-(dLon * dLon) / 1000.0F - lat * lat / 150.0F);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(((40 + 180 * env) + dl * 0.25F) * shade),
+                  u8(((70 + 160 * env) + dl * 0.25F) * shade),
+                  u8(((130 + 100 * env) + dl * 0.20F) * shade), false};
+        }
+    });
+}
+
+// Ozone Hole: top-down Antarctic view. Ozone-depleted region pulses wider
+// and narrower over time (austral spring → summer).
+void effectOzoneHole(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 14, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      // South pole projection: lat = -90 + r/R * 90.
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          const float u = xx - cx;
+          const float v = (yy - cy) * ya;
+          const float r = std::sqrt(u * u + v * v);
+          if (r > R) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          const float lat = -90.0F + r / R * 90.0F;
+          const bool ice = lat < -70.0F;
+          // Default: cold blue ocean / white Antarctica.
+          float r0, g0, b0;
+          if (ice) {
+            r0 = 220 + dl * 0.10F;
+            g0 = 230 + dl * 0.10F;
+            b0 = 240;
+          } else {
+            r0 = 40 + dl * 0.20F;
+            g0 = 80 + dl * 0.25F;
+            b0 = 130 + dl * 0.30F;
+          }
+          // Ozone hole: pulsing dark patch over the pole, max in October-Nov.
+          const float pulse = 0.6F + 0.4F * std::sin(t * 6.2832F);
+          const float holeR = mn * 0.25F * pulse;
+          if (r < holeR) {
+            const float hole = 1.0F - r / holeR;
+            r0 = r0 * (1 - 0.7F * hole) + 30 * hole;
+            g0 = g0 * (1 - 0.7F * hole) + 0 * hole;
+            b0 = b0 * (1 - 0.7F * hole) + 80 * hole;
+          }
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(r0), u8(g0), u8(b0), false};
+        }
+      // Latitude rings.
+      for (float lat : {-60.0F, -70.0F, -80.0F}) {
+        const float rr = (90.0F + lat) / 90.0F * R;
+        for (float a = 0; a < 6.2832F; a += 0.02F) {
+          const float xx = cx + std::cos(a) * rr;
+          const float yy = cy + std::sin(a) * rr / ya;
+          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+            dst[static_cast<std::size_t>(static_cast<int>(yy)) * w + static_cast<int>(xx)] =
+                Rgb{120, 140, 180, false};
+        }
+      }
+    });
+}
+
+// Pangaea: a single supercontinent in the middle of t=0; as t grows it
+// fragments into the modern continents.
+void effectPangaea(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 7000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLonDeg = 0.0F;
+      const float cLat = 1.0F, sLat = 0.0F;
+      // Ocean fill.
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(20 + dl * 0.20F), u8(60 + dl * 0.25F), u8(120 + dl * 0.30F), false};
+        }
+      // Continent fragments — drift outward from origin centre over t.
+      struct Cont { float lat, lon; float r; float driftLat, driftLon; };
+      const Cont conts[] = {
+          // Each starts near (0, 0) when t=0 and drifts to its modern position.
+          {30, -80, mn * 0.10F, 30, -80},    // North America
+          {-15, -55, mn * 0.08F, -15, -55},  // South America
+          {0, 20, mn * 0.10F, 0, 20},        // Africa
+          {50, 10, mn * 0.08F, 50, 10},      // Europe
+          {30, 100, mn * 0.15F, 30, 100},    // Asia
+          {-25, 135, mn * 0.06F, -25, 135},  // Australia
+      };
+      const float drift = std::clamp(t * 1.2F, 0.0F, 1.0F);
+      for (const auto& c : conts) {
+        // Start: clumped near 0, 0 (Pangaea). End: at modern location.
+        const float curLat = drift * c.driftLat;
+        const float curLon = drift * c.driftLon;
+        float px, py;
+        if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, curLat, curLon, px, py))
+          drawDataDisk(dst, w, h, src, px, py, c.r, ya, 0.75F, 0.0F,
+                       Rgb{140, 120, 70, false});
+      }
+      // Label at start ("PANGAEA") fading to end ("TODAY").
+      const std::string label = (drift < 0.5F) ? "PANGAEA" : "TODAY";
+      const int sc = std::max(2, static_cast<int>(mn / 30.0F));
+      const float lineW = static_cast<float>(label.size()) * 6 * sc;
+      for (int ci = 0; ci < static_cast<int>(label.size()); ++ci) {
+        const auto g = glyph5x7(label[ci]);
+        for (int fy = 0; fy < 7; ++fy)
+          for (int fx = 0; fx < 5; ++fx)
+            if (g[fy][fx] == '1')
+              plotDot(dst, w, h, w * 0.5F - lineW * 0.5F + (ci * 6 + fx) * sc, h * 0.08F + fy * sc,
+                      std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, Rgb{240, 220, 140, false});
+      }
+    });
+}
+
+// Ring of Fire: Pacific globe with a chain of volcano markers around the
+// Pacific rim. Random ones erupt as red flashes, shock-rings ripple out.
+void effectRingOfFire(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 6500,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLonDeg = -150.0F;
+      const float cLat = 1.0F, sLat = 0.0F;
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(20 + dl * 0.20F), u8(50 + dl * 0.25F), u8(100 + dl * 0.30F), false};
+        }
+      // Ring of fire chain (rough Pacific rim).
+      const std::vector<std::pair<float,float>> vol = {
+          {65,-160},{60,-150},{55,-135},{45,-125},{38,-122},{30,-115},{20,-105},{10,-90},
+          {-5,-80},{-20,-72},{-35,-72},{-45,-75},
+          {-40,170},{-20,165},{0,150},{10,140},{20,140},{30,135},{40,140},{50,155},{55,160}};
+      for (size_t i = 0; i < vol.size(); ++i) {
+        float px, py;
+        if (!globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, vol[i].first, vol[i].second, px, py)) continue;
+        // Steady volcano marker.
+        plotDot(dst, w, h, px, py, mn * 0.008F, ya, Rgb{180, 80, 40, false});
+        // Erupts occasionally.
+        const float eruptT = std::fmod(t + hash(i) * 0.7F, 0.3F);
+        if (eruptT < 0.05F) {
+          const float age = eruptT / 0.05F;
+          plotDot(dst, w, h, px, py, mn * 0.025F * (1 - age), ya, Rgb{255, 200, 80, false});
+          // Shockwave ring.
+          for (float a = 0; a < 6.2832F; a += 0.05F)
+            plotDot(dst, w, h, px + std::cos(a) * mn * 0.04F * age, py + std::sin(a) * mn * 0.04F * age / ya,
+                    std::max(1.0F, mn * 0.002F), ya, Rgb{u8(255 * (1 - age)), u8(160 * (1 - age)), u8(40), false});
+        }
+      }
+    });
+}
+
+// Saharan Dust: dust plume from the Sahara crosses the Atlantic to feed the
+// Amazon. Data-tinted dust particles drift.
+void effectSaharanDust(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLatDeg = 15.0F, centerLonDeg = -30.0F;
+      const float cLat = std::cos(centerLatDeg * 3.14159F / 180.0F);
+      const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          // Africa: simplified band on the east; SA on the west.
+          const bool africa = lon > -20.0F && lon < 50.0F && lat > -30.0F && lat < 30.0F;
+          const bool amazonia = lon > -80.0F && lon < -45.0F && lat > -15.0F && lat < 10.0F;
+          float r0, g0, b0;
+          if (africa) { r0 = 200 + dl * 0.15F; g0 = 160 + dl * 0.10F; b0 = 80; }
+          else if (amazonia) { r0 = 60 + dl * 0.15F; g0 = 140 + dl * 0.20F; b0 = 50; }
+          else { r0 = 30 + dl * 0.20F; g0 = 70 + dl * 0.25F; b0 = 130 + dl * 0.30F; }
+          dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(r0), u8(g0), u8(b0), false};
+        }
+      // Dust plume particles: drift from Sahara (~20°N, 10°E) westward to Caribbean (~15°N, -65°E).
+      for (int i = 0; i < 200; ++i) {
+        const float lifeT = std::fmod(t + hash(i), 1.0F);
+        const float lat = 20.0F + (hash(i * 7) - 0.5F) * 10.0F;
+        const float lonStart = 10.0F, lonEnd = -65.0F;
+        const float lon = lonStart + lifeT * (lonEnd - lonStart);
+        float px, py;
+        if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py))
+          plotDot(dst, w, h, px, py, mn * 0.006F, ya, Rgb{220, 180, 100, false});
+      }
+    });
+}
+
+// Sea Ice: top-down Arctic view. White ice cap waxes and wanes seasonally.
+void effectSeaIce(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6500,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 14, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      // North-pole projection. lat = 90 - r/R * 90.
+      // Ice cap radius oscillates with t (winter wider, summer narrower).
+      const float icePulse = 0.55F + 0.35F * std::sin(t * 6.2832F);  // 0.20..0.90
+      const float iceR = R * icePulse;
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          const float u = xx - cx;
+          const float v = (yy - cy) * ya;
+          const float r = std::sqrt(u * u + v * v);
+          if (r > R) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          // Continents (rough): Russia, Alaska, Canada, Greenland — sketch as
+          // sectors of the disk.
+          const float theta = std::atan2(v, u);
+          const float lat = 90.0F - r / R * 90.0F;
+          const bool ice = r < iceR;
+          const bool island = (lat < 70.0F) && (
+              (theta > -2.0F && theta < -1.0F) ||  // Russia sector
+              (theta > 1.0F && theta < 2.0F) ||    // North America sector
+              (theta > 2.5F || theta < -2.5F));    // Greenland sector
+          if (ice) {
+            const float fade = 1.0F - r / iceR;
+            dst[static_cast<std::size_t>(yy) * w + xx] =
+                Rgb{u8(220 + 30 * fade + dl * 0.10F), u8(230 + 20 * fade + dl * 0.10F),
+                    u8(250), false};
+          } else if (island) {
+            dst[static_cast<std::size_t>(yy) * w + xx] =
+                Rgb{u8(100 + dl * 0.20F), u8(130 + dl * 0.20F), u8(80), false};
+          } else {
+            dst[static_cast<std::size_t>(yy) * w + xx] =
+                Rgb{u8(20 + dl * 0.20F), u8(50 + dl * 0.25F), u8(110 + dl * 0.30F), false};
+          }
+        }
+      // Latitude rings.
+      for (float lat : {60.0F, 70.0F, 80.0F}) {
+        const float rr = (90.0F - lat) / 90.0F * R;
+        for (float a = 0; a < 6.2832F; a += 0.02F) {
+          const float xx = cx + std::cos(a) * rr;
+          const float yy = cy + std::sin(a) * rr / ya;
+          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+            dst[static_cast<std::size_t>(static_cast<int>(yy)) * w + static_cast<int>(xx)] =
+                Rgb{160, 180, 210, false};
+        }
+      }
+    });
+}
+
+// Tsunami: Pacific basin. Concentric wave fronts radiating from a Japanese
+// epicentre across the data-tinted ocean.
+void effectTsunami(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6500,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLatDeg = 20.0F, centerLonDeg = 160.0F;
+      const float cLat = std::cos(centerLatDeg * 3.14159F / 180.0F);
+      const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
+      // Pre-compute epicentre screen position.
+      const float epiLat = 38.0F, epiLon = 143.0F;  // Tohoku
+      float epiPx = 0, epiPy = 0;
+      const bool epiVisible =
+          globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, epiLat, epiLon, epiPx, epiPy);
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          float r0 = 20 + dl * 0.20F, g0 = 60 + dl * 0.25F, b0 = 110 + dl * 0.30F;
+          // Continents (rough land mask).
+          const bool land = (lon > 100.0F && lon < 145.0F && lat > 0.0F && lat < 50.0F)  // Asia
+                         || (lon > -130.0F && lon < -75.0F && lat > -60.0F && lat < 60.0F) // Americas
+                         || (lon > 140.0F && lon < 180.0F && lat > -45.0F && lat < -10.0F); // Australia
+          if (land) { r0 = 120 + dl * 0.10F; g0 = 130; b0 = 80; }
+          // Concentric wave fronts.
+          if (epiVisible) {
+            const float dx = xx - epiPx;
+            const float dy = (yy - epiPy) * ya;
+            const float r = std::sqrt(dx * dx + dy * dy);
+            const float speed = mn * 1.5F;
+            const float wave = std::sin(r * 0.10F - t * speed * 0.05F);
+            const float reach = std::clamp(t * speed - r, 0.0F, mn * 0.4F) / (mn * 0.4F);
+            if (!land && reach > 0)
+              { r0 += 80 * wave * reach; g0 += 60 * wave * reach; b0 += 100 * wave * reach; }
+          }
+          dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(r0), u8(g0), u8(b0), false};
+        }
+      // Mark the epicentre.
+      if (epiVisible)
+        plotDot(dst, w, h, epiPx, epiPy, mn * 0.012F, ya, Rgb{255, 80, 80, false});
+    });
+}
+
+// Walker Cell: Pacific east-west. Convective rising over Indonesia,
+// sinking over Peru, arrows showing the circulation.
+void effectWalkerCell(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  runFrames(renderer, w, h, 6500,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLonDeg = -150.0F;
+      const float cLat = 1.0F, sLat = 0.0F;
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          dst[static_cast<std::size_t>(yy) * w + xx] =
+              Rgb{u8(20 + dl * 0.20F), u8(60 + dl * 0.25F), u8(110 + dl * 0.30F), false};
+        }
+      // Convective rising at ~110°E (Indonesia): cloud cluster.
+      for (int i = 0; i < 30; ++i) {
+        const float a = i / 30.0F * 6.2832F;
+        const float lat = 0.0F + std::sin(a + t * 3.0F) * 6.0F;
+        const float lon = 110.0F + std::cos(a + t * 3.0F) * 6.0F;
+        float px, py;
+        if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py))
+          plotDot(dst, w, h, px, py, mn * 0.020F, ya, Rgb{240, 240, 250, false});
+      }
+      // Sinking at ~ -80°E (Peru): clear, dry-bright.
+      for (int i = 0; i < 12; ++i) {
+        const float a = i / 12.0F * 6.2832F;
+        const float lat = -10.0F + std::sin(a) * 3.0F;
+        const float lon = -80.0F + std::cos(a) * 4.0F;
+        float px, py;
+        if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py))
+          plotDot(dst, w, h, px, py, mn * 0.008F, ya, Rgb{220, 200, 140, false});
+      }
+      // East-west arrows along equator (surface easterlies + upper westerlies).
+      const float adv = std::fmod(t * 1.5F, 1.0F);
+      for (int k = 0; k < 12; ++k) {
+        const float lonE = -180.0F + (k / 12.0F) * 360.0F + adv * 30.0F;
+        float px, py;
+        if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, 0.0F, lonE, px, py)) {
+          plotDot(dst, w, h, px - mn * 0.005F, py, mn * 0.005F, ya, Rgb{255, 240, 120, false});
+        }
+      }
+    });
+}
+
+// Wildfire Smoke: North American globe; smoke plumes from a few fires drift
+// eastward on prevailing winds.
+void effectWildfireSmoke(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  runFrames(renderer, w, h, 6000,
+    [&](float t, std::vector<Rgb>& dst) {
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+          dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
+      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float R = mn * 0.42F;
+      const float centerLatDeg = 45.0F, centerLonDeg = -90.0F;
+      const float cLat = std::cos(centerLatDeg * 3.14159F / 180.0F);
+      const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
+      for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx) {
+          float lat, lon;
+          if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
+          const Rgb d = sample(src, w, h, xx, yy);
+          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+          // Crude land vs ocean: longitude band -130 .. -65 + latitude 25..70 = N America.
+          const bool land = lon > -135.0F && lon < -65.0F && lat > 25.0F && lat < 70.0F;
+          float r0, g0, b0;
+          if (land) { r0 = 90 + dl * 0.20F; g0 = 130 + dl * 0.20F; b0 = 60; }
+          else { r0 = 30 + dl * 0.20F; g0 = 70 + dl * 0.25F; b0 = 110 + dl * 0.30F; }
+          dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(r0), u8(g0), u8(b0), false};
+        }
+      // Fires + smoke trails.
+      const std::vector<std::pair<float,float>> fires = {
+          {45,-122}, {50,-115}, {40,-105}, {55,-100}};
+      for (const auto& f : fires) {
+        float fpx, fpy;
+        if (!globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, f.first, f.second, fpx, fpy)) continue;
+        plotDot(dst, w, h, fpx, fpy, mn * 0.012F, ya, Rgb{255, 80, 30, false});
+        // Smoke particles drift east + north.
+        for (int i = 0; i < 40; ++i) {
+          const float age = std::fmod(t * 1.5F + hash(i + static_cast<int>(f.first * 7)), 1.0F);
+          const float driftLon = f.second + age * 40.0F + (hash(i * 3) - 0.5F) * 8.0F;
+          const float driftLat = f.first + age * 8.0F + (hash(i * 5) - 0.5F) * 4.0F;
+          float spx, spy;
+          if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, driftLat, driftLon, spx, spy))
+            plotDot(dst, w, h, spx, spy, mn * 0.010F * (1 - age), ya,
+                    Rgb{u8(160), u8(140), u8(130), false});
+        }
+      }
+    });
+}
+
 // Effect roster. Keep in sync with the dispatch switch below and with the
 // names in exitEffectName().
-constexpr int kEffectCount = 268;
+constexpr int kEffectCount = 286;
 
 // Themes group the effects for the F8 picker and --list-exit-effects.
 // Order matters: this is the order themes appear in menus. Cultural
@@ -20202,270 +21309,288 @@ constexpr Theme kThemes[kEffectCount] = {
     /*   1 Acid Trip              */ Theme::Chemistry,
     /*   2 ACME Anvil             */ Theme::Cartoon,
     /*   3 Akira                  */ Theme::Cinema,
-    /*   4 Anubis                 */ Theme::Myth,
-    /*   5 Apocalypse             */ Theme::Cinema,
-    /*   6 Apollo 11              */ Theme::History,
-    /*   7 Aurora                 */ Theme::Weather,
-    /*   8 Avogadro               */ Theme::Chemistry,
-    /*   9 Ballet                 */ Theme::Music,
-    /*  10 Banksy Balloon         */ Theme::Art,
-    /*  11 Bass Spiral            */ Theme::Music,
-    /*  12 Beagle                 */ Theme::Biology,
-    /*  13 Beethoven Fifth        */ Theme::Music,
-    /*  14 Benzene                */ Theme::Chemistry,
-    /*  15 Berlin Wall            */ Theme::History,
-    /*  16 Big Bang               */ Theme::Physics,
-    /*  17 Big Keyboard           */ Theme::Cinema,
-    /*  18 Black Hole             */ Theme::Physics,
-    /*  19 Bohr Atom              */ Theme::Physics,
-    /*  20 Bond Barrel            */ Theme::Cinema,
-    /*  21 Bone Chandelier        */ Theme::Art,
-    /*  22 Bone Cut               */ Theme::Cinema,
-    /*  23 Boulder                */ Theme::Cinema,
-    /*  24 Bouncing Ball          */ Theme::TerminalFx,
-    /*  25 Brachistochrone        */ Theme::Physics,
-    /*  26 Brownian               */ Theme::Chemistry,
-    /*  27 Buckyball              */ Theme::Chemistry,
-    /*  28 Butterfly              */ Theme::Physics,
-    /*  29 Cambrian               */ Theme::Biology,
-    /*  30 Catalyst               */ Theme::Chemistry,
-    /*  31 Ceci n'est pas         */ Theme::Art,
-    /*  32 Cell Divides           */ Theme::Biology,
-    /*  33 Cetacean               */ Theme::Biology,
-    /*  34 Chinese Dragon         */ Theme::Myth,
-    /*  35 Chladni                */ Theme::Physics,
-    /*  36 Chromatography         */ Theme::Chemistry,
-    /*  37 Clockwork              */ Theme::Cinema,
-    /*  38 Close Encounters       */ Theme::Cinema,
-    /*  39 CMB Glow               */ Theme::Physics,
-    /*  40 Co-evolution           */ Theme::Biology,
-    /*  41 Columbus               */ Theme::History,
-    /*  42 Comet Tail             */ Theme::Physics,
-    /*  43 Conductor Baton        */ Theme::Music,
-    /*  44 Coriolis               */ Theme::Weather,
-    /*  45 Cosmic Web             */ Theme::Physics,
-    /*  46 Countdown              */ Theme::TerminalFx,
-    /*  47 Crab                   */ Theme::TerminalFx,
-    /*  48 CRT Off                */ Theme::TerminalFx,
-    /*  49 Darwin                 */ Theme::Biology,
-    /*  50 Deep Field             */ Theme::Physics,
-    /*  51 DeLorean               */ Theme::Cinema,
-    /*  52 Derecho                */ Theme::Weather,
-    /*  53 Dial M                 */ Theme::Cinema,
-    /*  54 Dictator Globe         */ Theme::Cinema,
-    /*  55 Dissolve               */ Theme::TerminalFx,
-    /*  56 DNA                    */ Theme::Biology,
-    /*  57 Dodecahedron           */ Theme::Physics,
-    /*  58 Double Slit            */ Theme::Physics,
-    /*  59 Doves                  */ Theme::Cinema,
-    /*  60 E.T.                   */ Theme::Cinema,
-    /*  61 Eiffel Tower           */ Theme::History,
-    /*  62 El Nino                */ Theme::Weather,
-    /*  63 Electrolysis           */ Theme::Chemistry,
-    /*  64 End Card               */ Theme::TerminalFx,
-    /*  65 Endosymbiosis          */ Theme::Biology,
-    /*  66 Euler Identity         */ Theme::Physics,
-    /*  67 Explode                */ Theme::TerminalFx,
-    /*  68 Eye Wink               */ Theme::TerminalFx,
-    /*  69 Fade                   */ Theme::TerminalFx,
-    /*  70 Fall to Pieces         */ Theme::TerminalFx,
-    /*  71 Feather                */ Theme::Cinema,
-    /*  72 Film Burn              */ Theme::Cinema,
-    /*  73 Finches                */ Theme::Biology,
-    /*  74 Fire                   */ Theme::TerminalFx,
-    /*  75 Fireworks              */ Theme::TerminalFx,
-    /*  76 Fish                   */ Theme::TerminalFx,
-    /*  77 Flame Test             */ Theme::Chemistry,
-    /*  78 Flatland               */ Theme::Physics,
-    /*  79 Fogbow                 */ Theme::Weather,
-    /*  80 Foot Stomp             */ Theme::Cartoon,
-    /*  81 Foucault Pendulum      */ Theme::Physics,
-    /*  82 Fourier                */ Theme::Physics,
-    /*  83 Galapagos              */ Theme::Biology,
-    /*  84 Galaxy Collision       */ Theme::Physics,
-    /*  85 Galileo Telescope      */ Theme::History,
-    /*  86 Galileo Tower          */ Theme::Physics,
-    /*  87 Game of Life           */ Theme::Physics,
-    /*  88 Garuda                 */ Theme::Myth,
-    /*  89 Gas Giant              */ Theme::Physics,
-    /*  90 Glow Stick             */ Theme::Chemistry,
-    /*  91 Golden Spiral          */ Theme::Physics,
-    /*  92 Gotcha                 */ Theme::TerminalFx,
-    /*  93 Gravity Lens           */ Theme::Physics,
-    /*  94 Greek Dance            */ Theme::Music,
-    /*  95 Guillotine             */ Theme::History,
-    /*  96 Gunshot                */ Theme::TerminalFx,
-    /*  97 Gutenberg              */ Theme::History,
-    /*  98 HAL 9000               */ Theme::Cinema,
-    /*  99 HAL Stare              */ Theme::Cinema,
-    /* 100 Halley                 */ Theme::Physics,
-    /* 101 Hendrix Guitar         */ Theme::Music,
-    /* 102 Hitchcock              */ Theme::Cinema,
-    /* 103 Hokusai Wave           */ Theme::Art,
-    /* 104 Hurricane Eye          */ Theme::Weather,
-    /* 105 Implode + Ring         */ Theme::TerminalFx,
-    /* 106 Inception              */ Theme::Cinema,
-    /* 107 Interstellar           */ Theme::Cinema,
-    /* 108 Iris Out               */ Theme::TerminalFx,
-    /* 109 Jaws                   */ Theme::Cinema,
-    /* 110 Jellyfish              */ Theme::TerminalFx,
-    /* 111 Jet Stream             */ Theme::Weather,
-    /* 112 Jurassic               */ Theme::Cinema,
-    /* 113 JWST                   */ Theme::Physics,
-    /* 114 King Kong              */ Theme::Cinema,
-    /* 115 Koyaanisqatsi          */ Theme::Cinema,
-    /* 116 Lava Lamp              */ Theme::Chemistry,
-    /* 117 Lawrence               */ Theme::Cinema,
-    /* 118 Lebowski               */ Theme::Cinema,
-    /* 119 Liesegang              */ Theme::Chemistry,
-    /* 120 LIGO Chirp             */ Theme::Physics,
-    /* 121 Lorenz Attractor       */ Theme::Physics,
-    /* 122 Lucy                   */ Theme::Biology,
-    /* 123 Lunar Eclipse          */ Theme::Physics,
-    /* 124 Macarena               */ Theme::Music,
-    /* 125 Magna Carta            */ Theme::History,
-    /* 126 Magnetar               */ Theme::Physics,
-    /* 127 Magritte Bowler        */ Theme::Art,
-    /* 128 Mammatus               */ Theme::Weather,
-    /* 129 Mandelbrot             */ Theme::Physics,
-    /* 130 March of Progress      */ Theme::Biology,
-    /* 131 Mars Rover             */ Theme::Physics,
-    /* 132 Mary Poppins           */ Theme::Cinema,
-    /* 133 Matrix Drop            */ Theme::Cinema,
-    /* 134 Memento                */ Theme::Cinema,
-    /* 135 Mendel                 */ Theme::Biology,
-    /* 136 Mendeleev              */ Theme::Chemistry,
-    /* 137 Mentos                 */ Theme::Chemistry,
-    /* 138 Mitochondrial Eve      */ Theme::Biology,
-    /* 139 Mjolnir                */ Theme::Myth,
-    /* 140 Mobius                 */ Theme::Physics,
-    /* 141 Mona Lisa              */ Theme::Art,
-    /* 142 Monolith               */ Theme::Cinema,
-    /* 143 Monsoon                */ Theme::Weather,
-    /* 144 Monty Python           */ Theme::Cartoon,
-    /* 145 Moon Rocket            */ Theme::Cinema,
-    /* 146 Munch Scream           */ Theme::Art,
-    /* 147 Mutation               */ Theme::Biology,
-    /* 148 NaCl Lattice           */ Theme::Chemistry,
-    /* 149 Napoleon               */ Theme::History,
-    /* 150 Neo                    */ Theme::Cinema,
-    /* 151 Neutron Star           */ Theme::Physics,
-    /* 152 Newspaper              */ Theme::TerminalFx,
-    /* 153 Newton Cradle          */ Theme::Physics,
-    /* 154 Nosferatu              */ Theme::Cinema,
-    /* 155 Opera Curtain          */ Theme::Music,
-    /* 156 Out of Africa          */ Theme::Biology,
-    /* 157 Pac-Man                */ Theme::Cartoon,
-    /* 158 Pac-Man Duel           */ Theme::Cartoon,
-    /* 159 Pandora                */ Theme::Myth,
-    /* 160 Parthenon              */ Theme::History,
-    /* 161 Peacock                */ Theme::Biology,
-    /* 162 Pegasus                */ Theme::Myth,
-    /* 163 Pendulum Waves         */ Theme::Physics,
-    /* 164 Peppered Moth          */ Theme::Biology,
-    /* 165 Periodic Table         */ Theme::Chemistry,
-    /* 166 pH Strip               */ Theme::Chemistry,
-    /* 167 Phase Transition       */ Theme::Chemistry,
-    /* 168 Phoenix                */ Theme::Myth,
-    /* 169 Pi                     */ Theme::Physics,
-    /* 170 Piano Keys             */ Theme::Music,
-    /* 171 Pillars of Creation    */ Theme::Physics,
-    /* 172 Pink Panther           */ Theme::Cartoon,
-    /* 173 Pleasantville          */ Theme::Cinema,
-    /* 174 Polar Vortex           */ Theme::Weather,
-    /* 175 Pompeii                */ Theme::History,
-    /* 176 Pride Rock             */ Theme::Cinema,
-    /* 177 Psycho                 */ Theme::Cinema,
-    /* 178 Pulp Fiction           */ Theme::Cinema,
-    /* 179 Pulsar                 */ Theme::Physics,
-    /* 180 Punctuated             */ Theme::Biology,
-    /* 181 Pyramids               */ Theme::History,
-    /* 182 Pythagoras             */ Theme::Physics,
-    /* 183 Python Wars            */ Theme::Cartoon,
-    /* 184 Quetzalcoatl           */ Theme::Myth,
-    /* 185 Ragnarok               */ Theme::Myth,
-    /* 186 Red Balloon            */ Theme::Cinema,
-    /* 187 Riverdance             */ Theme::Music,
-    /* 188 Rocky                  */ Theme::Cinema,
-    /* 189 Rosebud                */ Theme::Cinema,
-    /* 190 Rubik                  */ Theme::Physics,
-    /* 191 Russian Dance          */ Theme::Music,
-    /* 192 Sagittarius A          */ Theme::Physics,
-    /* 193 Saturn                 */ Theme::Physics,
-    /* 194 Schrodinger            */ Theme::Physics,
-    /* 195 Selection              */ Theme::Biology,
-    /* 196 Shawshank              */ Theme::Cinema,
-    /* 197 Sheet Music            */ Theme::Music,
-    /* 198 Shining                */ Theme::Cinema,
-    /* 199 Shiver                 */ Theme::TerminalFx,
-    /* 200 Sierpinski             */ Theme::Physics,
-    /* 201 Silly Walk             */ Theme::Cartoon,
-    /* 202 Singin'                */ Theme::Music,
-    /* 203 Sistine                */ Theme::Art,
-    /* 204 Skeleton Wave          */ Theme::TerminalFx,
-    /* 205 Snow Tree              */ Theme::Weather,
-    /* 206 Snowfall               */ Theme::Weather,
-    /* 207 Soap Bubble            */ Theme::Chemistry,
-    /* 208 Solar Eclipse          */ Theme::Physics,
-    /* 209 Solar Flare            */ Theme::Physics,
-    /* 210 Solar System           */ Theme::Physics,
-    /* 211 Sound of Music         */ Theme::Music,
-    /* 212 Spaghettify            */ Theme::Physics,
-    /* 213 Spider                 */ Theme::TerminalFx,
-    /* 214 Spiral                 */ Theme::TerminalFx,
-    /* 215 Spirited Train         */ Theme::Cinema,
-    /* 216 Sputnik                */ Theme::History,
-    /* 217 Standing Wave          */ Theme::Physics,
-    /* 218 Standoff               */ Theme::Cinema,
-    /* 219 Star Gate              */ Theme::Cinema,
-    /* 220 Star Wars              */ Theme::Cinema,
-    /* 221 Stephenson             */ Theme::History,
-    /* 222 Stingray               */ Theme::Weather,
-    /* 223 Stonehenge             */ Theme::History,
-    /* 224 Stradivarius           */ Theme::Music,
-    /* 225 Strangelove            */ Theme::Cinema,
-    /* 226 Submarine              */ Theme::Music,
-    /* 227 Sun Dogs               */ Theme::Physics,
-    /* 228 Supercell              */ Theme::Weather,
-    /* 229 Supernova              */ Theme::Physics,
-    /* 230 Tatooine               */ Theme::Cinema,
-    /* 231 Teardrop               */ Theme::TerminalFx,
-    /* 232 Tears in Rain          */ Theme::Cinema,
-    /* 233 Test Card              */ Theme::TerminalFx,
-    /* 234 Thanos Snap            */ Theme::Cinema,
-    /* 235 That's All Folks       */ Theme::Cartoon,
-    /* 236 The Birds              */ Theme::Cinema,
-    /* 237 The End                */ Theme::TerminalFx,
-    /* 238 Thelma & Louise        */ Theme::Cinema,
-    /* 239 Theremin               */ Theme::Music,
-    /* 240 Thriller               */ Theme::Music,
-    /* 241 Thunderstorm           */ Theme::Weather,
-    /* 242 Titanic                */ Theme::Cinema,
-    /* 243 Tornado                */ Theme::Weather,
-    /* 244 Tornado Duel           */ Theme::Weather,
-    /* 245 Totoro                 */ Theme::Cinema,
-    /* 246 Tracks                 */ Theme::Cinema,
-    /* 247 Train                  */ Theme::Cinema,
-    /* 248 Tree of Life           */ Theme::Biology,
-    /* 249 Trojan Horse           */ Theme::History,
-    /* 250 Tron                   */ Theme::Cinema,
-    /* 251 Truman                 */ Theme::Cinema,
-    /* 252 Tunnel                 */ Theme::TerminalFx,
-    /* 253 UFO                    */ Theme::Cinema,
-    /* 254 Up                     */ Theme::Cinema,
-    /* 255 Utopia                 */ Theme::TerminalFx,
-    /* 256 Valkyrie Ride          */ Theme::Music,
-    /* 257 Vertigo                */ Theme::Cinema,
-    /* 258 Viking Longboat        */ Theme::History,
-    /* 259 Vinyl Spin             */ Theme::Music,
-    /* 260 Warhol Banana          */ Theme::Art,
-    /* 261 Warp                   */ Theme::TerminalFx,
-    /* 262 Wizard of Oz           */ Theme::Cinema,
-    /* 263 Word Reveal            */ Theme::TerminalFx,
-    /* 264 Wormhole               */ Theme::Physics,
-    /* 265 Wright Flyer           */ Theme::History,
-    /* 266 Yggdrasil              */ Theme::Myth,
-    /* 267 YMCA                   */ Theme::Music,
+    /*   4 AMOC                   */ Theme::Weather,
+    /*   5 Anubis                 */ Theme::Myth,
+    /*   6 Apocalypse             */ Theme::Cinema,
+    /*   7 Apollo 11              */ Theme::History,
+    /*   8 Aurora                 */ Theme::Weather,
+    /*   9 Auroral Oval           */ Theme::Weather,
+    /*  10 Avogadro               */ Theme::Chemistry,
+    /*  11 Ballet                 */ Theme::Music,
+    /*  12 Banksy Balloon         */ Theme::Art,
+    /*  13 Bass Spiral            */ Theme::Music,
+    /*  14 Beagle                 */ Theme::Biology,
+    /*  15 Beethoven Fifth        */ Theme::Music,
+    /*  16 Benzene                */ Theme::Chemistry,
+    /*  17 Berlin Wall            */ Theme::History,
+    /*  18 Big Bang               */ Theme::Physics,
+    /*  19 Big Keyboard           */ Theme::Cinema,
+    /*  20 Black Hole             */ Theme::Physics,
+    /*  21 Bohr Atom              */ Theme::Physics,
+    /*  22 Bond Barrel            */ Theme::Cinema,
+    /*  23 Bone Chandelier        */ Theme::Art,
+    /*  24 Bone Cut               */ Theme::Cinema,
+    /*  25 Boulder                */ Theme::Cinema,
+    /*  26 Bouncing Ball          */ Theme::TerminalFx,
+    /*  27 Brachistochrone        */ Theme::Physics,
+    /*  28 Brownian               */ Theme::Chemistry,
+    /*  29 Buckyball              */ Theme::Chemistry,
+    /*  30 Butterfly              */ Theme::Physics,
+    /*  31 Cambrian               */ Theme::Biology,
+    /*  32 Catalyst               */ Theme::Chemistry,
+    /*  33 Ceci n'est pas         */ Theme::Art,
+    /*  34 Cell Divides           */ Theme::Biology,
+    /*  35 Cetacean               */ Theme::Biology,
+    /*  36 Chinese Dragon         */ Theme::Myth,
+    /*  37 Chladni                */ Theme::Physics,
+    /*  38 Chromatography         */ Theme::Chemistry,
+    /*  39 Clockwork              */ Theme::Cinema,
+    /*  40 Close Encounters       */ Theme::Cinema,
+    /*  41 CMB Glow               */ Theme::Physics,
+    /*  42 Co-evolution           */ Theme::Biology,
+    /*  43 Columbus               */ Theme::History,
+    /*  44 Comet Tail             */ Theme::Physics,
+    /*  45 Conductor Baton        */ Theme::Music,
+    /*  46 Coriolis               */ Theme::Weather,
+    /*  47 Cosmic Web             */ Theme::Physics,
+    /*  48 Countdown              */ Theme::TerminalFx,
+    /*  49 Crab                   */ Theme::TerminalFx,
+    /*  50 CRT Off                */ Theme::TerminalFx,
+    /*  51 Darwin                 */ Theme::Biology,
+    /*  52 Day Terminator         */ Theme::Physics,
+    /*  53 Deep Field             */ Theme::Physics,
+    /*  54 DeLorean               */ Theme::Cinema,
+    /*  55 Derecho                */ Theme::Weather,
+    /*  56 Dial M                 */ Theme::Cinema,
+    /*  57 Dictator Globe         */ Theme::Cinema,
+    /*  58 Dissolve               */ Theme::TerminalFx,
+    /*  59 DNA                    */ Theme::Biology,
+    /*  60 Dodecahedron           */ Theme::Physics,
+    /*  61 Double Slit            */ Theme::Physics,
+    /*  62 Doves                  */ Theme::Cinema,
+    /*  63 E.T.                   */ Theme::Cinema,
+    /*  64 Eiffel Tower           */ Theme::History,
+    /*  65 El Nino                */ Theme::Weather,
+    /*  66 Electrolysis           */ Theme::Chemistry,
+    /*  67 End Card               */ Theme::TerminalFx,
+    /*  68 Endosymbiosis          */ Theme::Biology,
+    /*  69 Euler Identity         */ Theme::Physics,
+    /*  70 Explode                */ Theme::TerminalFx,
+    /*  71 Eye Wink               */ Theme::TerminalFx,
+    /*  72 Fade                   */ Theme::TerminalFx,
+    /*  73 Fall to Pieces         */ Theme::TerminalFx,
+    /*  74 Feather                */ Theme::Cinema,
+    /*  75 Film Burn              */ Theme::Cinema,
+    /*  76 Finches                */ Theme::Biology,
+    /*  77 Fire                   */ Theme::TerminalFx,
+    /*  78 Fireworks              */ Theme::TerminalFx,
+    /*  79 Fish                   */ Theme::TerminalFx,
+    /*  80 Flame Test             */ Theme::Chemistry,
+    /*  81 Flatland               */ Theme::Physics,
+    /*  82 Fogbow                 */ Theme::Weather,
+    /*  83 Foot Stomp             */ Theme::Cartoon,
+    /*  84 Foucault Pendulum      */ Theme::Physics,
+    /*  85 Fourier                */ Theme::Physics,
+    /*  86 Galapagos              */ Theme::Biology,
+    /*  87 Galaxy Collision       */ Theme::Physics,
+    /*  88 Galileo Telescope      */ Theme::History,
+    /*  89 Galileo Tower          */ Theme::Physics,
+    /*  90 Game of Life           */ Theme::Physics,
+    /*  91 Garuda                 */ Theme::Myth,
+    /*  92 Gas Giant              */ Theme::Physics,
+    /*  93 Glow Stick             */ Theme::Chemistry,
+    /*  94 Golden Spiral          */ Theme::Physics,
+    /*  95 Gotcha                 */ Theme::TerminalFx,
+    /*  96 Gravity Lens           */ Theme::Physics,
+    /*  97 Greek Dance            */ Theme::Music,
+    /*  98 Guillotine             */ Theme::History,
+    /*  99 Gunshot                */ Theme::TerminalFx,
+    /* 100 Gutenberg              */ Theme::History,
+    /* 101 Hadley Cell            */ Theme::Weather,
+    /* 102 HAL 9000               */ Theme::Cinema,
+    /* 103 HAL Stare              */ Theme::Cinema,
+    /* 104 Halley                 */ Theme::Physics,
+    /* 105 Hendrix Guitar         */ Theme::Music,
+    /* 106 Hitchcock              */ Theme::Cinema,
+    /* 107 Hokusai Wave           */ Theme::Art,
+    /* 108 Hurricane Eye          */ Theme::Weather,
+    /* 109 Hurricane Tracks       */ Theme::Weather,
+    /* 110 Implode + Ring         */ Theme::TerminalFx,
+    /* 111 Inception              */ Theme::Cinema,
+    /* 112 Interstellar           */ Theme::Cinema,
+    /* 113 Iris Out               */ Theme::TerminalFx,
+    /* 114 ISS Track              */ Theme::Physics,
+    /* 115 ITCZ                   */ Theme::Weather,
+    /* 116 Jaws                   */ Theme::Cinema,
+    /* 117 Jellyfish              */ Theme::TerminalFx,
+    /* 118 Jet Stream             */ Theme::Weather,
+    /* 119 Jurassic               */ Theme::Cinema,
+    /* 120 JWST                   */ Theme::Physics,
+    /* 121 King Kong              */ Theme::Cinema,
+    /* 122 Koyaanisqatsi          */ Theme::Cinema,
+    /* 123 Krakatoa               */ Theme::Weather,
+    /* 124 Lava Lamp              */ Theme::Chemistry,
+    /* 125 Lawrence               */ Theme::Cinema,
+    /* 126 Lebowski               */ Theme::Cinema,
+    /* 127 Liesegang              */ Theme::Chemistry,
+    /* 128 LIGO Chirp             */ Theme::Physics,
+    /* 129 Lorenz Attractor       */ Theme::Physics,
+    /* 130 Lucy                   */ Theme::Biology,
+    /* 131 Lunar Eclipse          */ Theme::Physics,
+    /* 132 Macarena               */ Theme::Music,
+    /* 133 Magna Carta            */ Theme::History,
+    /* 134 Magnetar               */ Theme::Physics,
+    /* 135 Magnetosphere          */ Theme::Physics,
+    /* 136 Magritte Bowler        */ Theme::Art,
+    /* 137 Mammatus               */ Theme::Weather,
+    /* 138 Mandelbrot             */ Theme::Physics,
+    /* 139 March of Progress      */ Theme::Biology,
+    /* 140 Mars Rover             */ Theme::Physics,
+    /* 141 Mary Poppins           */ Theme::Cinema,
+    /* 142 Matrix Drop            */ Theme::Cinema,
+    /* 143 Memento                */ Theme::Cinema,
+    /* 144 Mendel                 */ Theme::Biology,
+    /* 145 Mendeleev              */ Theme::Chemistry,
+    /* 146 Mentos                 */ Theme::Chemistry,
+    /* 147 Mitochondrial Eve      */ Theme::Biology,
+    /* 148 MJO                    */ Theme::Weather,
+    /* 149 Mjolnir                */ Theme::Myth,
+    /* 150 Mobius                 */ Theme::Physics,
+    /* 151 Mona Lisa              */ Theme::Art,
+    /* 152 Monolith               */ Theme::Cinema,
+    /* 153 Monsoon                */ Theme::Weather,
+    /* 154 Monty Python           */ Theme::Cartoon,
+    /* 155 Moon Rocket            */ Theme::Cinema,
+    /* 156 Munch Scream           */ Theme::Art,
+    /* 157 Mutation               */ Theme::Biology,
+    /* 158 NaCl Lattice           */ Theme::Chemistry,
+    /* 159 Napoleon               */ Theme::History,
+    /* 160 Neo                    */ Theme::Cinema,
+    /* 161 Neutron Star           */ Theme::Physics,
+    /* 162 Newspaper              */ Theme::TerminalFx,
+    /* 163 Newton Cradle          */ Theme::Physics,
+    /* 164 Nosferatu              */ Theme::Cinema,
+    /* 165 Opera Curtain          */ Theme::Music,
+    /* 166 Out of Africa          */ Theme::Biology,
+    /* 167 Ozone Hole             */ Theme::Weather,
+    /* 168 Pac-Man                */ Theme::Cartoon,
+    /* 169 Pac-Man Duel           */ Theme::Cartoon,
+    /* 170 Pandora                */ Theme::Myth,
+    /* 171 Pangaea                */ Theme::Physics,
+    /* 172 Parthenon              */ Theme::History,
+    /* 173 Peacock                */ Theme::Biology,
+    /* 174 Pegasus                */ Theme::Myth,
+    /* 175 Pendulum Waves         */ Theme::Physics,
+    /* 176 Peppered Moth          */ Theme::Biology,
+    /* 177 Periodic Table         */ Theme::Chemistry,
+    /* 178 pH Strip               */ Theme::Chemistry,
+    /* 179 Phase Transition       */ Theme::Chemistry,
+    /* 180 Phoenix                */ Theme::Myth,
+    /* 181 Pi                     */ Theme::Physics,
+    /* 182 Piano Keys             */ Theme::Music,
+    /* 183 Pillars of Creation    */ Theme::Physics,
+    /* 184 Pink Panther           */ Theme::Cartoon,
+    /* 185 Pleasantville          */ Theme::Cinema,
+    /* 186 Polar Vortex           */ Theme::Weather,
+    /* 187 Pompeii                */ Theme::History,
+    /* 188 Pride Rock             */ Theme::Cinema,
+    /* 189 Psycho                 */ Theme::Cinema,
+    /* 190 Pulp Fiction           */ Theme::Cinema,
+    /* 191 Pulsar                 */ Theme::Physics,
+    /* 192 Punctuated             */ Theme::Biology,
+    /* 193 Pyramids               */ Theme::History,
+    /* 194 Pythagoras             */ Theme::Physics,
+    /* 195 Python Wars            */ Theme::Cartoon,
+    /* 196 Quetzalcoatl           */ Theme::Myth,
+    /* 197 Ragnarok               */ Theme::Myth,
+    /* 198 Red Balloon            */ Theme::Cinema,
+    /* 199 Ring of Fire           */ Theme::Physics,
+    /* 200 Riverdance             */ Theme::Music,
+    /* 201 Rocky                  */ Theme::Cinema,
+    /* 202 Rosebud                */ Theme::Cinema,
+    /* 203 Rubik                  */ Theme::Physics,
+    /* 204 Russian Dance          */ Theme::Music,
+    /* 205 Sagittarius A          */ Theme::Physics,
+    /* 206 Saharan Dust           */ Theme::Weather,
+    /* 207 Saturn                 */ Theme::Physics,
+    /* 208 Schrodinger            */ Theme::Physics,
+    /* 209 Sea Ice                */ Theme::Weather,
+    /* 210 Selection              */ Theme::Biology,
+    /* 211 Shawshank              */ Theme::Cinema,
+    /* 212 Sheet Music            */ Theme::Music,
+    /* 213 Shining                */ Theme::Cinema,
+    /* 214 Shiver                 */ Theme::TerminalFx,
+    /* 215 Sierpinski             */ Theme::Physics,
+    /* 216 Silly Walk             */ Theme::Cartoon,
+    /* 217 Singin'                */ Theme::Music,
+    /* 218 Sistine                */ Theme::Art,
+    /* 219 Skeleton Wave          */ Theme::TerminalFx,
+    /* 220 Snow Tree              */ Theme::Weather,
+    /* 221 Snowfall               */ Theme::Weather,
+    /* 222 Soap Bubble            */ Theme::Chemistry,
+    /* 223 Solar Eclipse          */ Theme::Physics,
+    /* 224 Solar Flare            */ Theme::Physics,
+    /* 225 Solar System           */ Theme::Physics,
+    /* 226 Sound of Music         */ Theme::Music,
+    /* 227 Spaghettify            */ Theme::Physics,
+    /* 228 Spider                 */ Theme::TerminalFx,
+    /* 229 Spiral                 */ Theme::TerminalFx,
+    /* 230 Spirited Train         */ Theme::Cinema,
+    /* 231 Sputnik                */ Theme::History,
+    /* 232 Standing Wave          */ Theme::Physics,
+    /* 233 Standoff               */ Theme::Cinema,
+    /* 234 Star Gate              */ Theme::Cinema,
+    /* 235 Star Wars              */ Theme::Cinema,
+    /* 236 Stephenson             */ Theme::History,
+    /* 237 Stingray               */ Theme::Weather,
+    /* 238 Stonehenge             */ Theme::History,
+    /* 239 Stradivarius           */ Theme::Music,
+    /* 240 Strangelove            */ Theme::Cinema,
+    /* 241 Submarine              */ Theme::Music,
+    /* 242 Sun Dogs               */ Theme::Physics,
+    /* 243 Supercell              */ Theme::Weather,
+    /* 244 Supernova              */ Theme::Physics,
+    /* 245 Tatooine               */ Theme::Cinema,
+    /* 246 Teardrop               */ Theme::TerminalFx,
+    /* 247 Tears in Rain          */ Theme::Cinema,
+    /* 248 Test Card              */ Theme::TerminalFx,
+    /* 249 Thanos Snap            */ Theme::Cinema,
+    /* 250 That's All Folks       */ Theme::Cartoon,
+    /* 251 The Birds              */ Theme::Cinema,
+    /* 252 The End                */ Theme::TerminalFx,
+    /* 253 Thelma & Louise        */ Theme::Cinema,
+    /* 254 Theremin               */ Theme::Music,
+    /* 255 Thriller               */ Theme::Music,
+    /* 256 Thunderstorm           */ Theme::Weather,
+    /* 257 Titanic                */ Theme::Cinema,
+    /* 258 Tornado                */ Theme::Weather,
+    /* 259 Tornado Duel           */ Theme::Weather,
+    /* 260 Totoro                 */ Theme::Cinema,
+    /* 261 Tracks                 */ Theme::Cinema,
+    /* 262 Train                  */ Theme::Cinema,
+    /* 263 Tree of Life           */ Theme::Biology,
+    /* 264 Trojan Horse           */ Theme::History,
+    /* 265 Tron                   */ Theme::Cinema,
+    /* 266 Truman                 */ Theme::Cinema,
+    /* 267 Tsunami                */ Theme::Weather,
+    /* 268 Tunnel                 */ Theme::TerminalFx,
+    /* 269 UFO                    */ Theme::Cinema,
+    /* 270 Up                     */ Theme::Cinema,
+    /* 271 Utopia                 */ Theme::TerminalFx,
+    /* 272 Valkyrie Ride          */ Theme::Music,
+    /* 273 Vertigo                */ Theme::Cinema,
+    /* 274 Viking Longboat        */ Theme::History,
+    /* 275 Vinyl Spin             */ Theme::Music,
+    /* 276 Walker Cell            */ Theme::Weather,
+    /* 277 Warhol Banana          */ Theme::Art,
+    /* 278 Warp                   */ Theme::TerminalFx,
+    /* 279 Wildfire Smoke         */ Theme::Weather,
+    /* 280 Wizard of Oz           */ Theme::Cinema,
+    /* 281 Word Reveal            */ Theme::TerminalFx,
+    /* 282 Wormhole               */ Theme::Physics,
+    /* 283 Wright Flyer           */ Theme::History,
+    /* 284 Yggdrasil              */ Theme::Myth,
+    /* 285 YMCA                   */ Theme::Music,
 };
 static_assert(sizeof(kThemes) / sizeof(kThemes[0]) == kEffectCount,
               "kThemes must be parallel to kNames");
@@ -20483,72 +21608,77 @@ const char* exitEffectName(int effectIndex)
   // is dispatched by this index, so the two lists must stay in lockstep.
   static const char* const kNames[kEffectCount] = {
       "Accretion Disk"      , "Acid Trip"           , "ACME Anvil"          , "Akira",
-      "Anubis"              , "Apocalypse"          , "Apollo 11"           , "Aurora",
-      "Avogadro"            , "Ballet"              , "Banksy Balloon"      , "Bass Spiral",
-      "Beagle"              , "Beethoven Fifth"     , "Benzene"             , "Berlin Wall",
-      "Big Bang"            , "Big Keyboard"        , "Black Hole"          , "Bohr Atom",
-      "Bond Barrel"         , "Bone Chandelier"     , "Bone Cut"            , "Boulder",
-      "Bouncing Ball"       , "Brachistochrone"     , "Brownian"            , "Buckyball",
-      "Butterfly"           , "Cambrian"            , "Catalyst"            , "Ceci n'est pas",
-      "Cell Divides"        , "Cetacean"            , "Chinese Dragon"      , "Chladni",
-      "Chromatography"      , "Clockwork"           , "Close Encounters"    , "CMB Glow",
-      "Co-evolution"        , "Columbus"            , "Comet Tail"          , "Conductor Baton",
-      "Coriolis"            , "Cosmic Web"          , "Countdown"           , "Crab",
-      "CRT Off"             , "Darwin"              , "Deep Field"          , "DeLorean",
-      "Derecho"             , "Dial M"              , "Dictator Globe"      , "Dissolve",
-      "DNA"                 , "Dodecahedron"        , "Double Slit"         , "Doves",
-      "E.T."                , "Eiffel Tower"        , "El Nino"             , "Electrolysis",
-      "End Card"            , "Endosymbiosis"       , "Euler Identity"      , "Explode",
-      "Eye Wink"            , "Fade"                , "Fall to Pieces"      , "Feather",
-      "Film Burn"           , "Finches"             , "Fire"                , "Fireworks",
-      "Fish"                , "Flame Test"          , "Flatland"            , "Fogbow",
-      "Foot Stomp"          , "Foucault Pendulum"   , "Fourier"             , "Galapagos",
-      "Galaxy Collision"    , "Galileo Telescope"   , "Galileo Tower"       , "Game of Life",
-      "Garuda"              , "Gas Giant"           , "Glow Stick"          , "Golden Spiral",
-      "Gotcha"              , "Gravity Lens"        , "Greek Dance"         , "Guillotine",
-      "Gunshot"             , "Gutenberg"           , "HAL 9000"            , "HAL Stare",
+      "AMOC"                , "Anubis"              , "Apocalypse"          , "Apollo 11",
+      "Aurora"              , "Auroral Oval"        , "Avogadro"            , "Ballet",
+      "Banksy Balloon"      , "Bass Spiral"         , "Beagle"              , "Beethoven Fifth",
+      "Benzene"             , "Berlin Wall"         , "Big Bang"            , "Big Keyboard",
+      "Black Hole"          , "Bohr Atom"           , "Bond Barrel"         , "Bone Chandelier",
+      "Bone Cut"            , "Boulder"             , "Bouncing Ball"       , "Brachistochrone",
+      "Brownian"            , "Buckyball"           , "Butterfly"           , "Cambrian",
+      "Catalyst"            , "Ceci n'est pas"      , "Cell Divides"        , "Cetacean",
+      "Chinese Dragon"      , "Chladni"             , "Chromatography"      , "Clockwork",
+      "Close Encounters"    , "CMB Glow"            , "Co-evolution"        , "Columbus",
+      "Comet Tail"          , "Conductor Baton"     , "Coriolis"            , "Cosmic Web",
+      "Countdown"           , "Crab"                , "CRT Off"             , "Darwin",
+      "Day Terminator"      , "Deep Field"          , "DeLorean"            , "Derecho",
+      "Dial M"              , "Dictator Globe"      , "Dissolve"            , "DNA",
+      "Dodecahedron"        , "Double Slit"         , "Doves"               , "E.T.",
+      "Eiffel Tower"        , "El Nino"             , "Electrolysis"        , "End Card",
+      "Endosymbiosis"       , "Euler Identity"      , "Explode"             , "Eye Wink",
+      "Fade"                , "Fall to Pieces"      , "Feather"             , "Film Burn",
+      "Finches"             , "Fire"                , "Fireworks"           , "Fish",
+      "Flame Test"          , "Flatland"            , "Fogbow"              , "Foot Stomp",
+      "Foucault Pendulum"   , "Fourier"             , "Galapagos"           , "Galaxy Collision",
+      "Galileo Telescope"   , "Galileo Tower"       , "Game of Life"        , "Garuda",
+      "Gas Giant"           , "Glow Stick"          , "Golden Spiral"       , "Gotcha",
+      "Gravity Lens"        , "Greek Dance"         , "Guillotine"          , "Gunshot",
+      "Gutenberg"           , "Hadley Cell"         , "HAL 9000"            , "HAL Stare",
       "Halley"              , "Hendrix Guitar"      , "Hitchcock"           , "Hokusai Wave",
-      "Hurricane Eye"       , "Implode + Ring"      , "Inception"           , "Interstellar",
-      "Iris Out"            , "Jaws"                , "Jellyfish"           , "Jet Stream",
-      "Jurassic"            , "JWST"                , "King Kong"           , "Koyaanisqatsi",
+      "Hurricane Eye"       , "Hurricane Tracks"    , "Implode + Ring"      , "Inception",
+      "Interstellar"        , "Iris Out"            , "ISS Track"           , "ITCZ",
+      "Jaws"                , "Jellyfish"           , "Jet Stream"          , "Jurassic",
+      "JWST"                , "King Kong"           , "Koyaanisqatsi"       , "Krakatoa",
       "Lava Lamp"           , "Lawrence"            , "Lebowski"            , "Liesegang",
       "LIGO Chirp"          , "Lorenz Attractor"    , "Lucy"                , "Lunar Eclipse",
-      "Macarena"            , "Magna Carta"         , "Magnetar"            , "Magritte Bowler",
-      "Mammatus"            , "Mandelbrot"          , "March of Progress"   , "Mars Rover",
-      "Mary Poppins"        , "Matrix Drop"         , "Memento"             , "Mendel",
-      "Mendeleev"           , "Mentos"              , "Mitochondrial Eve"   , "Mjolnir",
-      "Mobius"              , "Mona Lisa"           , "Monolith"            , "Monsoon",
-      "Monty Python"        , "Moon Rocket"         , "Munch Scream"        , "Mutation",
-      "NaCl Lattice"        , "Napoleon"            , "Neo"                 , "Neutron Star",
-      "Newspaper"           , "Newton Cradle"       , "Nosferatu"           , "Opera Curtain",
-      "Out of Africa"       , "Pac-Man"             , "Pac-Man Duel"        , "Pandora",
+      "Macarena"            , "Magna Carta"         , "Magnetar"            , "Magnetosphere",
+      "Magritte Bowler"     , "Mammatus"            , "Mandelbrot"          , "March of Progress",
+      "Mars Rover"          , "Mary Poppins"        , "Matrix Drop"         , "Memento",
+      "Mendel"              , "Mendeleev"           , "Mentos"              , "Mitochondrial Eve",
+      "MJO"                 , "Mjolnir"             , "Mobius"              , "Mona Lisa",
+      "Monolith"            , "Monsoon"             , "Monty Python"        , "Moon Rocket",
+      "Munch Scream"        , "Mutation"            , "NaCl Lattice"        , "Napoleon",
+      "Neo"                 , "Neutron Star"        , "Newspaper"           , "Newton Cradle",
+      "Nosferatu"           , "Opera Curtain"       , "Out of Africa"       , "Ozone Hole",
+      "Pac-Man"             , "Pac-Man Duel"        , "Pandora"             , "Pangaea",
       "Parthenon"           , "Peacock"             , "Pegasus"             , "Pendulum Waves",
       "Peppered Moth"       , "Periodic Table"      , "pH Strip"            , "Phase Transition",
       "Phoenix"             , "Pi"                  , "Piano Keys"          , "Pillars of Creation",
       "Pink Panther"        , "Pleasantville"       , "Polar Vortex"        , "Pompeii",
       "Pride Rock"          , "Psycho"              , "Pulp Fiction"        , "Pulsar",
       "Punctuated"          , "Pyramids"            , "Pythagoras"          , "Python Wars",
-      "Quetzalcoatl"        , "Ragnarok"            , "Red Balloon"         , "Riverdance",
-      "Rocky"               , "Rosebud"             , "Rubik"               , "Russian Dance",
-      "Sagittarius A"       , "Saturn"              , "Schrodinger"         , "Selection",
-      "Shawshank"           , "Sheet Music"         , "Shining"             , "Shiver",
-      "Sierpinski"          , "Silly Walk"          , "Singin'"             , "Sistine",
-      "Skeleton Wave"       , "Snow Tree"           , "Snowfall"            , "Soap Bubble",
-      "Solar Eclipse"       , "Solar Flare"         , "Solar System"        , "Sound of Music",
-      "Spaghettify"         , "Spider"              , "Spiral"              , "Spirited Train",
-      "Sputnik"             , "Standing Wave"       , "Standoff"            , "Star Gate",
-      "Star Wars"           , "Stephenson"          , "Stingray"            , "Stonehenge",
-      "Stradivarius"        , "Strangelove"         , "Submarine"           , "Sun Dogs",
-      "Supercell"           , "Supernova"           , "Tatooine"            , "Teardrop",
-      "Tears in Rain"       , "Test Card"           , "Thanos Snap"         , "That's All Folks",
-      "The Birds"           , "The End"             , "Thelma & Louise"     , "Theremin",
-      "Thriller"            , "Thunderstorm"        , "Titanic"             , "Tornado",
-      "Tornado Duel"        , "Totoro"              , "Tracks"              , "Train",
-      "Tree of Life"        , "Trojan Horse"        , "Tron"                , "Truman",
+      "Quetzalcoatl"        , "Ragnarok"            , "Red Balloon"         , "Ring of Fire",
+      "Riverdance"          , "Rocky"               , "Rosebud"             , "Rubik",
+      "Russian Dance"       , "Sagittarius A"       , "Saharan Dust"        , "Saturn",
+      "Schrodinger"         , "Sea Ice"             , "Selection"           , "Shawshank",
+      "Sheet Music"         , "Shining"             , "Shiver"              , "Sierpinski",
+      "Silly Walk"          , "Singin'"             , "Sistine"             , "Skeleton Wave",
+      "Snow Tree"           , "Snowfall"            , "Soap Bubble"         , "Solar Eclipse",
+      "Solar Flare"         , "Solar System"        , "Sound of Music"      , "Spaghettify",
+      "Spider"              , "Spiral"              , "Spirited Train"      , "Sputnik",
+      "Standing Wave"       , "Standoff"            , "Star Gate"           , "Star Wars",
+      "Stephenson"          , "Stingray"            , "Stonehenge"          , "Stradivarius",
+      "Strangelove"         , "Submarine"           , "Sun Dogs"            , "Supercell",
+      "Supernova"           , "Tatooine"            , "Teardrop"            , "Tears in Rain",
+      "Test Card"           , "Thanos Snap"         , "That's All Folks"    , "The Birds",
+      "The End"             , "Thelma & Louise"     , "Theremin"            , "Thriller",
+      "Thunderstorm"        , "Titanic"             , "Tornado"             , "Tornado Duel",
+      "Totoro"              , "Tracks"              , "Train"               , "Tree of Life",
+      "Trojan Horse"        , "Tron"                , "Truman"              , "Tsunami",
       "Tunnel"              , "UFO"                 , "Up"                  , "Utopia",
       "Valkyrie Ride"       , "Vertigo"             , "Viking Longboat"     , "Vinyl Spin",
-      "Warhol Banana"       , "Warp"                , "Wizard of Oz"        , "Word Reveal",
-      "Wormhole"            , "Wright Flyer"        , "Yggdrasil"           , "YMCA"};
+      "Walker Cell"         , "Warhol Banana"       , "Warp"                , "Wildfire Smoke",
+      "Wizard of Oz"        , "Word Reveal"         , "Wormhole"            , "Wright Flyer",
+      "Yggdrasil"           , "YMCA"};
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return "random";
   return kNames[effectIndex];
@@ -20643,9 +21773,9 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
   const bool stompRoll = (rng() % 5U) == 0U;
   const double stompDelayMs = 350.0 + static_cast<double>(rng() % 700U);
   std::unique_ptr<ImageSource> stompFoot;
-  // Foot Stomp (80), Monty Python (144), Python Wars (183) — these already
+  // Foot Stomp (83), Monty Python (154), Python Wars (195) — these already
   // end on a foot, so don't double-stomp them.
-  if (stompRoll && e != 80 && e != 144 && e != 183)
+  if (stompRoll && e != 83 && e != 154 && e != 195)
   {
     std::size_t sfw = 0;
     std::size_t sfh = 0;
@@ -20669,270 +21799,288 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
     case 1: effectAcidTrip(renderer, frame, subW, subH); break;
     case 2: effectAcmeAnvil(renderer, frame, subW, subH); break;
     case 3: effectAkira(renderer, frame, subW, subH); break;
-    case 4: effectAnubis(renderer, frame, subW, subH); break;
-    case 5: effectApocalypse(renderer, frame, subW, subH); break;
-    case 6: effectApollo11(renderer, frame, subW, subH); break;
-    case 7: effectAurora(renderer, frame, subW, subH, rng); break;
-    case 8: effectAvogadro(renderer, frame, subW, subH); break;
-    case 9: effectBallet(renderer, frame, subW, subH); break;
-    case 10: effectBanksyBalloon(renderer, frame, subW, subH); break;
-    case 11: effectBassSpiral(renderer, frame, subW, subH); break;
-    case 12: effectBeagle(renderer, frame, subW, subH); break;
-    case 13: effectBeethovenFifth(renderer, frame, subW, subH); break;
-    case 14: effectBenzene(renderer, frame, subW, subH); break;
-    case 15: effectBerlinWall(renderer, frame, subW, subH); break;
-    case 16: effectBigBang(renderer, frame, subW, subH); break;
-    case 17: effectBigKeyboard(renderer, frame, subW, subH); break;
-    case 18: effectBlackHole(renderer, frame, subW, subH); break;
-    case 19: effectBohrAtom(renderer, frame, subW, subH); break;
-    case 20: effectBond(renderer, frame, subW, subH); break;
-    case 21: effectBoneChandelier(renderer, frame, subW, subH); break;
-    case 22: effectBoneCut(renderer, frame, subW, subH); break;
-    case 23: effectBoulder(renderer, frame, subW, subH); break;
-    case 24: effectBall(renderer, frame, subW, subH); break;
-    case 25: effectBrachistochrone(renderer, frame, subW, subH); break;
-    case 26: effectBrownian(renderer, frame, subW, subH); break;
-    case 27: effectBuckyball(renderer, frame, subW, subH); break;
-    case 28: effectButterfly(renderer, frame, subW, subH); break;
-    case 29: effectCambrian(renderer, frame, subW, subH); break;
-    case 30: effectCatalyst(renderer, frame, subW, subH); break;
-    case 31: effectCeciNestPas(renderer, frame, subW, subH); break;
-    case 32: effectCellDivides(renderer, frame, subW, subH); break;
-    case 33: effectCetacean(renderer, frame, subW, subH); break;
-    case 34: effectChineseDragon(renderer, frame, subW, subH); break;
-    case 35: effectChladni(renderer, frame, subW, subH); break;
-    case 36: effectChromatography(renderer, frame, subW, subH); break;
-    case 37: effectClockwork(renderer, frame, subW, subH); break;
-    case 38: effectCloseEncounters(renderer, frame, subW, subH); break;
-    case 39: effectCmbGlow(renderer, frame, subW, subH); break;
-    case 40: effectCoEvolution(renderer, frame, subW, subH); break;
-    case 41: effectColumbus(renderer, frame, subW, subH); break;
-    case 42: effectCometTail(renderer, frame, subW, subH); break;
-    case 43: effectConductorBaton(renderer, frame, subW, subH); break;
-    case 44: effectCoriolis(renderer, frame, subW, subH); break;
-    case 45: effectCosmicWeb(renderer, frame, subW, subH); break;
-    case 46: effectCountdown(renderer, frame, subW, subH); break;
-    case 47: effectCrab(renderer, frame, subW, subH); break;
-    case 48: effectCrtOff(renderer, frame, subW, subH); break;
-    case 49: effectDarwin(renderer, frame, subW, subH); break;
-    case 50: effectDeepField(renderer, frame, subW, subH); break;
-    case 51: effectDeLorean(renderer, frame, subW, subH); break;
-    case 52: effectDerecho(renderer, frame, subW, subH); break;
-    case 53: effectDialM(renderer, frame, subW, subH); break;
-    case 54: effectGlobeDance(renderer, frame, subW, subH); break;
-    case 55: effectDissolve(renderer, frame, subW, subH, rng); break;
-    case 56: effectDNA(renderer, frame, subW, subH); break;
-    case 57: effectDodecahedron(renderer, frame, subW, subH); break;
-    case 58: effectDoubleSlit(renderer, frame, subW, subH); break;
-    case 59: effectDoves(renderer, frame, subW, subH, rng); break;
-    case 60: effectET(renderer, frame, subW, subH); break;
-    case 61: effectEiffel(renderer, frame, subW, subH); break;
-    case 62: effectElNino(renderer, frame, subW, subH); break;
-    case 63: effectElectrolysis(renderer, frame, subW, subH); break;
-    case 64: effectEndCard(renderer, frame, subW, subH); break;
-    case 65: effectEndosymbiosis(renderer, frame, subW, subH); break;
-    case 66: effectEulerIdentity(renderer, frame, subW, subH); break;
-    case 67: effectExplode(renderer, frame, subW, subH); break;
-    case 68: effectEyewink(renderer, frame, subW, subH); break;
-    case 69: effectFade(renderer, frame, subW, subH); break;
-    case 70: effectFallToPieces(renderer, frame, subW, subH); break;
-    case 71: effectFeather(renderer, frame, subW, subH); break;
-    case 72: effectFilmBurn(renderer, frame, subW, subH); break;
-    case 73: effectFinches(renderer, frame, subW, subH); break;
-    case 74: effectFire(renderer, frame, subW, subH, rng); break;
-    case 75: effectFireworks(renderer, frame, subW, subH, rng); break;
-    case 76: effectFish(renderer, frame, subW, subH); break;
-    case 77: effectFlameTest(renderer, frame, subW, subH); break;
-    case 78: effectFlatland(renderer, frame, subW, subH, rng); break;
-    case 79: effectFogbow(renderer, frame, subW, subH); break;
-    case 80: effectFoot(renderer, frame, subW, subH); break;
-    case 81: effectFoucaultPendulum(renderer, frame, subW, subH); break;
-    case 82: effectFourier(renderer, frame, subW, subH); break;
-    case 83: effectGalapagos(renderer, frame, subW, subH); break;
-    case 84: effectGalaxyCollision(renderer, frame, subW, subH); break;
-    case 85: effectGalileoTelescope(renderer, frame, subW, subH); break;
-    case 86: effectGalileoTower(renderer, frame, subW, subH); break;
-    case 87: effectGameOfLife(renderer, frame, subW, subH); break;
-    case 88: effectGaruda(renderer, frame, subW, subH); break;
-    case 89: effectGasGiant(renderer, frame, subW, subH); break;
-    case 90: effectGlowStick(renderer, frame, subW, subH); break;
-    case 91: effectGoldenSpiral(renderer, frame, subW, subH); break;
-    case 92: effectGotcha(renderer, frame, subW, subH); break;
-    case 93: effectGravityLens(renderer, frame, subW, subH); break;
-    case 94: effectGreekDance(renderer, frame, subW, subH); break;
-    case 95: effectGuillotine(renderer, frame, subW, subH); break;
-    case 96: effectGunshot(renderer, frame, subW, subH, rng); break;
-    case 97: effectGutenberg(renderer, frame, subW, subH); break;
-    case 98: effectHal9000(renderer, frame, subW, subH); break;
-    case 99: effectHalStare(renderer, frame, subW, subH); break;
-    case 100: effectHalley(renderer, frame, subW, subH); break;
-    case 101: effectHendrixGuitar(renderer, frame, subW, subH); break;
-    case 102: effectHitchcock(renderer, frame, subW, subH); break;
-    case 103: effectHokusaiWave(renderer, frame, subW, subH); break;
-    case 104: effectHurricaneEye(renderer, frame, subW, subH); break;
-    case 105: effectImplodeRing(renderer, frame, subW, subH); break;
-    case 106: effectInception(renderer, frame, subW, subH); break;
-    case 107: effectInterstellar(renderer, frame, subW, subH); break;
-    case 108: effectIrisOut(renderer, frame, subW, subH); break;
-    case 109: effectJaws(renderer, frame, subW, subH); break;
-    case 110: effectJellyfish(renderer, frame, subW, subH); break;
-    case 111: effectJetStream(renderer, frame, subW, subH); break;
-    case 112: effectJurassic(renderer, frame, subW, subH); break;
-    case 113: effectJWST(renderer, frame, subW, subH); break;
-    case 114: effectKong(renderer, frame, subW, subH); break;
-    case 115: effectKoyaanisqatsi(renderer, frame, subW, subH); break;
-    case 116: effectLavaLamp(renderer, frame, subW, subH); break;
-    case 117: effectLawrence(renderer, frame, subW, subH); break;
-    case 118: effectLebowski(renderer, frame, subW, subH); break;
-    case 119: effectLiesegang(renderer, frame, subW, subH); break;
-    case 120: effectLigoChirp(renderer, frame, subW, subH); break;
-    case 121: effectLorenzAttractor(renderer, frame, subW, subH); break;
-    case 122: effectLucy(renderer, frame, subW, subH); break;
-    case 123: effectLunarEclipse(renderer, frame, subW, subH); break;
-    case 124: effectMacarena(renderer, frame, subW, subH); break;
-    case 125: effectMagnaCarta(renderer, frame, subW, subH); break;
-    case 126: effectMagnetar(renderer, frame, subW, subH); break;
-    case 127: effectMagritteBowler(renderer, frame, subW, subH); break;
-    case 128: effectMammatus(renderer, frame, subW, subH); break;
-    case 129: effectMandelbrot(renderer, frame, subW, subH); break;
-    case 130: effectMarchOfProgress(renderer, frame, subW, subH); break;
-    case 131: effectMarsRover(renderer, frame, subW, subH); break;
-    case 132: effectMaryPoppins(renderer, frame, subW, subH); break;
-    case 133: effectMatrix(renderer, frame, subW, subH, rng); break;
-    case 134: effectMemento(renderer, frame, subW, subH); break;
-    case 135: effectMendel(renderer, frame, subW, subH); break;
-    case 136: effectMendeleev(renderer, frame, subW, subH); break;
-    case 137: effectMentos(renderer, frame, subW, subH); break;
-    case 138: effectMitochondrialEve(renderer, frame, subW, subH); break;
-    case 139: effectMjolnir(renderer, frame, subW, subH); break;
-    case 140: effectMobius(renderer, frame, subW, subH); break;
-    case 141: effectMonaLisa(renderer, frame, subW, subH); break;
-    case 142: effectMonolith(renderer, frame, subW, subH); break;
-    case 143: effectMonsoon(renderer, frame, subW, subH); break;
-    case 144: effectMontyPython(renderer, frame, subW, subH); break;
-    case 145: effectMoonRocket(renderer, frame, subW, subH); break;
-    case 146: effectMunchScream(renderer, frame, subW, subH); break;
-    case 147: effectMutation(renderer, frame, subW, subH); break;
-    case 148: effectNaClLattice(renderer, frame, subW, subH); break;
-    case 149: effectNapoleon(renderer, frame, subW, subH); break;
-    case 150: effectNeo(renderer, frame, subW, subH); break;
-    case 151: effectNeutronStar(renderer, frame, subW, subH); break;
-    case 152: effectNewspaper(renderer, frame, subW, subH); break;
-    case 153: effectNewtonCradle(renderer, frame, subW, subH); break;
-    case 154: effectNosferatu(renderer, frame, subW, subH); break;
-    case 155: effectOperaCurtain(renderer, frame, subW, subH); break;
-    case 156: effectOutOfAfrica(renderer, frame, subW, subH); break;
-    case 157: effectPacman(renderer, frame, subW, subH); break;
-    case 158: effectPacmanDuel(renderer, frame, subW, subH); break;
-    case 159: effectPandora(renderer, frame, subW, subH); break;
-    case 160: effectParthenon(renderer, frame, subW, subH); break;
-    case 161: effectPeacock(renderer, frame, subW, subH); break;
-    case 162: effectPegasus(renderer, frame, subW, subH); break;
-    case 163: effectPendulumWaves(renderer, frame, subW, subH); break;
-    case 164: effectPepperedMoth(renderer, frame, subW, subH); break;
-    case 165: effectPeriodicTable(renderer, frame, subW, subH); break;
-    case 166: effectPhStrip(renderer, frame, subW, subH); break;
-    case 167: effectPhaseTransition(renderer, frame, subW, subH); break;
-    case 168: effectPhoenix(renderer, frame, subW, subH); break;
-    case 169: effectPi(renderer, frame, subW, subH); break;
-    case 170: effectPianoKeys(renderer, frame, subW, subH); break;
-    case 171: effectPillarsOfCreation(renderer, frame, subW, subH); break;
-    case 172: effectPinkPanther(renderer, frame, subW, subH); break;
-    case 173: effectPleasantville(renderer, frame, subW, subH); break;
-    case 174: effectPolarVortex(renderer, frame, subW, subH); break;
-    case 175: effectPompeii(renderer, frame, subW, subH); break;
-    case 176: effectPrideRock(renderer, frame, subW, subH); break;
-    case 177: effectPsycho(renderer, frame, subW, subH); break;
-    case 178: effectPulp(renderer, frame, subW, subH); break;
-    case 179: effectPulsar(renderer, frame, subW, subH); break;
-    case 180: effectPunctuated(renderer, frame, subW, subH); break;
-    case 181: effectPyramids(renderer, frame, subW, subH); break;
-    case 182: effectPythagoras(renderer, frame, subW, subH); break;
-    case 183: effectPythonWars(renderer, frame, subW, subH); break;
-    case 184: effectQuetzalcoatl(renderer, frame, subW, subH); break;
-    case 185: effectRagnarok(renderer, frame, subW, subH); break;
-    case 186: effectRedBalloon(renderer, frame, subW, subH); break;
-    case 187: effectRiverdance(renderer, frame, subW, subH); break;
-    case 188: effectRocky(renderer, frame, subW, subH); break;
-    case 189: effectRosebud(renderer, frame, subW, subH, rng); break;
-    case 190: effectRubik(renderer, frame, subW, subH, rng); break;
-    case 191: effectRussianDance(renderer, frame, subW, subH); break;
-    case 192: effectSagittariusA(renderer, frame, subW, subH); break;
-    case 193: effectSaturn(renderer, frame, subW, subH); break;
-    case 194: effectSchrodinger(renderer, frame, subW, subH); break;
-    case 195: effectSelection(renderer, frame, subW, subH); break;
-    case 196: effectShawshank(renderer, frame, subW, subH); break;
-    case 197: effectSheetMusic(renderer, frame, subW, subH); break;
-    case 198: effectShining(renderer, frame, subW, subH); break;
-    case 199: effectShiver(renderer, frame, subW, subH, rng); break;
-    case 200: effectSierpinski(renderer, frame, subW, subH); break;
-    case 201: effectSillyWalk(renderer, frame, subW, subH); break;
-    case 202: effectSinginRain(renderer, frame, subW, subH); break;
-    case 203: effectSistine(renderer, frame, subW, subH); break;
-    case 204: effectSkeletonWave(renderer, frame, subW, subH); break;
-    case 205: effectSnowTree(renderer, frame, subW, subH); break;
-    case 206: effectSnowflakes(renderer, frame, subW, subH, rng); break;
-    case 207: effectSoapBubble(renderer, frame, subW, subH); break;
-    case 208: effectSolarEclipse(renderer, frame, subW, subH); break;
-    case 209: effectSolarFlare(renderer, frame, subW, subH); break;
-    case 210: effectSolarSystem(renderer, frame, subW, subH, rng); break;
-    case 211: effectSoundOfMusic(renderer, frame, subW, subH); break;
-    case 212: effectSpaghettify(renderer, frame, subW, subH); break;
-    case 213: effectSpider(renderer, frame, subW, subH); break;
-    case 214: effectSpiral(renderer, frame, subW, subH); break;
-    case 215: effectSpiritedTrain(renderer, frame, subW, subH); break;
-    case 216: effectSputnik(renderer, frame, subW, subH); break;
-    case 217: effectStandingWave(renderer, frame, subW, subH); break;
-    case 218: effectStandoff(renderer, frame, subW, subH); break;
-    case 219: effectStarGate(renderer, frame, subW, subH); break;
-    case 220: effectStarWars(renderer, frame, subW, subH); break;
-    case 221: effectStephenson(renderer, frame, subW, subH); break;
-    case 222: effectStingray(renderer, frame, subW, subH); break;
-    case 223: effectStonehenge(renderer, frame, subW, subH); break;
-    case 224: effectStradivarius(renderer, frame, subW, subH); break;
-    case 225: effectStrangelove(renderer, frame, subW, subH); break;
-    case 226: effectSubmarine(renderer, frame, subW, subH, rng); break;
-    case 227: effectSunDogs(renderer, frame, subW, subH); break;
-    case 228: effectSupercell(renderer, frame, subW, subH); break;
-    case 229: effectSupernova(renderer, frame, subW, subH); break;
-    case 230: effectTatooine(renderer, frame, subW, subH); break;
-    case 231: effectTeardrop(renderer, frame, subW, subH); break;
-    case 232: effectTearsInRain(renderer, frame, subW, subH, rng); break;
-    case 233: effectTestCard(renderer, frame, subW, subH, rng); break;
-    case 234: effectThanos(renderer, frame, subW, subH, rng); break;
-    case 235: effectThatsAllFolks(renderer, frame, subW, subH); break;
-    case 236: effectBirds(renderer, frame, subW, subH); break;
-    case 237: effectTheEnd(renderer, frame, subW, subH, rng); break;
-    case 238: effectThelma(renderer, frame, subW, subH); break;
-    case 239: effectTheremin(renderer, frame, subW, subH); break;
-    case 240: effectThriller(renderer, frame, subW, subH); break;
-    case 241: effectThunderstorm(renderer, frame, subW, subH, rng); break;
-    case 242: effectTitanic(renderer, frame, subW, subH); break;
-    case 243: effectTornado(renderer, frame, subW, subH); break;
-    case 244: effectTornadoDuel(renderer, frame, subW, subH); break;
-    case 245: effectTotoro(renderer, frame, subW, subH); break;
-    case 246: effectStandByMe(renderer, frame, subW, subH); break;
-    case 247: effectTrain(renderer, frame, subW, subH); break;
-    case 248: effectTreeOfLife(renderer, frame, subW, subH); break;
-    case 249: effectTrojanHorse(renderer, frame, subW, subH); break;
-    case 250: effectTron(renderer, frame, subW, subH); break;
-    case 251: effectTruman(renderer, frame, subW, subH); break;
-    case 252: effectTunnel(renderer, frame, subW, subH); break;
-    case 253: effectUFO(renderer, frame, subW, subH); break;
-    case 254: effectUp(renderer, frame, subW, subH); break;
-    case 255: effectUtopia(renderer, frame, subW, subH, rng, linesFrame, swedenMask); break;
-    case 256: effectValkyrieRide(renderer, frame, subW, subH); break;
-    case 257: effectVertigo(renderer, frame, subW, subH); break;
-    case 258: effectVikingLongboat(renderer, frame, subW, subH); break;
-    case 259: effectVinylSpin(renderer, frame, subW, subH); break;
-    case 260: effectWarholBanana(renderer, frame, subW, subH); break;
-    case 261: effectWarp(renderer, frame, subW, subH); break;
-    case 262: effectOz(renderer, frame, subW, subH); break;
-    case 263: effectWordReveal(renderer, frame, subW, subH, rng, words); break;
-    case 264: effectWormhole(renderer, frame, subW, subH); break;
-    case 265: effectWrightFlyer(renderer, frame, subW, subH); break;
-    case 266: effectYggdrasil(renderer, frame, subW, subH); break;
-    case 267: effectYMCA(renderer, frame, subW, subH); break;
+    case 4: effectAmoc(renderer, frame, subW, subH); break;
+    case 5: effectAnubis(renderer, frame, subW, subH); break;
+    case 6: effectApocalypse(renderer, frame, subW, subH); break;
+    case 7: effectApollo11(renderer, frame, subW, subH); break;
+    case 8: effectAurora(renderer, frame, subW, subH, rng); break;
+    case 9: effectAuroralOval(renderer, frame, subW, subH); break;
+    case 10: effectAvogadro(renderer, frame, subW, subH); break;
+    case 11: effectBallet(renderer, frame, subW, subH); break;
+    case 12: effectBanksyBalloon(renderer, frame, subW, subH); break;
+    case 13: effectBassSpiral(renderer, frame, subW, subH); break;
+    case 14: effectBeagle(renderer, frame, subW, subH); break;
+    case 15: effectBeethovenFifth(renderer, frame, subW, subH); break;
+    case 16: effectBenzene(renderer, frame, subW, subH); break;
+    case 17: effectBerlinWall(renderer, frame, subW, subH); break;
+    case 18: effectBigBang(renderer, frame, subW, subH); break;
+    case 19: effectBigKeyboard(renderer, frame, subW, subH); break;
+    case 20: effectBlackHole(renderer, frame, subW, subH); break;
+    case 21: effectBohrAtom(renderer, frame, subW, subH); break;
+    case 22: effectBond(renderer, frame, subW, subH); break;
+    case 23: effectBoneChandelier(renderer, frame, subW, subH); break;
+    case 24: effectBoneCut(renderer, frame, subW, subH); break;
+    case 25: effectBoulder(renderer, frame, subW, subH); break;
+    case 26: effectBall(renderer, frame, subW, subH); break;
+    case 27: effectBrachistochrone(renderer, frame, subW, subH); break;
+    case 28: effectBrownian(renderer, frame, subW, subH); break;
+    case 29: effectBuckyball(renderer, frame, subW, subH); break;
+    case 30: effectButterfly(renderer, frame, subW, subH); break;
+    case 31: effectCambrian(renderer, frame, subW, subH); break;
+    case 32: effectCatalyst(renderer, frame, subW, subH); break;
+    case 33: effectCeciNestPas(renderer, frame, subW, subH); break;
+    case 34: effectCellDivides(renderer, frame, subW, subH); break;
+    case 35: effectCetacean(renderer, frame, subW, subH); break;
+    case 36: effectChineseDragon(renderer, frame, subW, subH); break;
+    case 37: effectChladni(renderer, frame, subW, subH); break;
+    case 38: effectChromatography(renderer, frame, subW, subH); break;
+    case 39: effectClockwork(renderer, frame, subW, subH); break;
+    case 40: effectCloseEncounters(renderer, frame, subW, subH); break;
+    case 41: effectCmbGlow(renderer, frame, subW, subH); break;
+    case 42: effectCoEvolution(renderer, frame, subW, subH); break;
+    case 43: effectColumbus(renderer, frame, subW, subH); break;
+    case 44: effectCometTail(renderer, frame, subW, subH); break;
+    case 45: effectConductorBaton(renderer, frame, subW, subH); break;
+    case 46: effectCoriolis(renderer, frame, subW, subH); break;
+    case 47: effectCosmicWeb(renderer, frame, subW, subH); break;
+    case 48: effectCountdown(renderer, frame, subW, subH); break;
+    case 49: effectCrab(renderer, frame, subW, subH); break;
+    case 50: effectCrtOff(renderer, frame, subW, subH); break;
+    case 51: effectDarwin(renderer, frame, subW, subH); break;
+    case 52: effectDayTerminator(renderer, frame, subW, subH); break;
+    case 53: effectDeepField(renderer, frame, subW, subH); break;
+    case 54: effectDeLorean(renderer, frame, subW, subH); break;
+    case 55: effectDerecho(renderer, frame, subW, subH); break;
+    case 56: effectDialM(renderer, frame, subW, subH); break;
+    case 57: effectGlobeDance(renderer, frame, subW, subH); break;
+    case 58: effectDissolve(renderer, frame, subW, subH, rng); break;
+    case 59: effectDNA(renderer, frame, subW, subH); break;
+    case 60: effectDodecahedron(renderer, frame, subW, subH); break;
+    case 61: effectDoubleSlit(renderer, frame, subW, subH); break;
+    case 62: effectDoves(renderer, frame, subW, subH, rng); break;
+    case 63: effectET(renderer, frame, subW, subH); break;
+    case 64: effectEiffel(renderer, frame, subW, subH); break;
+    case 65: effectElNino(renderer, frame, subW, subH); break;
+    case 66: effectElectrolysis(renderer, frame, subW, subH); break;
+    case 67: effectEndCard(renderer, frame, subW, subH); break;
+    case 68: effectEndosymbiosis(renderer, frame, subW, subH); break;
+    case 69: effectEulerIdentity(renderer, frame, subW, subH); break;
+    case 70: effectExplode(renderer, frame, subW, subH); break;
+    case 71: effectEyewink(renderer, frame, subW, subH); break;
+    case 72: effectFade(renderer, frame, subW, subH); break;
+    case 73: effectFallToPieces(renderer, frame, subW, subH); break;
+    case 74: effectFeather(renderer, frame, subW, subH); break;
+    case 75: effectFilmBurn(renderer, frame, subW, subH); break;
+    case 76: effectFinches(renderer, frame, subW, subH); break;
+    case 77: effectFire(renderer, frame, subW, subH, rng); break;
+    case 78: effectFireworks(renderer, frame, subW, subH, rng); break;
+    case 79: effectFish(renderer, frame, subW, subH); break;
+    case 80: effectFlameTest(renderer, frame, subW, subH); break;
+    case 81: effectFlatland(renderer, frame, subW, subH, rng); break;
+    case 82: effectFogbow(renderer, frame, subW, subH); break;
+    case 83: effectFoot(renderer, frame, subW, subH); break;
+    case 84: effectFoucaultPendulum(renderer, frame, subW, subH); break;
+    case 85: effectFourier(renderer, frame, subW, subH); break;
+    case 86: effectGalapagos(renderer, frame, subW, subH); break;
+    case 87: effectGalaxyCollision(renderer, frame, subW, subH); break;
+    case 88: effectGalileoTelescope(renderer, frame, subW, subH); break;
+    case 89: effectGalileoTower(renderer, frame, subW, subH); break;
+    case 90: effectGameOfLife(renderer, frame, subW, subH); break;
+    case 91: effectGaruda(renderer, frame, subW, subH); break;
+    case 92: effectGasGiant(renderer, frame, subW, subH); break;
+    case 93: effectGlowStick(renderer, frame, subW, subH); break;
+    case 94: effectGoldenSpiral(renderer, frame, subW, subH); break;
+    case 95: effectGotcha(renderer, frame, subW, subH); break;
+    case 96: effectGravityLens(renderer, frame, subW, subH); break;
+    case 97: effectGreekDance(renderer, frame, subW, subH); break;
+    case 98: effectGuillotine(renderer, frame, subW, subH); break;
+    case 99: effectGunshot(renderer, frame, subW, subH, rng); break;
+    case 100: effectGutenberg(renderer, frame, subW, subH); break;
+    case 101: effectHadleyCell(renderer, frame, subW, subH); break;
+    case 102: effectHal9000(renderer, frame, subW, subH); break;
+    case 103: effectHalStare(renderer, frame, subW, subH); break;
+    case 104: effectHalley(renderer, frame, subW, subH); break;
+    case 105: effectHendrixGuitar(renderer, frame, subW, subH); break;
+    case 106: effectHitchcock(renderer, frame, subW, subH); break;
+    case 107: effectHokusaiWave(renderer, frame, subW, subH); break;
+    case 108: effectHurricaneEye(renderer, frame, subW, subH); break;
+    case 109: effectHurricaneTracks(renderer, frame, subW, subH); break;
+    case 110: effectImplodeRing(renderer, frame, subW, subH); break;
+    case 111: effectInception(renderer, frame, subW, subH); break;
+    case 112: effectInterstellar(renderer, frame, subW, subH); break;
+    case 113: effectIrisOut(renderer, frame, subW, subH); break;
+    case 114: effectIssTrack(renderer, frame, subW, subH); break;
+    case 115: effectItcz(renderer, frame, subW, subH); break;
+    case 116: effectJaws(renderer, frame, subW, subH); break;
+    case 117: effectJellyfish(renderer, frame, subW, subH); break;
+    case 118: effectJetStream(renderer, frame, subW, subH); break;
+    case 119: effectJurassic(renderer, frame, subW, subH); break;
+    case 120: effectJWST(renderer, frame, subW, subH); break;
+    case 121: effectKong(renderer, frame, subW, subH); break;
+    case 122: effectKoyaanisqatsi(renderer, frame, subW, subH); break;
+    case 123: effectKrakatoa(renderer, frame, subW, subH); break;
+    case 124: effectLavaLamp(renderer, frame, subW, subH); break;
+    case 125: effectLawrence(renderer, frame, subW, subH); break;
+    case 126: effectLebowski(renderer, frame, subW, subH); break;
+    case 127: effectLiesegang(renderer, frame, subW, subH); break;
+    case 128: effectLigoChirp(renderer, frame, subW, subH); break;
+    case 129: effectLorenzAttractor(renderer, frame, subW, subH); break;
+    case 130: effectLucy(renderer, frame, subW, subH); break;
+    case 131: effectLunarEclipse(renderer, frame, subW, subH); break;
+    case 132: effectMacarena(renderer, frame, subW, subH); break;
+    case 133: effectMagnaCarta(renderer, frame, subW, subH); break;
+    case 134: effectMagnetar(renderer, frame, subW, subH); break;
+    case 135: effectMagnetosphere(renderer, frame, subW, subH); break;
+    case 136: effectMagritteBowler(renderer, frame, subW, subH); break;
+    case 137: effectMammatus(renderer, frame, subW, subH); break;
+    case 138: effectMandelbrot(renderer, frame, subW, subH); break;
+    case 139: effectMarchOfProgress(renderer, frame, subW, subH); break;
+    case 140: effectMarsRover(renderer, frame, subW, subH); break;
+    case 141: effectMaryPoppins(renderer, frame, subW, subH); break;
+    case 142: effectMatrix(renderer, frame, subW, subH, rng); break;
+    case 143: effectMemento(renderer, frame, subW, subH); break;
+    case 144: effectMendel(renderer, frame, subW, subH); break;
+    case 145: effectMendeleev(renderer, frame, subW, subH); break;
+    case 146: effectMentos(renderer, frame, subW, subH); break;
+    case 147: effectMitochondrialEve(renderer, frame, subW, subH); break;
+    case 148: effectMjo(renderer, frame, subW, subH); break;
+    case 149: effectMjolnir(renderer, frame, subW, subH); break;
+    case 150: effectMobius(renderer, frame, subW, subH); break;
+    case 151: effectMonaLisa(renderer, frame, subW, subH); break;
+    case 152: effectMonolith(renderer, frame, subW, subH); break;
+    case 153: effectMonsoon(renderer, frame, subW, subH); break;
+    case 154: effectMontyPython(renderer, frame, subW, subH); break;
+    case 155: effectMoonRocket(renderer, frame, subW, subH); break;
+    case 156: effectMunchScream(renderer, frame, subW, subH); break;
+    case 157: effectMutation(renderer, frame, subW, subH); break;
+    case 158: effectNaClLattice(renderer, frame, subW, subH); break;
+    case 159: effectNapoleon(renderer, frame, subW, subH); break;
+    case 160: effectNeo(renderer, frame, subW, subH); break;
+    case 161: effectNeutronStar(renderer, frame, subW, subH); break;
+    case 162: effectNewspaper(renderer, frame, subW, subH); break;
+    case 163: effectNewtonCradle(renderer, frame, subW, subH); break;
+    case 164: effectNosferatu(renderer, frame, subW, subH); break;
+    case 165: effectOperaCurtain(renderer, frame, subW, subH); break;
+    case 166: effectOutOfAfrica(renderer, frame, subW, subH); break;
+    case 167: effectOzoneHole(renderer, frame, subW, subH); break;
+    case 168: effectPacman(renderer, frame, subW, subH); break;
+    case 169: effectPacmanDuel(renderer, frame, subW, subH); break;
+    case 170: effectPandora(renderer, frame, subW, subH); break;
+    case 171: effectPangaea(renderer, frame, subW, subH); break;
+    case 172: effectParthenon(renderer, frame, subW, subH); break;
+    case 173: effectPeacock(renderer, frame, subW, subH); break;
+    case 174: effectPegasus(renderer, frame, subW, subH); break;
+    case 175: effectPendulumWaves(renderer, frame, subW, subH); break;
+    case 176: effectPepperedMoth(renderer, frame, subW, subH); break;
+    case 177: effectPeriodicTable(renderer, frame, subW, subH); break;
+    case 178: effectPhStrip(renderer, frame, subW, subH); break;
+    case 179: effectPhaseTransition(renderer, frame, subW, subH); break;
+    case 180: effectPhoenix(renderer, frame, subW, subH); break;
+    case 181: effectPi(renderer, frame, subW, subH); break;
+    case 182: effectPianoKeys(renderer, frame, subW, subH); break;
+    case 183: effectPillarsOfCreation(renderer, frame, subW, subH); break;
+    case 184: effectPinkPanther(renderer, frame, subW, subH); break;
+    case 185: effectPleasantville(renderer, frame, subW, subH); break;
+    case 186: effectPolarVortex(renderer, frame, subW, subH); break;
+    case 187: effectPompeii(renderer, frame, subW, subH); break;
+    case 188: effectPrideRock(renderer, frame, subW, subH); break;
+    case 189: effectPsycho(renderer, frame, subW, subH); break;
+    case 190: effectPulp(renderer, frame, subW, subH); break;
+    case 191: effectPulsar(renderer, frame, subW, subH); break;
+    case 192: effectPunctuated(renderer, frame, subW, subH); break;
+    case 193: effectPyramids(renderer, frame, subW, subH); break;
+    case 194: effectPythagoras(renderer, frame, subW, subH); break;
+    case 195: effectPythonWars(renderer, frame, subW, subH); break;
+    case 196: effectQuetzalcoatl(renderer, frame, subW, subH); break;
+    case 197: effectRagnarok(renderer, frame, subW, subH); break;
+    case 198: effectRedBalloon(renderer, frame, subW, subH); break;
+    case 199: effectRingOfFire(renderer, frame, subW, subH); break;
+    case 200: effectRiverdance(renderer, frame, subW, subH); break;
+    case 201: effectRocky(renderer, frame, subW, subH); break;
+    case 202: effectRosebud(renderer, frame, subW, subH, rng); break;
+    case 203: effectRubik(renderer, frame, subW, subH, rng); break;
+    case 204: effectRussianDance(renderer, frame, subW, subH); break;
+    case 205: effectSagittariusA(renderer, frame, subW, subH); break;
+    case 206: effectSaharanDust(renderer, frame, subW, subH); break;
+    case 207: effectSaturn(renderer, frame, subW, subH); break;
+    case 208: effectSchrodinger(renderer, frame, subW, subH); break;
+    case 209: effectSeaIce(renderer, frame, subW, subH); break;
+    case 210: effectSelection(renderer, frame, subW, subH); break;
+    case 211: effectShawshank(renderer, frame, subW, subH); break;
+    case 212: effectSheetMusic(renderer, frame, subW, subH); break;
+    case 213: effectShining(renderer, frame, subW, subH); break;
+    case 214: effectShiver(renderer, frame, subW, subH, rng); break;
+    case 215: effectSierpinski(renderer, frame, subW, subH); break;
+    case 216: effectSillyWalk(renderer, frame, subW, subH); break;
+    case 217: effectSinginRain(renderer, frame, subW, subH); break;
+    case 218: effectSistine(renderer, frame, subW, subH); break;
+    case 219: effectSkeletonWave(renderer, frame, subW, subH); break;
+    case 220: effectSnowTree(renderer, frame, subW, subH); break;
+    case 221: effectSnowflakes(renderer, frame, subW, subH, rng); break;
+    case 222: effectSoapBubble(renderer, frame, subW, subH); break;
+    case 223: effectSolarEclipse(renderer, frame, subW, subH); break;
+    case 224: effectSolarFlare(renderer, frame, subW, subH); break;
+    case 225: effectSolarSystem(renderer, frame, subW, subH, rng); break;
+    case 226: effectSoundOfMusic(renderer, frame, subW, subH); break;
+    case 227: effectSpaghettify(renderer, frame, subW, subH); break;
+    case 228: effectSpider(renderer, frame, subW, subH); break;
+    case 229: effectSpiral(renderer, frame, subW, subH); break;
+    case 230: effectSpiritedTrain(renderer, frame, subW, subH); break;
+    case 231: effectSputnik(renderer, frame, subW, subH); break;
+    case 232: effectStandingWave(renderer, frame, subW, subH); break;
+    case 233: effectStandoff(renderer, frame, subW, subH); break;
+    case 234: effectStarGate(renderer, frame, subW, subH); break;
+    case 235: effectStarWars(renderer, frame, subW, subH); break;
+    case 236: effectStephenson(renderer, frame, subW, subH); break;
+    case 237: effectStingray(renderer, frame, subW, subH); break;
+    case 238: effectStonehenge(renderer, frame, subW, subH); break;
+    case 239: effectStradivarius(renderer, frame, subW, subH); break;
+    case 240: effectStrangelove(renderer, frame, subW, subH); break;
+    case 241: effectSubmarine(renderer, frame, subW, subH, rng); break;
+    case 242: effectSunDogs(renderer, frame, subW, subH); break;
+    case 243: effectSupercell(renderer, frame, subW, subH); break;
+    case 244: effectSupernova(renderer, frame, subW, subH); break;
+    case 245: effectTatooine(renderer, frame, subW, subH); break;
+    case 246: effectTeardrop(renderer, frame, subW, subH); break;
+    case 247: effectTearsInRain(renderer, frame, subW, subH, rng); break;
+    case 248: effectTestCard(renderer, frame, subW, subH, rng); break;
+    case 249: effectThanos(renderer, frame, subW, subH, rng); break;
+    case 250: effectThatsAllFolks(renderer, frame, subW, subH); break;
+    case 251: effectBirds(renderer, frame, subW, subH); break;
+    case 252: effectTheEnd(renderer, frame, subW, subH, rng); break;
+    case 253: effectThelma(renderer, frame, subW, subH); break;
+    case 254: effectTheremin(renderer, frame, subW, subH); break;
+    case 255: effectThriller(renderer, frame, subW, subH); break;
+    case 256: effectThunderstorm(renderer, frame, subW, subH, rng); break;
+    case 257: effectTitanic(renderer, frame, subW, subH); break;
+    case 258: effectTornado(renderer, frame, subW, subH); break;
+    case 259: effectTornadoDuel(renderer, frame, subW, subH); break;
+    case 260: effectTotoro(renderer, frame, subW, subH); break;
+    case 261: effectStandByMe(renderer, frame, subW, subH); break;
+    case 262: effectTrain(renderer, frame, subW, subH); break;
+    case 263: effectTreeOfLife(renderer, frame, subW, subH); break;
+    case 264: effectTrojanHorse(renderer, frame, subW, subH); break;
+    case 265: effectTron(renderer, frame, subW, subH); break;
+    case 266: effectTruman(renderer, frame, subW, subH); break;
+    case 267: effectTsunami(renderer, frame, subW, subH); break;
+    case 268: effectTunnel(renderer, frame, subW, subH); break;
+    case 269: effectUFO(renderer, frame, subW, subH); break;
+    case 270: effectUp(renderer, frame, subW, subH); break;
+    case 271: effectUtopia(renderer, frame, subW, subH, rng, linesFrame, swedenMask); break;
+    case 272: effectValkyrieRide(renderer, frame, subW, subH); break;
+    case 273: effectVertigo(renderer, frame, subW, subH); break;
+    case 274: effectVikingLongboat(renderer, frame, subW, subH); break;
+    case 275: effectVinylSpin(renderer, frame, subW, subH); break;
+    case 276: effectWalkerCell(renderer, frame, subW, subH); break;
+    case 277: effectWarholBanana(renderer, frame, subW, subH); break;
+    case 278: effectWarp(renderer, frame, subW, subH); break;
+    case 279: effectWildfireSmoke(renderer, frame, subW, subH); break;
+    case 280: effectOz(renderer, frame, subW, subH); break;
+    case 281: effectWordReveal(renderer, frame, subW, subH, rng, words); break;
+    case 282: effectWormhole(renderer, frame, subW, subH); break;
+    case 283: effectWrightFlyer(renderer, frame, subW, subH); break;
+    case 284: effectYggdrasil(renderer, frame, subW, subH); break;
+    case 285: effectYMCA(renderer, frame, subW, subH); break;
     default: effectFade(renderer, frame, subW, subH); break;
   }
 
