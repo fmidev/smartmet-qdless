@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 12%{?dist}.fmi
+Release: 13%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,6 +111,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 
 %changelog
+* Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-13.fmi
+- Weather effects overhaul. New: Tornado Duel (two tornadoes form, drift together, collide and merge into a single fatter funnel before dissipating). Renamed Ice Storm to Snow Tree (snow accumulates on a large bare tree until cumulative load tips it over). Rewrote Coriolis with a clear cyclone-on-each-hemisphere reference plus curving wind arrows that bend right of motion in the north and left in the south. Rewrote El Nino, Jet Stream, Monsoon and Polar Vortex as proper geographic globe views: El Nino is now an orthographic Pacific globe with a growing east-equator warm anomaly; Jet Stream is a globe with a multi-harmonic polar-front jet ribbon and particles flowing along it; Monsoon is centred on the Bay of Bengal with a rain front advancing over the Indian subcontinent and Indochina; Polar Vortex is a top-down polar projection with a multi-harmonic Rossby wave circling the pole. Re-themed Crab, Fire, Fish, Jellyfish, Spider out of Weather (now Terminal effects) and Sun Dogs into Maths & physics (atmospheric optics).
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-12.fmi
 - Extrema view performance: the merge-tree cost scales with cell count, so on a multi-million-cell hybrid volume it took ~2 s — which surfaced as ~2 s per frame during time animation, where the per-frame time change forces a recompute. sampleVolumeGrid now takes a cell budget and horizontally strides the read (levels preserved) so the working lattice is capped (~400k cells for the interactive view), bounding both the newbase read and the merge-tree compute regardless of input size; the toggle-on freeze and per-animation-frame recompute drop to ~0.15 s. The --extrema text report still runs at full resolution. Trade-off: a coarser feature lattice when the cap engages.
 
