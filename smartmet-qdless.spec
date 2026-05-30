@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 19%{?dist}.fmi
+Release: 20%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -112,6 +112,10 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/transfoot.png
 
 %changelog
+* Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-20.fmi
+- 19 new astronomy effects (Maths & physics theme): Andromeda Approach (tilted spiral grows, data-tinted arms), Bok Globule (dark cloud collapses, young star ignites from sampled nebula), Cassini Finale (data-textured Saturn, ringed with Cassini Division, tiny probe dives between rings and planet), Cepheid (pulsating data star + sinusoidal light curve), Crab Nebula (radial data-tinted filaments + pulsing central neutron star), Dyson Sphere (assembling shell-arcs around a data sun), Europa Ice (data-textured ice with cracks revealing data-tinted ocean), Hawking Radiation (black hole shrinks, pair-creation flashes), Helix Nebula (concentric tilted rings, data-textured), HR Diagram (data-tinted main-sequence + giant branch stars), Hubble Expansion (galaxies recede, redshifting), Hubble Telescope (instrument silhouette + mirror-view inset of a data-textured deep field), Lagrange Points (Sun-Earth system with L1-L5 + Trojans), Moon Phases (data-textured moon cycles through phases), Olympus Mons (data-textured Mars surface, shield-volcano profile rises), Parker Solar Probe (probe dives into the data-filled sun), Saturn Rings (close-up with Cassini Division + Encke gap), Sunspot Cycle (11-year cycle compressed, spots drift across the data-textured sun), Voyager (probe crosses heliopause from warm heliosphere into cool ISM). Every scene samples the active weather data — backgrounds, planet surfaces, and disc bodies all use sample() / drawDataDisk so the data is visibly part of the scene rather than wiped to black. Total roster: 307 -> 326. Stomp-exclusion shifted to Foot Stomp 97, Monty Python 176, Python Wars 227.
+- 3D curtain: Shift+Tab cycles the sub-mode (A / B / Both / View) in reverse, so an over-tab can be backed out without going all the way around.
+
 * Fri May 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-19.fmi
 - Hovmöller diagrams in the cross-section view. While a cross-section is open, 'H' toggles the chart's Y-axis from level/height to time: the line is sampled at the current level across every time step in the file (oldest at top, newest at bottom) and rendered with the active palette, so the chart shows the variable's evolution along the great-circle path. Mutually exclusive with the 'y' height-axis toggle; only offered when the source has more than one time step. Row labels show MM-DD HH:MM stamps; the popup title flips to "Hovmöller:" when active, and the footer hint advertises the toggle. Works for any cross-section path (great-circle, zonal, meridional).
 

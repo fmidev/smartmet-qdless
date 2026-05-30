@@ -3891,6 +3891,20 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         itsLastMessage = fmt::format("Curtain sub-mode: {}", subModeLabel());
         return true;
       }
+      case KEY_BTAB:
+      {
+        // Shift-Tab: same cycle in reverse so the user can back out of
+        // an accidental over-tab without going all the way around again.
+        switch (itsCurtainActiveEnd)
+        {
+          case CurtainEnd::A: itsCurtainActiveEnd = CurtainEnd::View; break;
+          case CurtainEnd::B: itsCurtainActiveEnd = CurtainEnd::A; break;
+          case CurtainEnd::Both: itsCurtainActiveEnd = CurtainEnd::B; break;
+          case CurtainEnd::View: itsCurtainActiveEnd = CurtainEnd::Both; break;
+        }
+        itsLastMessage = fmt::format("Curtain sub-mode: {}", subModeLabel());
+        return true;
+      }
       case KEY_LEFT:
         if (inView) itsCamYaw -= kYawStep;
         else moveActive(0.0, -dLon);
