@@ -23968,6 +23968,10 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
   g_stompFired = false;
   const bool stompRoll = (rng() % 5U) == 0U;
   const double stompDelayMs = 350.0 + static_cast<double>(rng() % 700U);
+  // Coin-flip on which foot the random stomp uses. Done outside the
+  // conditional so the rng stream stays identical when a replayed seed
+  // didn't pick a stomp on this run.
+  const bool useTransfoot = (rng() % 2U) == 0U;
   std::unique_ptr<ImageSource> stompFoot;
   // Foot Stomp (97), Monty Python (176), Python Wars (227) — these already
   // end on a foot, so don't double-stomp them.
@@ -23975,7 +23979,12 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
   {
     std::size_t sfw = 0;
     std::size_t sfh = 0;
-    stompFoot = loadFootImage(sfw, sfh);
+    // Random pick between the renaissance-background foot.png and the
+    // alpha-clean transfoot.png. Fall back to whichever is available.
+    if (useTransfoot)
+      stompFoot = loadDataImage("transfoot.png", sfw, sfh);
+    if (!stompFoot)
+      stompFoot = loadFootImage(sfw, sfh);
     if (stompFoot)
     {
       g_stompArmed = true;
