@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 21%{?dist}.fmi
+Release: 22%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -112,6 +112,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/transfoot.png
 
 %changelog
+* Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-22.fmi
+- Refactor QdlessExitEffect.cpp (~24k lines) into per-theme translation units. Helpers (drawing primitives, runFrames, sample, image loaders, drawFootSprite, globe projections, skeleton crew, kEffectCount / Theme / kThemes / kThemeNames) move into include/QdlessExitEffectCommon.h inside namespace Qdless::ee_detail. Effects are split into eleven source/QdlessExitEffect<Theme>.cpp files (Art, Biology, Cartoon, Chemistry, Cinema, History, Music, Myth, Physics, TerminalFx, Weather), one per theme. Effect forward declarations live in include/QdlessExitEffectEffects.h, included by the registry and indirectly by every theme cpp. source/QdlessExitEffect.cpp keeps just the registry (exitEffectCount/Name/Theme, exitWordline, exitEffectIndexByName, playExitEffect, dispatch switch, random-stomp logic). Functionally identical (same 326 effects, same dispatch order, same stomp indices) — the only behavioural change is per-TU compile times shrink from one ~24k-line file to eleven files of ~600-5300 lines. Largest TU: Cinema at 5343 lines, Physics at 4162.
+
 * Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-21.fmi
 - Random surprise stomp now coin-flips between foot.png (renaissance background) and transfoot.png (alpha-clean cutout) so the gag has two looks. The rng draw happens unconditionally so a replayed seed still reproduces.
 
