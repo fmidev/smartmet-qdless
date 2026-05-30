@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 22%{?dist}.fmi
+Release: 23%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -112,6 +112,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/transfoot.png
 
 %changelog
+* Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-23.fmi
+- 3D views now obey the B and C keys for borders and coastlines. Previously draw3D / draw3DQueryData / draw3DSurfaceStack / draw3DCrossSection branched only on `style != LineStyle::None`, so the only way to silence the thick polylines crowding the volume was to disable them entirely. Each function now computes effCoast/effBord with a Thick→Braille demotion (thick lines visually clutter a 3D scene) and renders Thick only when the user has explicitly chosen Thick. Braille selection draws a 2×4 sub-cell dot-mask projected through the same camera basis as the volume, z-tested against the cross-section's depth buffer so vector lines occlude correctly behind the curtain. drawGlobe was left alone because the globe's projected polylines already render as pixel-thin segments. Net effect: B/C now produce three distinct looks (None / Braille / Thick) in every 3D view, with Braille the default.
+
 * Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-22.fmi
 - Refactor QdlessExitEffect.cpp (~24k lines) into per-theme translation units. Helpers (drawing primitives, runFrames, sample, image loaders, drawFootSprite, globe projections, skeleton crew, kEffectCount / Theme / kThemes / kThemeNames) move into include/QdlessExitEffectCommon.h inside namespace Qdless::ee_detail. Effects are split into eleven source/QdlessExitEffect<Theme>.cpp files (Art, Biology, Cartoon, Chemistry, Cinema, History, Music, Myth, Physics, TerminalFx, Weather), one per theme. Effect forward declarations live in include/QdlessExitEffectEffects.h, included by the registry and indirectly by every theme cpp. source/QdlessExitEffect.cpp keeps just the registry (exitEffectCount/Name/Theme, exitWordline, exitEffectIndexByName, playExitEffect, dispatch switch, random-stomp logic). Functionally identical (same 326 effects, same dispatch order, same stomp indices) — the only behavioural change is per-TU compile times shrink from one ~24k-line file to eleven files of ~600-5300 lines. Largest TU: Cinema at 5343 lines, Physics at 4162.
 

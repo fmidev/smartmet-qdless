@@ -5424,6 +5424,15 @@ void App::draw3D(const Layout& layout)
   // the same volume would just appear twice.
   const int cellW = l.map.width;
   const int cellH = l.map.height;
+
+  // In 3D, demote Thick coastlines/borders to Braille — thick lines
+  // crowd the volume; Braille keeps the geographic context without
+  // clutter. Honours None (still hidden) and explicit Braille (still
+  // Braille). The user can press [c]/[b] to cycle as usual.
+  const LineStyle effCoast =
+      (itsCoastlineStyle == LineStyle::Thick) ? LineStyle::Braille : itsCoastlineStyle;
+  const LineStyle effBord =
+      (itsBorderStyle == LineStyle::Thick) ? LineStyle::Braille : itsBorderStyle;
   const int subRows = subRowsForStyle(itsCornerStyle);
   const int subW = cellW * 2;
   const int subH = cellH * subRows;
@@ -5540,9 +5549,9 @@ void App::draw3D(const Layout& layout)
       }
     }
   };
-  if (itsCoastlineStyle == LineStyle::Thick)
+  if (effCoast == LineStyle::Thick)
     drawPolylinesThick(itsCoastlines, Rgb{200, 200, 200});
-  if (itsBorderStyle == LineStyle::Thick)
+  if (effBord == LineStyle::Thick)
     drawPolylinesThick(itsBorders, Rgb{120, 120, 120});
 
   // Range rings at 50, 100, 150, 200 km — visual anchor for distance.
@@ -5638,8 +5647,8 @@ void App::draw3D(const Layout& layout)
   // sub-cell mask than the renderer's quadrant grid, with the camera's
   // z-buffer (sampled at the nearest quadrant pixel) so radar bins
   // still occlude coastlines behind them.
-  const bool brailleCoast = itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
-  const bool brailleBorder = itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+  const bool brailleCoast = effCoast == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder = effBord == LineStyle::Braille && !itsBorders.empty();
   if (brailleCoast || brailleBorder)
   {
     const int bW = cellW * 2;
@@ -5830,6 +5839,12 @@ void App::draw3DQueryData(const Layout& layout)
   const int subH = cellH * subRows;
   const double aspect = static_cast<double>(subRows) / 4.0;
 
+  // Demote Thick → Braille in 3D so thick lines don't crowd the volume.
+  const LineStyle effCoast =
+      (itsCoastlineStyle == LineStyle::Thick) ? LineStyle::Braille : itsCoastlineStyle;
+  const LineStyle effBord =
+      (itsBorderStyle == LineStyle::Thick) ? LineStyle::Braille : itsBorderStyle;
+
   // Camera basis (copied verbatim from draw3D — same maths).
   const double cy = std::cos(itsCamYaw);
   const double sy_ = std::sin(itsCamYaw);
@@ -5935,9 +5950,9 @@ void App::draw3DQueryData(const Layout& layout)
       }
     }
   };
-  if (itsCoastlineStyle == LineStyle::Thick)
+  if (effCoast == LineStyle::Thick)
     drawPolylinesThick(itsCoastlines, Rgb{200, 200, 200});
-  if (itsBorderStyle == LineStyle::Thick)
+  if (effBord == LineStyle::Thick)
     drawPolylinesThick(itsBorders, Rgb{120, 120, 120});
 
   const double vexagger = itsVexagger3D;
@@ -6031,8 +6046,8 @@ void App::draw3DQueryData(const Layout& layout)
 
   // Braille overlay for coastlines / borders — identical mechanics to
   // draw3D, just with the bbox-centred latLonToXY plugged in.
-  const bool brailleCoast = itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
-  const bool brailleBorder = itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+  const bool brailleCoast = effCoast == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder = effBord == LineStyle::Braille && !itsBorders.empty();
   if (brailleCoast || brailleBorder)
   {
     const int bW = cellW * 2;
@@ -6211,6 +6226,12 @@ void App::draw3DSurfaceStack(const Layout& layout)
   const int subH = cellH * subRows;
   const double aspect = static_cast<double>(subRows) / 4.0;
 
+  // Demote Thick → Braille in 3D so thick lines don't crowd the stack.
+  const LineStyle effCoast =
+      (itsCoastlineStyle == LineStyle::Thick) ? LineStyle::Braille : itsCoastlineStyle;
+  const LineStyle effBord =
+      (itsBorderStyle == LineStyle::Thick) ? LineStyle::Braille : itsBorderStyle;
+
   // Camera basis.
   const double cy = std::cos(itsCamYaw);
   const double sy_ = std::sin(itsCamYaw);
@@ -6306,9 +6327,9 @@ void App::draw3DSurfaceStack(const Layout& layout)
       }
     }
   };
-  if (itsCoastlineStyle == LineStyle::Thick)
+  if (effCoast == LineStyle::Thick)
     drawPolylinesThick(itsCoastlines, Rgb{200, 200, 200});
-  if (itsBorderStyle == LineStyle::Thick)
+  if (effBord == LineStyle::Thick)
     drawPolylinesThick(itsBorders, Rgb{120, 120, 120});
 
   // Layer table. Heights are canonical mid-of-deck values:
@@ -6389,8 +6410,8 @@ void App::draw3DSurfaceStack(const Layout& layout)
   // Coastline / border braille overlay — same shape as the other 3D
   // paths. Pulled out as a lambda over the per-renderer scaling so the
   // diff with draw3DQueryData stays obvious.
-  const bool brailleCoast = itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
-  const bool brailleBorder = itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+  const bool brailleCoast = effCoast == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder = effBord == LineStyle::Braille && !itsBorders.empty();
   if (brailleCoast || brailleBorder)
   {
     const int bW = cellW * 2;
@@ -6602,6 +6623,12 @@ void App::draw3DCrossSection(const Layout& layout)
   const int subW = cellW * 2;
   const int subH = cellH * subRows;
   const double aspect = static_cast<double>(subRows) / 4.0;
+
+  // Demote Thick → Braille in 3D so thick lines don't crowd the curtain.
+  const LineStyle effCoast =
+      (itsCoastlineStyle == LineStyle::Thick) ? LineStyle::Braille : itsCoastlineStyle;
+  const LineStyle effBord =
+      (itsBorderStyle == LineStyle::Thick) ? LineStyle::Braille : itsBorderStyle;
 
   // Camera basis (verbatim from draw3DQueryData).
   const double cy = std::cos(itsCamYaw);
@@ -6995,9 +7022,11 @@ void App::draw3DCrossSection(const Layout& layout)
   }
   itsSource->selectLevelIndex(static_cast<std::size_t>(savedLevel));
 
-  // Coastlines / borders projected onto the ground plane. Thick style only
-  // for mode 4 — braille glyphs are cell-positioned characters that don't
-  // mix with the per-pixel raster cleanly.
+  // Coastlines / borders projected onto the ground plane. Thick path
+  // rasterises directly into pixels via drawLine; the Braille path uses a
+  // 2×4 sub-cell mask composited as glyphs over the final raster (see
+  // below). Thick is demoted to Braille in 3D by effCoast/effBord upstream,
+  // so this branch is normally inactive unless that demotion is removed.
   auto drawPolylinesThick = [&](const std::vector<Polyline>& polys, Rgb color)
   {
     for (const auto& p : polys)
@@ -7016,9 +7045,9 @@ void App::draw3DCrossSection(const Layout& layout)
       }
     }
   };
-  if (itsCoastlineStyle != LineStyle::None)
+  if (effCoast == LineStyle::Thick)
     drawPolylinesThick(itsCoastlines, Rgb{200, 200, 200});
-  if (itsBorderStyle != LineStyle::None)
+  if (effBord == LineStyle::Thick)
     drawPolylinesThick(itsBorders, Rgb{120, 120, 120});
 
   // Endpoint poles + curtain rectangle outlines. Each plane shows its
@@ -7072,6 +7101,127 @@ void App::draw3DCrossSection(const Layout& layout)
   std::ostringstream os;
   cache3DRaster(pixels, subW, subH);
   itsRenderer.render(os, pixels, subW, subH, layout.map.row, layout.map.col);
+
+  // Braille overlay for coastlines / borders. Same 2×4 sub-cell trick as
+  // draw3DQueryData — projects each polyline vertex into screen + depth,
+  // z-tests against zbuf at the underlying sub-cell, then composites the
+  // resulting glyphs over the rendered raster.
+  const bool brailleCoast = effCoast == LineStyle::Braille && !itsCoastlines.empty();
+  const bool brailleBorder = effBord == LineStyle::Braille && !itsBorders.empty();
+  if (brailleCoast || brailleBorder)
+  {
+    const int bW = cellW * 2;
+    const int bH = cellH * 4;
+    std::vector<unsigned char> dotMask(static_cast<std::size_t>(bW) * bH, 0);
+    std::vector<Rgb> dotColor(static_cast<std::size_t>(bW) * bH, Rgb{0, 0, 0});
+    const double yFineScale = 4.0 / subRows;
+    auto projectB = [&](double wx, double wy, double wz, int& bx, int& by, float& depth)
+    {
+      const double sx = rightX * wx + rightY * wy + rightZ * wz;
+      const double sy = upX * wx + upY * wy + upZ * wz;
+      const double dp = fwdX * wx + fwdY * wy + fwdZ * wz;
+      bx = static_cast<int>(std::round(bW / 2.0 + xscale * sx));
+      by = static_cast<int>(std::round(bH / 2.0 - yscale * yFineScale * sy));
+      depth = static_cast<float>(dp * depthScale);
+    };
+    auto plotB = [&](int bx, int by, float depth, Rgb color)
+    {
+      if (bx < 0 || bx >= bW || by < 0 || by >= bH)
+        return;
+      const int qy = by * subRows / 4;
+      const std::size_t qidx = static_cast<std::size_t>(qy) * subW + bx;
+      if (depth >= zbuf[qidx])
+        return;
+      const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+      dotMask[bidx] = 1;
+      dotColor[bidx] = color;
+    };
+    auto lineB =
+        [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
+    {
+      int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+      float d0 = 0, d1 = 0;
+      projectB(wx0, wy0, wz0, x0, y0, d0);
+      projectB(wx1, wy1, wz1, x1, y1, d1);
+      const int adx = std::abs(x1 - x0);
+      const int ady = std::abs(y1 - y0);
+      const int steps = std::max(adx, ady);
+      if (steps <= 0)
+      {
+        plotB(x0, y0, d0, color);
+        return;
+      }
+      for (int i = 0; i <= steps; ++i)
+      {
+        const double t = static_cast<double>(i) / steps;
+        const int cx = static_cast<int>(std::round(x0 + t * (x1 - x0)));
+        const int cy_ = static_cast<int>(std::round(y0 + t * (y1 - y0)));
+        const float dt = static_cast<float>(d0 + t * (d1 - d0));
+        plotB(cx, cy_, dt, color);
+      }
+    };
+    auto drawPolyB = [&](const std::vector<Polyline>& polys, Rgb color)
+    {
+      for (const auto& p : polys)
+      {
+        if (p.lats.size() < 2)
+          continue;
+        double x0 = 0, y0 = 0;
+        latLonToXY(p.lats[0], p.lons[0], x0, y0);
+        for (std::size_t i = 1; i < p.lats.size(); ++i)
+        {
+          double x1 = 0, y1 = 0;
+          latLonToXY(p.lats[i], p.lons[i], x1, y1);
+          lineB(x0, y0, 0, x1, y1, 0, color);
+          x0 = x1;
+          y0 = y1;
+        }
+      }
+    };
+    if (brailleCoast)
+      drawPolyB(itsCoastlines, Rgb{200, 200, 200});
+    if (brailleBorder)
+      drawPolyB(itsBorders, Rgb{120, 120, 120});
+
+    std::string brailleOut;
+    for (int cy_ = 0; cy_ < cellH; ++cy_)
+    {
+      for (int cx = 0; cx < cellW; ++cx)
+      {
+        unsigned cellMask = 0;
+        Rgb cellFg{200, 200, 200};
+        for (int sy = 0; sy < 4; ++sy)
+        {
+          for (int sx = 0; sx < 2; ++sx)
+          {
+            const int bx = cx * 2 + sx;
+            const int by = cy_ * 4 + sy;
+            const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+            if (dotMask[bidx] != 0U)
+            {
+              cellMask |= 1U << brailleBit(sx, sy);
+              cellFg = dotColor[bidx];
+            }
+          }
+        }
+        if (cellMask == 0U)
+          continue;
+        const int qy = cy_ * subRows;
+        const Rgb bg = pixels[static_cast<std::size_t>(qy) * subW + cx * 2];
+        brailleOut += "\x1b[";
+        brailleOut += std::to_string(layout.map.row + cy_ + 1);
+        brailleOut += ';';
+        brailleOut += std::to_string(layout.map.col + cx + 1);
+        brailleOut += 'H';
+        brailleOut += itsRenderer.bgEscape(bg);
+        brailleOut += itsRenderer.fgEscape(cellFg);
+        brailleOut += brailleGlyph(cellMask);
+      }
+    }
+    if (!brailleOut.empty())
+      os << brailleOut << "\x1b[0m";
+  }
+
   os << "\x1b[" << layout.map.row + layout.map.height << ";" << layout.map.col + 1 << "H"
      << "\x1b[0m\x1b[7m " << hud << " \x1b[0m";
   std::cout << os.str();
