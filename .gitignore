@@ -5,6 +5,8 @@ qdless
 *.a
 *.tar.gz
 .cache/
+__pycache__/
+*.pyc
 core
 *.swp
 *~
