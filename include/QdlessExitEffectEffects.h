@@ -150,6 +150,7 @@ void effectJellyfish(const Renderer& renderer, const std::vector<Rgb>& src, int 
 void effectJetStream(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectJurassic(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectJWST(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectKenney(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectKong(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectKoyaanisqatsi(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectKrakatoa(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);

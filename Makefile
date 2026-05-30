@@ -104,6 +104,13 @@ install:
 	    $(INSTALL_DATA) $$f $(datadir)/smartmet/qdless/muybridge/$$name/; \
 	  done; \
 	done
+	@for d in data/kenney/*/; do \
+	  name=$$(basename $$d); \
+	  mkdir -p $(datadir)/smartmet/qdless/kenney/$$name; \
+	  for f in $$d*.png; do \
+	    $(INSTALL_DATA) $$f $(datadir)/smartmet/qdless/kenney/$$name/; \
+	  done; \
+	done
 
 test:
 	@if [ -f test/Makefile ]; then cd test && $(MAKE) test; \

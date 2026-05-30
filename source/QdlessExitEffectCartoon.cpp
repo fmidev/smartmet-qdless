@@ -5,6 +5,116 @@ namespace Qdless
 namespace ee_detail
 {
 
+// Kenney gallery: 4×4 grid of Kenney.nl "Platformer Art Deluxe" (CC0)
+// character animations playing simultaneously over the dimmed data
+// backdrop. The 11-frame player walk cycle is the showpiece (top-left
+// cell); the rest of the grid covers jumps, climbs, swims, and small
+// creature loops for breadth. Sprites are pre-extracted to
+// data/kenney/<motion>/frame_NN.png by scripts/kenney2sprites.py — they
+// arrive as alpha-clean colour PNGs and composite directly through
+// drawKenneyFrame which preserves the original cartoon palette.
+void effectKenney(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto motions = loadAllKenneyMotions();
+
+  constexpr int cols = 4;
+  constexpr int rows = 4;
+  const float cellW = static_cast<float>(w) / cols;
+  const float cellH = static_cast<float>(h) / rows;
+  const float spriteH = cellH * 0.78F;
+
+  auto drawText = [&](std::vector<Rgb>& dst, const char* s, float px, float py, Rgb color)
+  {
+    constexpr int kFW = 5, kFH = 7, kGap = 1;
+    int x0 = static_cast<int>(std::round(px));
+    const int y0 = static_cast<int>(std::round(py));
+    for (const char* p = s; *p; ++p)
+    {
+      const auto g = glyph5x7(static_cast<char>(std::toupper(static_cast<unsigned char>(*p))));
+      for (int fy = 0; fy < kFH; ++fy)
+        for (int fx = 0; fx < kFW; ++fx)
+        {
+          if (g[fy][fx] != '1')
+            continue;
+          const int xx = x0 + fx;
+          const int yy = y0 + fy;
+          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+            dst[static_cast<std::size_t>(yy) * w + xx] = color;
+        }
+      x0 += kFW + kGap;
+    }
+  };
+
+  runFrames(
+      renderer,
+      w,
+      h,
+      6400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        // Cool blue-grey scrapbook backdrop so the cartoon colours pop.
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(40 + l * 0.20F), u8(60 + l * 0.22F), u8(95 + l * 0.20F), false};
+          }
+        // Thin grid dividers.
+        const Rgb divCol{20, 30, 50, false};
+        for (int c = 1; c < cols; ++c)
+        {
+          const int xx = static_cast<int>(c * cellW);
+          for (int yy = 0; yy < h; ++yy)
+            dst[static_cast<std::size_t>(yy) * w + xx] = divCol;
+        }
+        for (int r = 1; r < rows; ++r)
+        {
+          const int yy = static_cast<int>(r * cellH);
+          for (int xx = 0; xx < w; ++xx)
+            dst[static_cast<std::size_t>(yy) * w + xx] = divCol;
+        }
+
+        for (int idx = 0; idx < kKenneyMotionCount; ++idx)
+        {
+          const int r = idx / cols;
+          const int c = idx % cols;
+          const float cx = (c + 0.5F) * cellW;
+          // Anchor sprites slightly above centre so the caption strip has
+          // room below; the walking sprites read better with the feet
+          // near the implied ground anyway.
+          const float cy = (r + 0.5F) * cellH - cellH * 0.06F;
+
+          const auto& m = motions[idx];
+          if (m.frames.empty())
+            continue;
+          const int nf = static_cast<int>(m.frames.size());
+          // Cycle ~3.5× over the runtime so the 11-frame walk plays
+          // properly (else it looks like a slow march); short 2-frame
+          // cycles just blink at a similar visual rate.
+          const float phase = t * 3.5F + idx * 0.13F;
+          const int fi = static_cast<int>(std::floor(phase * nf)) % std::max(1, nf);
+
+          drawKenneyFrame(dst, w, h, ya, m, fi, cx, cy, spriteH);
+
+          const char* label = kKenneyLabels[idx];
+          const std::size_t llen = std::strlen(label);
+          const float capW = llen * 6.0F;
+          const float capX = cx - capW * 0.5F;
+          const float capY = (r + 1) * cellH - cellH * 0.10F;
+          drawText(dst, label, capX, capY, Rgb{230, 240, 250, false});
+        }
+
+        const char* title = "KENNEY.NL PLATFORMER PACK (CC0)";
+        const std::size_t tlen = std::strlen(title);
+        const float tw = tlen * 6.0F;
+        drawText(dst, title, w * 0.5F - tw * 0.5F, 4.0F, Rgb{240, 250, 255, false});
+      });
+}
+
 void effectPacman(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);

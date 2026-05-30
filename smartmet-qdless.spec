@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 25%{?dist}.fmi
+Release: 26%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -111,8 +111,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/foot.png
 %{_datadir}/smartmet/qdless/transfoot.png
 %{_datadir}/smartmet/qdless/muybridge/*/*.png
+%{_datadir}/smartmet/qdless/kenney/*/*.png
 
 %changelog
+* Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-26.fmi
+- New Kenney exit effect (Cartoon theme, alphabetical roster index 141, between JWST and King Kong). 4x4 gallery of CC0-licensed cartoon platformer sprites from Kenney.nl's "Platformer Art Deluxe" pack: the 11-frame player walk cycle is the showpiece, surrounded by jump/duck/hurt for the human, an alien character with walk/climb/swim/jump cycles, and small creature loops (snail, slime, spider, fish, fly, bee, bat, plus a three-character party shot). Unlike Muybridge's grayscale rotoscopes the Kenney art is full-colour and the renderer preserves it verbatim over a cool blue-grey scrapbook backdrop. Sprites are pre-extracted (alpha-clean, tightly cropped) by scripts/kenney2sprites.py into data/kenney/<motion>/frame_NN.png. The C++ side reuses the existing MuybridgeMotion struct but adds drawKenneyFrame which keeps the original RGB (vs Muybridge's tinted silhouette) and loadAllKenneyMotions which walks data/kenney/. Roster grows 327 -> 328; Monty Python stomp-exclusion shifts 176 -> 177 and Python Wars 228 -> 229 to follow the inserted slot.
+
 * Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-25.fmi
 - Muybridge silhouette extraction is far more robust. The first cut used per-frame corner-median polarity detection and per-frame Otsu thresholding — that failed on three classes of plate the original Wikimedia GIFs include: (a) plates with a black ruler strip down one side (the disc-thrower plate has one) which dragged the corner median away from the actual photographic backdrop and inverted the polarity decision; (b) plates with a figure that dwells in a narrow band across the whole sequence (also the thrower), where the per-pixel temporal median picked figure pixels as "background"; (c) plates with frame-to-frame exposure drift (a few human plates re-encoded into the GIF with slightly different colour tables), where a uniformly brighter frame got wholly flagged as subject. Pipeline is now: global polarity from the pooled histogram across the whole sequence (very dark vs very bright bins decide which side the figure lives on); background plate from the per-pixel 25th/75th percentile across time (robust against the figure dwelling at a point AND against bright halftone specks); per-frame exposure normalization by subtracting the median (frame - bg) offset before thresholding (so a globally over- or under-exposed frame no longer triggers a flood mask); Otsu on the difference image with the zero-bin masked out (otherwise the huge population of background-matching pixels skews Otsu toward a near-zero threshold) and a hard floor at 48. Visual result: the man_walk plate that had 5 of its 12 frames fully inverted is now clean across all frames; the woman_walk frame 5 that previously came out as a solid-filled rectangle is now a clean upright silhouette; the disc-throw plate's coverage swing is down from 0-71% (catastrophic frame-9 flood) to 0-17% (within the expected variation for a small, sparse subject). All 16 motions checked: median coverage 5-23% with no outlier frames.
 
