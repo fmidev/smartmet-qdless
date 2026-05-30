@@ -191,6 +191,7 @@ void effectMoonPhases(const Renderer& renderer, const std::vector<Rgb>& src, int
 void effectMoonRocket(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectMunchScream(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectMutation(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectMuybridge(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectNaClLattice(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectNapoleon(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectNeo(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);

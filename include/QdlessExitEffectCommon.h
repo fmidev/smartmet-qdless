@@ -1239,7 +1239,147 @@ inline FootSprite loadPythonFootSprite()
   return s;
 }
 
-constexpr int kEffectCount = 326;
+// Muybridge motion studies. Each motion is a sequence of pre-rendered
+// rotoscope silhouettes (black on transparent alpha) prepared by
+// scripts/gif2muybridge.py from the original 1880s GIFs on Wikimedia
+// Commons. The list of motion names below has to match the directories
+// under data/muybridge/. The frame count per motion is whatever the
+// source GIF supplied — typically 9-32 frames.
+struct MuybridgeMotion
+{
+  std::string name;
+  std::vector<std::unique_ptr<ImageSource>> frames;
+  std::vector<std::pair<std::size_t, std::size_t>> sizes;  // (w, h) per frame
+};
+
+constexpr const char* kMuybridgeMotions[] = {
+    // Humans first — the rotoscope idea was originally human-focused.
+    "man_walk",
+    "stairs",
+    "woman_walk",
+    "disc_throw",
+    "leapfrog",
+    "dance",
+    "somersault",
+    "hammering",
+    "wrestling",
+    "waltz",
+    // Animals — Sallie Gardner is here because she made the whole idea
+    // famous in 1878 and the user explicitly asked for her.
+    "race_horse",
+    "horse_gallop",
+    "horse_jump",
+    "horse_walk",
+    "elephant",
+    "buffalo",
+};
+constexpr int kMuybridgeMotionCount =
+    static_cast<int>(sizeof(kMuybridgeMotions) / sizeof(kMuybridgeMotions[0]));
+
+// English labels shown on the gallery effect's caption row.
+constexpr const char* kMuybridgeLabels[kMuybridgeMotionCount] = {
+    "Man walking",
+    "Climbing stairs",
+    "Woman walking",
+    "Throwing disc",
+    "Leapfrog",
+    "Dancing",
+    "Somersault",
+    "Hammering",
+    "Wrestling",
+    "Waltz",
+    "Annie G racing",
+    "Horse galloping",
+    "Horse jumping",
+    "Horse walking",
+    "Elephant walking",
+    "Buffalo galloping",
+};
+
+inline MuybridgeMotion loadMuybridgeMotion(const char* name)
+{
+  MuybridgeMotion m;
+  m.name = name;
+  // Discover frames by attempting frame_NN.png in sequence until one
+  // fails. The conversion script numbers them sequentially from 00.
+  for (int i = 0; i < 64; ++i)
+  {
+    char rel[128];
+    std::snprintf(rel, sizeof(rel), "muybridge/%s/frame_%02d.png", name, i);
+    std::size_t fw = 0, fh = 0;
+    auto img = loadDataImage(rel, fw, fh);
+    if (!img)
+      break;
+    m.frames.push_back(std::move(img));
+    m.sizes.emplace_back(fw, fh);
+  }
+  return m;
+}
+
+// One-shot loader: returns a vector with every motion attempted. Motions
+// that fail to find their files come back with empty .frames so the
+// caller can skip them.
+inline std::vector<MuybridgeMotion> loadAllMuybridgeMotions()
+{
+  std::vector<MuybridgeMotion> out;
+  out.reserve(kMuybridgeMotionCount);
+  for (int i = 0; i < kMuybridgeMotionCount; ++i)
+    out.push_back(loadMuybridgeMotion(kMuybridgeMotions[i]));
+  return out;
+}
+
+// Composite a Muybridge frame at (cx,cy) at a target height in screen
+// pixels, tinted to `fg`. Alpha controls opacity so the antialiased edge
+// from the LANCZOS downsample blends correctly with the underlying
+// raster. The sprite's natural aspect is preserved.
+inline void drawMuybridgeFrame(std::vector<Rgb>& dst, int w, int h, float ya,
+                               const MuybridgeMotion& m, int frameIdx,
+                               float cx, float cy, float spriteH, Rgb fg)
+{
+  if (m.frames.empty())
+    return;
+  const int idx = ((frameIdx % static_cast<int>(m.frames.size())) +
+                   static_cast<int>(m.frames.size())) %
+                  static_cast<int>(m.frames.size());
+  const auto& img = m.frames[idx];
+  const auto [iw, ih] = m.sizes[idx];
+  if (img == nullptr || iw == 0 || ih == 0)
+    return;
+  const float aspect = static_cast<float>(iw) / static_cast<float>(ih);
+  const float spriteW = spriteH * aspect;
+  const int x0 = static_cast<int>(std::max(0.0F, cx - spriteW * 0.5F));
+  const int x1 = static_cast<int>(std::min(static_cast<float>(w - 1), cx + spriteW * 0.5F));
+  const int y0 = static_cast<int>(std::max(0.0F, cy - spriteH * 0.5F / ya));
+  const int y1 = static_cast<int>(std::min(static_cast<float>(h - 1), cy + spriteH * 0.5F / ya));
+  if (x1 <= x0 || y1 <= y0)
+    return;
+  for (int yy = y0; yy <= y1; ++yy)
+  {
+    const float v = (static_cast<float>(yy) - (cy - spriteH * 0.5F / ya)) /
+                    (spriteH / ya);
+    if (v < 0.0F || v > 1.0F)
+      continue;
+    for (int xx = x0; xx <= x1; ++xx)
+    {
+      const float u = (static_cast<float>(xx) - (cx - spriteW * 0.5F)) / spriteW;
+      if (u < 0.0F || u > 1.0F)
+        continue;
+      const Rgb pix = img->pixelAtUV(std::clamp(u, 0.0F, 0.999F),
+                                     std::clamp(v, 0.0F, 0.999F));
+      // ImageSource collapses alpha to binary (anything < 128 is
+      // transparent). Our PNGs are black-on-transparent; the Python
+      // morphological cleanup already crispened edges, so a hard cutoff
+      // is fine and matches what the loader is going to give us anyway.
+      if (pix.transparent)
+        continue;
+      const std::size_t di = static_cast<std::size_t>(yy) * w + xx;
+      dst[di] = fg;
+      dst[di].transparent = false;
+    }
+  }
+}
+
+constexpr int kEffectCount = 327;
 
 enum class Theme : std::uint8_t
 {
@@ -1455,150 +1595,151 @@ constexpr Theme kThemes[kEffectCount] = {
     /* 179 Moon Rocket            */ Theme::Cinema,
     /* 180 Munch Scream           */ Theme::Art,
     /* 181 Mutation               */ Theme::Biology,
-    /* 182 NaCl Lattice           */ Theme::Chemistry,
-    /* 183 Napoleon               */ Theme::History,
-    /* 184 Neo                    */ Theme::Cinema,
-    /* 185 Neutron Star           */ Theme::Physics,
-    /* 186 Newspaper              */ Theme::TerminalFx,
-    /* 187 Newton                 */ Theme::History,
-    /* 188 Newton Cradle          */ Theme::Physics,
-    /* 189 Nosferatu              */ Theme::Cinema,
-    /* 190 Olympic Torch          */ Theme::History,
-    /* 191 Olympus Mons           */ Theme::Physics,
-    /* 192 Opera Curtain          */ Theme::Music,
-    /* 193 Oscar Statue           */ Theme::Cinema,
-    /* 194 Out of Africa          */ Theme::Biology,
-    /* 195 Ozone Hole             */ Theme::Weather,
-    /* 196 Pac-Man                */ Theme::Cartoon,
-    /* 197 Pac-Man Duel           */ Theme::Cartoon,
-    /* 198 Pandora                */ Theme::Myth,
-    /* 199 Pandora Foot           */ Theme::Myth,
-    /* 200 Pangaea                */ Theme::Physics,
-    /* 201 Parker Probe           */ Theme::Physics,
-    /* 202 Parthenon              */ Theme::History,
-    /* 203 Peacock                */ Theme::Biology,
-    /* 204 Pegasus                */ Theme::Myth,
-    /* 205 Pendulum Waves         */ Theme::Physics,
-    /* 206 Peppered Moth          */ Theme::Biology,
-    /* 207 Periodic Table         */ Theme::Chemistry,
-    /* 208 pH Strip               */ Theme::Chemistry,
-    /* 209 Phase Transition       */ Theme::Chemistry,
-    /* 210 Phoenix                */ Theme::Myth,
-    /* 211 Pi                     */ Theme::Physics,
-    /* 212 Piano Keys             */ Theme::Music,
-    /* 213 Pillars of Creation    */ Theme::Physics,
-    /* 214 Pink Panther           */ Theme::Cartoon,
-    /* 215 Pleasantville          */ Theme::Cinema,
-    /* 216 Polar Vortex           */ Theme::Weather,
-    /* 217 Pompeii                */ Theme::History,
-    /* 218 Pride Rock             */ Theme::Cinema,
-    /* 219 Psycho                 */ Theme::Cinema,
-    /* 220 Pulp Briefcase         */ Theme::Cinema,
-    /* 221 Pulp Fiction           */ Theme::Cinema,
-    /* 222 Pulsar                 */ Theme::Physics,
-    /* 223 Punctuated             */ Theme::Biology,
-    /* 224 Pyramids               */ Theme::History,
-    /* 225 Pythagoras             */ Theme::Physics,
-    /* 226 Python Cut             */ Theme::Cartoon,
-    /* 227 Python Wars            */ Theme::Cartoon,
-    /* 228 Quetzalcoatl           */ Theme::Myth,
-    /* 229 Ragnarok               */ Theme::Myth,
-    /* 230 Red Balloon            */ Theme::Cinema,
-    /* 231 Ring of Fire           */ Theme::Physics,
-    /* 232 Riverdance             */ Theme::Music,
-    /* 233 Rocky                  */ Theme::Cinema,
-    /* 234 Rosebud                */ Theme::Cinema,
-    /* 235 Rubik                  */ Theme::Physics,
-    /* 236 Russian Dance          */ Theme::Music,
-    /* 237 Sagittarius A          */ Theme::Physics,
-    /* 238 Saharan Dust           */ Theme::Weather,
-    /* 239 Saturn                 */ Theme::Physics,
-    /* 240 Saturn Rings           */ Theme::Physics,
-    /* 241 Schrodinger            */ Theme::Physics,
-    /* 242 Sea Ice                */ Theme::Weather,
-    /* 243 Selection              */ Theme::Biology,
-    /* 244 Shawshank              */ Theme::Cinema,
-    /* 245 Sheet Music            */ Theme::Music,
-    /* 246 Shining                */ Theme::Cinema,
-    /* 247 Shiver                 */ Theme::TerminalFx,
-    /* 248 Sierpinski             */ Theme::Physics,
-    /* 249 Silly Walk             */ Theme::Cartoon,
-    /* 250 Singin'                */ Theme::Music,
-    /* 251 Sistine                */ Theme::Art,
-    /* 252 Skeleton Wave          */ Theme::TerminalFx,
-    /* 253 Snow Tree              */ Theme::Weather,
-    /* 254 Snowfall               */ Theme::Weather,
-    /* 255 Soap Bubble            */ Theme::Chemistry,
-    /* 256 Solar Eclipse          */ Theme::Physics,
-    /* 257 Solar Flare            */ Theme::Physics,
-    /* 258 Solar System           */ Theme::Physics,
-    /* 259 Sound of Music         */ Theme::Music,
-    /* 260 Spaghettify            */ Theme::Physics,
-    /* 261 Spider                 */ Theme::TerminalFx,
-    /* 262 Spiral                 */ Theme::TerminalFx,
-    /* 263 Spirited Train         */ Theme::Cinema,
-    /* 264 Sputnik                */ Theme::History,
-    /* 265 Standing Wave          */ Theme::Physics,
-    /* 266 Standoff               */ Theme::Cinema,
-    /* 267 Star Gate              */ Theme::Cinema,
-    /* 268 Star Wars              */ Theme::Cinema,
-    /* 269 Stephenson             */ Theme::History,
-    /* 270 Stingray               */ Theme::Weather,
-    /* 271 Stonehenge             */ Theme::History,
-    /* 272 Stradivarius           */ Theme::Music,
-    /* 273 Strangelove            */ Theme::Cinema,
-    /* 274 Submarine              */ Theme::Music,
-    /* 275 Sun Dogs               */ Theme::Physics,
-    /* 276 Sunspot Cycle          */ Theme::Physics,
-    /* 277 Supercell              */ Theme::Weather,
-    /* 278 Supernova              */ Theme::Physics,
-    /* 279 Tatooine               */ Theme::Cinema,
-    /* 280 Teardrop               */ Theme::TerminalFx,
-    /* 281 Tears in Rain          */ Theme::Cinema,
-    /* 282 Test Card              */ Theme::TerminalFx,
-    /* 283 Thanos Snap            */ Theme::Cinema,
-    /* 284 That's All Folks       */ Theme::Cartoon,
-    /* 285 The Birds              */ Theme::Cinema,
-    /* 286 The End                */ Theme::TerminalFx,
-    /* 287 Thelma & Louise        */ Theme::Cinema,
-    /* 288 Theremin               */ Theme::Music,
-    /* 289 Thriller               */ Theme::Music,
-    /* 290 Thunderstorm           */ Theme::Weather,
-    /* 291 Titanic                */ Theme::Cinema,
-    /* 292 Top Hat                */ Theme::Cartoon,
-    /* 293 Tornado                */ Theme::Weather,
-    /* 294 Tornado Duel           */ Theme::Weather,
-    /* 295 Totoro                 */ Theme::Cinema,
-    /* 296 Tracks                 */ Theme::Cinema,
-    /* 297 Train                  */ Theme::Cinema,
-    /* 298 Tree of Life           */ Theme::Biology,
-    /* 299 Trojan Foot            */ Theme::Myth,
-    /* 300 Trojan Horse           */ Theme::History,
-    /* 301 Tron                   */ Theme::Cinema,
-    /* 302 Trophy                 */ Theme::Cartoon,
-    /* 303 Truman                 */ Theme::Cinema,
-    /* 304 Tsunami                */ Theme::Weather,
-    /* 305 Tunnel                 */ Theme::TerminalFx,
-    /* 306 UFO                    */ Theme::Cinema,
-    /* 307 Up                     */ Theme::Cinema,
-    /* 308 Utopia                 */ Theme::TerminalFx,
-    /* 309 Valkyrie Ride          */ Theme::Music,
-    /* 310 Vertigo                */ Theme::Cinema,
-    /* 311 Viking Longboat        */ Theme::History,
-    /* 312 Vinyl Spin             */ Theme::Music,
-    /* 313 Voyager                */ Theme::Physics,
-    /* 314 Walker Cell            */ Theme::Weather,
-    /* 315 Warhol Banana          */ Theme::Art,
-    /* 316 Warp                   */ Theme::TerminalFx,
-    /* 317 Wildfire Smoke         */ Theme::Weather,
-    /* 318 William Tell           */ Theme::Myth,
-    /* 319 Wizard of Oz           */ Theme::Cinema,
-    /* 320 Word Reveal            */ Theme::TerminalFx,
-    /* 321 Wormhole               */ Theme::Physics,
-    /* 322 Wright Flyer           */ Theme::History,
-    /* 323 Yggdrasil              */ Theme::Myth,
-    /* 324 YMCA                   */ Theme::Music,
-    /* 325 Yorick                 */ Theme::Cinema,
+    /* 182 Muybridge              */ Theme::Cinema,
+    /* 183 NaCl Lattice           */ Theme::Chemistry,
+    /* 184 Napoleon               */ Theme::History,
+    /* 185 Neo                    */ Theme::Cinema,
+    /* 186 Neutron Star           */ Theme::Physics,
+    /* 187 Newspaper              */ Theme::TerminalFx,
+    /* 188 Newton                 */ Theme::History,
+    /* 189 Newton Cradle          */ Theme::Physics,
+    /* 190 Nosferatu              */ Theme::Cinema,
+    /* 191 Olympic Torch          */ Theme::History,
+    /* 192 Olympus Mons           */ Theme::Physics,
+    /* 193 Opera Curtain          */ Theme::Music,
+    /* 194 Oscar Statue           */ Theme::Cinema,
+    /* 195 Out of Africa          */ Theme::Biology,
+    /* 196 Ozone Hole             */ Theme::Weather,
+    /* 197 Pac-Man                */ Theme::Cartoon,
+    /* 198 Pac-Man Duel           */ Theme::Cartoon,
+    /* 199 Pandora                */ Theme::Myth,
+    /* 200 Pandora Foot           */ Theme::Myth,
+    /* 201 Pangaea                */ Theme::Physics,
+    /* 202 Parker Probe           */ Theme::Physics,
+    /* 203 Parthenon              */ Theme::History,
+    /* 204 Peacock                */ Theme::Biology,
+    /* 205 Pegasus                */ Theme::Myth,
+    /* 206 Pendulum Waves         */ Theme::Physics,
+    /* 207 Peppered Moth          */ Theme::Biology,
+    /* 208 Periodic Table         */ Theme::Chemistry,
+    /* 209 pH Strip               */ Theme::Chemistry,
+    /* 210 Phase Transition       */ Theme::Chemistry,
+    /* 211 Phoenix                */ Theme::Myth,
+    /* 212 Pi                     */ Theme::Physics,
+    /* 213 Piano Keys             */ Theme::Music,
+    /* 214 Pillars of Creation    */ Theme::Physics,
+    /* 215 Pink Panther           */ Theme::Cartoon,
+    /* 216 Pleasantville          */ Theme::Cinema,
+    /* 217 Polar Vortex           */ Theme::Weather,
+    /* 218 Pompeii                */ Theme::History,
+    /* 219 Pride Rock             */ Theme::Cinema,
+    /* 220 Psycho                 */ Theme::Cinema,
+    /* 221 Pulp Briefcase         */ Theme::Cinema,
+    /* 222 Pulp Fiction           */ Theme::Cinema,
+    /* 223 Pulsar                 */ Theme::Physics,
+    /* 224 Punctuated             */ Theme::Biology,
+    /* 225 Pyramids               */ Theme::History,
+    /* 226 Pythagoras             */ Theme::Physics,
+    /* 227 Python Cut             */ Theme::Cartoon,
+    /* 228 Python Wars            */ Theme::Cartoon,
+    /* 229 Quetzalcoatl           */ Theme::Myth,
+    /* 230 Ragnarok               */ Theme::Myth,
+    /* 231 Red Balloon            */ Theme::Cinema,
+    /* 232 Ring of Fire           */ Theme::Physics,
+    /* 233 Riverdance             */ Theme::Music,
+    /* 234 Rocky                  */ Theme::Cinema,
+    /* 235 Rosebud                */ Theme::Cinema,
+    /* 236 Rubik                  */ Theme::Physics,
+    /* 237 Russian Dance          */ Theme::Music,
+    /* 238 Sagittarius A          */ Theme::Physics,
+    /* 239 Saharan Dust           */ Theme::Weather,
+    /* 240 Saturn                 */ Theme::Physics,
+    /* 241 Saturn Rings           */ Theme::Physics,
+    /* 242 Schrodinger            */ Theme::Physics,
+    /* 243 Sea Ice                */ Theme::Weather,
+    /* 244 Selection              */ Theme::Biology,
+    /* 245 Shawshank              */ Theme::Cinema,
+    /* 246 Sheet Music            */ Theme::Music,
+    /* 247 Shining                */ Theme::Cinema,
+    /* 248 Shiver                 */ Theme::TerminalFx,
+    /* 249 Sierpinski             */ Theme::Physics,
+    /* 250 Silly Walk             */ Theme::Cartoon,
+    /* 251 Singin'                */ Theme::Music,
+    /* 252 Sistine                */ Theme::Art,
+    /* 253 Skeleton Wave          */ Theme::TerminalFx,
+    /* 254 Snow Tree              */ Theme::Weather,
+    /* 255 Snowfall               */ Theme::Weather,
+    /* 256 Soap Bubble            */ Theme::Chemistry,
+    /* 257 Solar Eclipse          */ Theme::Physics,
+    /* 258 Solar Flare            */ Theme::Physics,
+    /* 259 Solar System           */ Theme::Physics,
+    /* 260 Sound of Music         */ Theme::Music,
+    /* 261 Spaghettify            */ Theme::Physics,
+    /* 262 Spider                 */ Theme::TerminalFx,
+    /* 263 Spiral                 */ Theme::TerminalFx,
+    /* 264 Spirited Train         */ Theme::Cinema,
+    /* 265 Sputnik                */ Theme::History,
+    /* 266 Standing Wave          */ Theme::Physics,
+    /* 267 Standoff               */ Theme::Cinema,
+    /* 268 Star Gate              */ Theme::Cinema,
+    /* 269 Star Wars              */ Theme::Cinema,
+    /* 270 Stephenson             */ Theme::History,
+    /* 271 Stingray               */ Theme::Weather,
+    /* 272 Stonehenge             */ Theme::History,
+    /* 273 Stradivarius           */ Theme::Music,
+    /* 274 Strangelove            */ Theme::Cinema,
+    /* 275 Submarine              */ Theme::Music,
+    /* 276 Sun Dogs               */ Theme::Physics,
+    /* 277 Sunspot Cycle          */ Theme::Physics,
+    /* 278 Supercell              */ Theme::Weather,
+    /* 279 Supernova              */ Theme::Physics,
+    /* 280 Tatooine               */ Theme::Cinema,
+    /* 281 Teardrop               */ Theme::TerminalFx,
+    /* 282 Tears in Rain          */ Theme::Cinema,
+    /* 283 Test Card              */ Theme::TerminalFx,
+    /* 284 Thanos Snap            */ Theme::Cinema,
+    /* 285 That's All Folks       */ Theme::Cartoon,
+    /* 286 The Birds              */ Theme::Cinema,
+    /* 287 The End                */ Theme::TerminalFx,
+    /* 288 Thelma & Louise        */ Theme::Cinema,
+    /* 289 Theremin               */ Theme::Music,
+    /* 290 Thriller               */ Theme::Music,
+    /* 291 Thunderstorm           */ Theme::Weather,
+    /* 292 Titanic                */ Theme::Cinema,
+    /* 293 Top Hat                */ Theme::Cartoon,
+    /* 294 Tornado                */ Theme::Weather,
+    /* 295 Tornado Duel           */ Theme::Weather,
+    /* 296 Totoro                 */ Theme::Cinema,
+    /* 297 Tracks                 */ Theme::Cinema,
+    /* 298 Train                  */ Theme::Cinema,
+    /* 299 Tree of Life           */ Theme::Biology,
+    /* 300 Trojan Foot            */ Theme::Myth,
+    /* 301 Trojan Horse           */ Theme::History,
+    /* 302 Tron                   */ Theme::Cinema,
+    /* 303 Trophy                 */ Theme::Cartoon,
+    /* 304 Truman                 */ Theme::Cinema,
+    /* 305 Tsunami                */ Theme::Weather,
+    /* 306 Tunnel                 */ Theme::TerminalFx,
+    /* 307 UFO                    */ Theme::Cinema,
+    /* 308 Up                     */ Theme::Cinema,
+    /* 309 Utopia                 */ Theme::TerminalFx,
+    /* 310 Valkyrie Ride          */ Theme::Music,
+    /* 311 Vertigo                */ Theme::Cinema,
+    /* 312 Viking Longboat        */ Theme::History,
+    /* 313 Vinyl Spin             */ Theme::Music,
+    /* 314 Voyager                */ Theme::Physics,
+    /* 315 Walker Cell            */ Theme::Weather,
+    /* 316 Warhol Banana          */ Theme::Art,
+    /* 317 Warp                   */ Theme::TerminalFx,
+    /* 318 Wildfire Smoke         */ Theme::Weather,
+    /* 319 William Tell           */ Theme::Myth,
+    /* 320 Wizard of Oz           */ Theme::Cinema,
+    /* 321 Word Reveal            */ Theme::TerminalFx,
+    /* 322 Wormhole               */ Theme::Physics,
+    /* 323 Wright Flyer           */ Theme::History,
+    /* 324 Yggdrasil              */ Theme::Myth,
+    /* 325 YMCA                   */ Theme::Music,
+    /* 326 Yorick                 */ Theme::Cinema,
 };
 
 static_assert(sizeof(kThemes) / sizeof(kThemes[0]) == kEffectCount,

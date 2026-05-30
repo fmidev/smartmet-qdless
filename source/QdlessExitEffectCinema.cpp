@@ -730,6 +730,124 @@ void effectInterstellar(const Renderer& renderer, const std::vector<Rgb>& src, i
       });
 }
 
+// Muybridge gallery: 4×4 grid of his most famous motion studies, each
+// playing simultaneously as a rotoscoped silhouette over the dimmed
+// weather data behind. Twelve human studies and four animal ones (the
+// galloping horse Sallie Gardner gets pride of place because she was the
+// very first rotoscoped subject in 1878). Sprites are loaded from
+// data/muybridge/<motion>/frame_NN.png — generated offline by
+// scripts/gif2muybridge.py from the original Wikimedia plates.
+void effectMuybridge(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto motions = loadAllMuybridgeMotions();
+
+  // Tiny left-aligned 5×7 text renderer for the captions. Each pixel is a
+  // 1-cell block at the integer (x,y) the user asks for.
+  auto drawText = [&](std::vector<Rgb>& dst, const char* s, float px, float py, Rgb color)
+  {
+    constexpr int kFW = 5, kFH = 7, kGap = 1;
+    int x0 = static_cast<int>(std::round(px));
+    const int y0 = static_cast<int>(std::round(py));
+    for (const char* p = s; *p; ++p)
+    {
+      const auto g = glyph5x7(static_cast<char>(std::toupper(static_cast<unsigned char>(*p))));
+      for (int fy = 0; fy < kFH; ++fy)
+        for (int fx = 0; fx < kFW; ++fx)
+        {
+          if (g[fy][fx] != '1')
+            continue;
+          const int xx = x0 + fx;
+          const int yy = y0 + fy;
+          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+            dst[static_cast<std::size_t>(yy) * w + xx] = color;
+        }
+      x0 += kFW + kGap;
+    }
+  };
+
+  // 4×4 grid covers exactly the 16 motion slots.
+  constexpr int cols = 4;
+  constexpr int rows = 4;
+  const float cellW = static_cast<float>(w) / cols;
+  const float cellH = static_cast<float>(h) / rows;
+  // Sprite height = 78% of cell, leaving room for a caption strip.
+  const float spriteH = cellH * 0.78F;
+
+  runFrames(
+      renderer,
+      w,
+      h,
+      6400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        // Sepia-dimmed data backdrop with thin black dividing lines so each
+        // cell reads as its own frame, scrapbook-style.
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(180 + l * 0.18F), u8(155 + l * 0.16F), u8(118 + l * 0.14F), false};
+          }
+        // Dividing lines.
+        const Rgb divCol{40, 28, 18, false};
+        for (int c = 1; c < cols; ++c)
+        {
+          const int xx = static_cast<int>(c * cellW);
+          for (int yy = 0; yy < h; ++yy)
+            dst[static_cast<std::size_t>(yy) * w + xx] = divCol;
+        }
+        for (int r = 1; r < rows; ++r)
+        {
+          const int yy = static_cast<int>(r * cellH);
+          for (int xx = 0; xx < w; ++xx)
+            dst[static_cast<std::size_t>(yy) * w + xx] = divCol;
+        }
+
+        // Every motion advances at its own speed proportional to its frame
+        // count — slower motions (more frames) and faster ones (fewer
+        // frames) all roughly cycle ~2× over the effect's lifetime.
+        for (int idx = 0; idx < kMuybridgeMotionCount; ++idx)
+        {
+          const int r = idx / cols;
+          const int c = idx % cols;
+          const float cx = (c + 0.5F) * cellW;
+          const float cy = (r + 0.5F) * cellH - cellH * 0.05F;
+
+          const auto& m = motions[idx];
+          if (m.frames.empty())
+            continue;
+          const int nf = static_cast<int>(m.frames.size());
+          // Cycle ~2.2 times over the runtime; offset each motion by its
+          // index so they don't all hit the same gait phase together.
+          const float phase = t * 2.2F + idx * 0.13F;
+          const int fi =
+              static_cast<int>(std::floor(phase * nf)) %
+              std::max(1, nf);
+
+          drawMuybridgeFrame(dst, w, h, ya, m, fi, cx, cy, spriteH,
+                             Rgb{18, 14, 10, false});
+
+          // Caption strip at the bottom of the cell with the motion label.
+          const char* label = kMuybridgeLabels[idx];
+          const std::size_t llen = std::strlen(label);
+          const float capW = llen * 6.0F;  // 5px glyph + 1px gap
+          const float capX = cx - capW * 0.5F;
+          const float capY = (r + 1) * cellH - cellH * 0.12F;
+          drawText(dst, label, capX, capY, Rgb{30, 20, 10, false});
+        }
+
+        // Title strip at top.
+        const char* title = "MUYBRIDGE - ANIMAL LOCOMOTION 1887";
+        const std::size_t tlen = std::strlen(title);
+        const float tw = tlen * 6.0F;
+        drawText(dst, title, w * 0.5F - tw * 0.5F, 4.0F, Rgb{15, 8, 4, false});
+      });
+}
+
 void effectNeo(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);

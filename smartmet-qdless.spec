@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 23%{?dist}.fmi
+Release: 24%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -110,8 +110,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cities1000.tsv
 %{_datadir}/smartmet/qdless/foot.png
 %{_datadir}/smartmet/qdless/transfoot.png
+%{_datadir}/smartmet/qdless/muybridge/*/*.png
 
 %changelog
+* Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-24.fmi
+- New Muybridge exit effect (Cinema theme, alphabetical roster index 182). Renders a 4x4 grid of Eadweard Muybridge's 1880s rotoscoped silhouettes — twelve human studies (man walking, woman walking, climbing stairs, throwing a discus, leapfrog, dancing, somersault, blacksmiths hammering, wrestling, waltz, plus two more) and four animal studies including Annie G galloping (the spiritual descendant of the 1878 Sallie Gardner study that founded motion pictures), horse jumping, an elephant, and a buffalo galloping. Each cell plays its own gait cycle independently over a sepia-dimmed data backdrop, with the motion label centered below and a "MUYBRIDGE - ANIMAL LOCOMOTION 1887" caption across the top. Sprites are loaded at runtime from data/muybridge/<motion>/frame_NN.png (263 frames total, ~1 MB on disk), prepared by scripts/gif2muybridge.py from the original public-domain Wikimedia Commons GIFs (Otsu threshold + median filter + connected-components cleanup to drop the metric-grid background while preserving the figure). The C++ side adds a MuybridgeMotion loader and drawMuybridgeFrame compositor in QdlessExitEffectCommon.h so other effects can drop a rotoscoped figure into any scene by name and frame index — replacing the rough plotDot+drawSeg stick figures that ad-hoc effects had been using. Roster grows 326 -> 327; subsequent dispatch indices and the Python Wars stomp-exclusion (227 -> 228) shift accordingly.
+
 * Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-23.fmi
 - 3D views now obey the B and C keys for borders and coastlines. Previously draw3D / draw3DQueryData / draw3DSurfaceStack / draw3DCrossSection branched only on `style != LineStyle::None`, so the only way to silence the thick polylines crowding the volume was to disable them entirely. Each function now computes effCoast/effBord with a Thick→Braille demotion (thick lines visually clutter a 3D scene) and renders Thick only when the user has explicitly chosen Thick. Braille selection draws a 2×4 sub-cell dot-mask projected through the same camera basis as the volume, z-tested against the cross-section's depth buffer so vector lines occlude correctly behind the curtain. drawGlobe was left alone because the globe's projected polylines already render as pixel-thin segments. Net effect: B/C now produce three distinct looks (None / Braille / Thick) in every 3D view, with Braille the default.
 
