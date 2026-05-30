@@ -88,26 +88,103 @@ def frames(gif_path: str) -> list[Image.Image]:
     return out
 
 
-def to_silhouette(frame: Image.Image) -> Image.Image:
-    """Return a grayscale 'L' image where 255 = subject, 0 = background."""
+def estimate_background(grays: list[Image.Image]) -> tuple[Image.Image, bool]:
+    """Reconstruct the static backdrop plate from the sequence.
+
+    Median across frames doesn't work if the figure dwells in the same
+    area across many frames (e.g. a throwing motion where the thrower
+    stays in one spot): the median picks figure pixels there. Instead we
+    detect polarity from the four-corner pixel pool (those are reliably
+    background across every Muybridge plate I've seen) and then take the
+    PER-PIXEL MAX (if the figure is darker than bg) or MIN (if the figure
+    is lighter) across the time axis — both recover the "uncovered"
+    background brightness wherever the figure ever moved aside.
+
+    Returns (background_image, invert_flag) where invert_flag is True
+    when the figure is darker than the background.
+    """
+    W, H = grays[0].size
+    n = len(grays)
+    # Polarity: pool the pixel histogram across all frames. Whichever
+    # extreme (very dark or very bright) is more populous is the static
+    # background — its plurality survives whatever the figure does in
+    # the middle. Corner sampling fails when a plate has a black border
+    # strip (disc-throw plate has a hard black ruler down the left side)
+    # because the corners then disagree with the actual photographic
+    # background. The histogram doesn't care where pixels live.
+    full_hist = [0] * 256
+    for g in grays:
+        for v in g.getdata():
+            full_hist[v] += 1
+    dark_mass = sum(full_hist[0:64])
+    light_mass = sum(full_hist[192:256])
+    invert = light_mass > dark_mass  # more bright pixels → light bg
+
+    # Per-pixel 75th/25th percentile projection. Plain max/min picks up
+    # bright/dark printing artefacts (paper specks, halftone dots) and
+    # mislabels the background as much brighter/darker than it actually
+    # is — that bumps the subject-difference for every pixel and floods
+    # the mask. The 75th percentile (or 25th when subject is bright) is
+    # robust against those outliers but still captures the true "no
+    # figure here" level since the figure visits each pixel only a
+    # minority of frames.
+    data = [list(g.getdata()) for g in grays]
+    pct_idx_hi = (3 * n) // 4  # 75th percentile
+    pct_idx_lo = n // 4        # 25th percentile
+    if invert:
+        bg_pixels = [
+            sorted(data[t][i] for t in range(n))[pct_idx_hi] for i in range(W * H)
+        ]
+    else:
+        bg_pixels = [
+            sorted(data[t][i] for t in range(n))[pct_idx_lo] for i in range(W * H)
+        ]
+    bg = Image.new("L", (W, H))
+    bg.putdata(bg_pixels)
+    return bg, invert
+
+
+def to_silhouette(frame: Image.Image, bg: Image.Image, invert: bool) -> Image.Image:
+    """Background-subtraction silhouette: anywhere the frame differs from
+    the precomputed background by more than a threshold becomes subject.
+
+    Frames can have inconsistent exposure (a paper-print plate scanned
+    unevenly, or a GIF re-encoded with per-frame quantisation). Before
+    subtracting we level the frame's brightness so its background pixels
+    align with the global background plate — that prevents a brighter
+    frame from being entirely flagged as 'subject'. We do this by
+    measuring the median difference at the BACKGROUND quartile of the
+    frame and shifting it out: the background dominates the histogram
+    even when a figure is present, so the most common offset between
+    frame and bg is exactly the exposure shift we want to remove.
+    """
     gray = frame.convert("L")
-    # Sample the background from the four corners — Muybridge's plates have
-    # a uniform backdrop in either direction.
-    px = gray.load()
-    W, H = gray.size
-    corners = [px[0, 0], px[W - 1, 0], px[0, H - 1], px[W - 1, H - 1]]
-    bg = sorted(corners)[len(corners) // 2]  # median of corners
-    # If bg is light, the subject is dark; invert so subject is always bright.
-    if bg > 128:
-        gray = ImageOps.invert(gray)
-        bg = 255 - bg
-    # Otsu threshold against the histogram, then sanity-clamp: don't let the
-    # threshold dip below bg + a margin or above 220.
-    hist = gray.histogram()
-    t = otsu(hist)
-    t = max(t, bg + 18)
-    t = min(t, 220)
-    mask = gray.point(lambda v: 255 if v >= t else 0, mode="L")
+    bg_pixels = list(bg.getdata())
+    fr_pixels = list(gray.getdata())
+    # Compute the median signed offset (frame - bg) — robust against the
+    # smaller population of figure pixels.
+    offsets = sorted(f - b for b, f in zip(bg_pixels, fr_pixels))
+    exposure_shift = offsets[len(offsets) // 2]
+    diff = []
+    for b, f in zip(bg_pixels, fr_pixels):
+        # Subtract the exposure shift before measuring subject-ness so a
+        # globally brighter / darker frame doesn't trigger the mask
+        # everywhere. When background is bright (invert=True) the subject
+        # is darker; when dark, brighter.
+        f_norm = f - exposure_shift
+        d = (b - f_norm) if invert else (f_norm - b)
+        diff.append(max(0, min(255, d)))
+    diff_img = Image.new("L", gray.size)
+    diff_img.putdata(diff)
+    # Otsu over the difference histogram, but ignore the huge zero-bin
+    # (background pixels with no figure contribute diff=0 in vast numbers
+    # and skew Otsu's class-variance toward a very low threshold). Hard
+    # floor at 48 so faint background gradients (uneven exposure across
+    # the plate) never trip the mask.
+    hist = diff_img.histogram()
+    hist[0] = 0
+    t = max(48, otsu(hist))
+    mask = diff_img.point(lambda v: 255 if v >= t else 0, mode="L")
     # Small morphological cleanup: dilate-then-erode (close) to fill the
     # joint gaps left by halftone print, then a 1-px median to smooth edges.
     mask = mask.filter(ImageFilter.MaxFilter(3))
@@ -172,7 +249,9 @@ def tight_bbox(masks: list[Image.Image]) -> tuple[int, int, int, int]:
 
 def emit(motion: str, src_path: str, out_root: Path) -> int:
     fs = frames(src_path)
-    masks = [to_silhouette(f) for f in fs]
+    grays = [f.convert("L") for f in fs]
+    bg, invert = estimate_background(grays)
+    masks = [to_silhouette(f, bg, invert) for f in fs]
     bbox = tight_bbox(masks)
     bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
     # Scale so the *bounding box height* lands at TARGET_H.
