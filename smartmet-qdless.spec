@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 27%{?dist}.fmi
+Release: 28%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-28.fmi
+- Marionette body shape redrawn as a Prince-of-Persia-style continuous silhouette instead of separate tapered capsules per bone. The first cut drew each limb segment and the torso as its own tapered capsule; where capsules of different radii met at a shared joint (e.g. wide thigh capsule meets narrower shin at the knee, or the wide torso capsule meets the thin arm at the shoulder) the rounded caps poked perpendicular to each bone and looked like a balloon stuck on top of every joint. Fix: the torso is now drawn as a single filled quadrilateral with corners at LeftArm / RightArm / RightUpLeg / LeftUpLeg, so the hip and shoulder joints are *inside* the torso polygon and the limbs grow out of its corners with no cap balloon. Limbs are constant-width capsules (no taper) with the same radius at every joint along a chain, so where two bones share an endpoint the cap discs blend into a same-width round corner instead of poking out. Limb radius is reduced from figureH/20 to figureH/30 for a slenderer Prince-of-Persia profile. New fillQuad() scan-line polygon helper in include/QdlessMarionette.h alongside drawCapsule. Net effect: the silhouette reads as one body, not as twelve loosely-connected balloons.
+
 * Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-27.fmi
 - New Marionette exit effect (Cinema theme, alphabetical roster index 163, between March of Progress and Mars Rover). One large procedurally-rendered humanoid figure cycles through twelve Carnegie Mellon mocap motions (walk, run, sneak, climb ladder, jump, cartwheel, sit, wave, punch, kick, salsa, throw) captured at 120 fps. Each motion plays for 2.5-4 s with the motion name fading in at the start and out near the end; the figure is drawn as a capsule-silhouette puppet (tapered limb capsules + wide torso capsule + head disc) over the dimmed weather-data backdrop. The smoothness comes from the source: 120 Hz dense joint trajectories, vastly higher framerate than the 2-frame Kenney walks or 12-frame Muybridge plates. New supporting infrastructure: include/QdlessBvh.h is a from-scratch BVH parser + forward-kinematics solver (handles arbitrary channel order, End Site leaves, intrinsic ZYX Euler rotations; ~200 lines); include/QdlessMarionette.h adds a tapered-capsule drawing primitive plus the CMU bone-table renderer that anchors the figure on its hip and scales it to a target screen height. Motion data lives in data/cmu/*.bvh (12 files, 1.8 MB total) prepared offline by scripts/cmu_preprocess.py from Daniel Holden's BVH-converted CMU mirror; each file is trimmed to one clean cycle and resampled 120 -> 60 Hz to halve disk footprint while staying well above the terminal redraw rate. Roster 328 -> 329; subsequent stomp-exclusion indices shift accordingly (Monty Python 177 -> 178, Python Wars 229 -> 230).
 

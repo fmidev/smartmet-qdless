@@ -196,6 +196,50 @@ inline void drawCapsule(std::vector<Rgb>& dst, int w, int h, float ya,
   }
 }
 
+// Filled convex quadrilateral by scan-line conversion. Used for the
+// torso silhouette which connects the shoulders to the hips as one
+// continuous shape — no caps, no balloon at the hip or shoulder joints
+// where the limbs emerge.
+inline void fillQuad(std::vector<Rgb>& dst, int w, int h,
+                     double v0x, double v0y, double v1x, double v1y,
+                     double v2x, double v2y, double v3x, double v3y,
+                     Rgb color)
+{
+  const double xs[4] = {v0x, v1x, v2x, v3x};
+  const double ys[4] = {v0y, v1y, v2y, v3y};
+  double minY = ys[0], maxY = ys[0];
+  for (int i = 1; i < 4; ++i)
+  {
+    if (ys[i] < minY) minY = ys[i];
+    if (ys[i] > maxY) maxY = ys[i];
+  }
+  const int ymin = std::max(0, static_cast<int>(std::floor(minY)));
+  const int ymax = std::min(h - 1, static_cast<int>(std::ceil(maxY)));
+  for (int y = ymin; y <= ymax; ++y)
+  {
+    double xL = 1e30, xR = -1e30;
+    for (int e = 0; e < 4; ++e)
+    {
+      const int e2 = (e + 1) % 4;
+      const double y0 = ys[e];
+      const double y1 = ys[e2];
+      if (y0 == y1) continue;
+      const double yLo = std::min(y0, y1);
+      const double yHi = std::max(y0, y1);
+      if (static_cast<double>(y) < yLo || static_cast<double>(y) > yHi) continue;
+      const double t = (static_cast<double>(y) - y0) / (y1 - y0);
+      const double x = xs[e] + t * (xs[e2] - xs[e]);
+      if (x < xL) xL = x;
+      if (x > xR) xR = x;
+    }
+    if (xR < xL) continue;
+    const int xa = std::max(0, static_cast<int>(std::floor(xL)));
+    const int xb = std::min(w - 1, static_cast<int>(std::ceil(xR)));
+    for (int x = xa; x <= xb; ++x)
+      dst[static_cast<std::size_t>(y) * w + x] = color;
+  }
+}
+
 // Filled circle (used for the head).
 inline void drawDisc(std::vector<Rgb>& dst, int w, int h, float ya,
                      double cx, double cy, double r, Rgb color)
@@ -255,44 +299,85 @@ inline void drawMarionette(std::vector<Rgb>& dst, int w, int h, float ya,
   p.cy = cy;
   p.ya = ya;
 
-  // Limb half-width reference, in dst cols. drawCapsule treats radii
-  // as visual col-widths (the y bbox is divided by ya). A real human's
-  // thigh diameter is ~1/16 of body height in *visual pixels*; we use
-  // figureH (rows) / 20 dst-cols, which after the ya correction comes
-  // out to roughly that ratio visually and reads clearly without
-  // overwhelming the silhouette.
-  const double bodyUnit = std::max(1.5, figureH / 20.0);
+  // Slender Prince-of-Persia-ish proportions: limb half-width is ~1/30
+  // of figure height. The torso is a filled polygon (not a capsule), so
+  // it doesn't add cap-balloons at the hip/shoulder where the limbs
+  // emerge. Limbs are constant-width capsules — same radius at every
+  // joint — so the rounded ends two bones share at a joint blend into
+  // a single same-width disc instead of poking out perpendicular to
+  // each bone.
+  const double bodyUnit = std::max(1.0, figureH / 30.0);
 
-  // 1) Torso first (under the limbs). Hips → Spine1 as a wide capsule.
-  const int hipsI  = anim.jointIndex("Hips");
-  const int spineI = anim.jointIndex("Spine1");
-  if (hipsI >= 0 && spineI >= 0)
+  const int spineI   = anim.jointIndex("Spine1");
+  const int lArmI    = anim.jointIndex("LeftArm");
+  const int rArmI    = anim.jointIndex("RightArm");
+  const int lLegI    = anim.jointIndex("LeftUpLeg");
+  const int rLegI    = anim.jointIndex("RightUpLeg");
+
+  // 1) Torso polygon: shoulders → hips. Drawn first so limbs overlay it.
+  if (lArmI >= 0 && rArmI >= 0 && lLegI >= 0 && rLegI >= 0)
   {
-    const auto a = projectJoint(p, worldPos[hipsI]);
-    const auto b = projectJoint(p, worldPos[spineI]);
-    drawCapsule(dst, w, h, ya, a[0], a[1], b[0], b[1],
-                bodyUnit * 2.2, bodyUnit * 2.4, bodyCol);
+    const auto sl = projectJoint(p, worldPos[lArmI]);
+    const auto sr = projectJoint(p, worldPos[rArmI]);
+    const auto hl = projectJoint(p, worldPos[lLegI]);
+    const auto hr = projectJoint(p, worldPos[rLegI]);
+    // Vertex order CW: left shoulder → right shoulder → right hip → left hip.
+    fillQuad(dst, w, h,
+             sl[0], sl[1], sr[0], sr[1], hr[0], hr[1], hl[0], hl[1],
+             bodyCol);
   }
 
-  // 2) Limbs as tapered capsules.
-  for (const auto& bone : cmuBones())
+  // 2) Limb chains as constant-width capsules. Each pair shares the
+  // same radius so the cap at any shared endpoint becomes an invisible
+  // round corner inside the limb width.
+  struct Chain
   {
-    const int ai = anim.jointIndex(bone.fromJoint);
-    const int bi = anim.jointIndex(bone.toJoint);
+    const char* a;
+    const char* b;
+    float widthMul;  // multiplier on bodyUnit, picked per body part
+  };
+  static constexpr Chain kChains[] = {
+      // Legs: thigh, shin, foot (all same width within a leg).
+      {"LeftUpLeg",   "LeftLeg",     1.00F},
+      {"LeftLeg",     "LeftFoot",    1.00F},
+      {"LeftFoot",    "LeftToeBase", 1.00F},
+      {"RightUpLeg",  "RightLeg",    1.00F},
+      {"RightLeg",    "RightFoot",   1.00F},
+      {"RightFoot",   "RightToeBase",1.00F},
+      // Arms: upper arm + forearm.
+      {"LeftArm",     "LeftForeArm", 0.85F},
+      {"LeftForeArm", "LeftHand",    0.85F},
+      {"RightArm",    "RightForeArm",0.85F},
+      {"RightForeArm","RightHand",   0.85F},
+  };
+  for (const auto& c : kChains)
+  {
+    const int ai = anim.jointIndex(c.a);
+    const int bi = anim.jointIndex(c.b);
     if (ai < 0 || bi < 0) continue;
     const auto a = projectJoint(p, worldPos[ai]);
     const auto b = projectJoint(p, worldPos[bi]);
-    // Taper down toward distal joints.
-    drawCapsule(dst, w, h, ya, a[0], a[1], b[0], b[1],
-                bodyUnit * bone.radius, bodyUnit * bone.radius * 0.85, bodyCol);
+    const double r = bodyUnit * c.widthMul;
+    drawCapsule(dst, w, h, ya, a[0], a[1], b[0], b[1], r, r, bodyCol);
   }
 
-  // 3) Head as a disc, sized to the figure.
+  // 3) Neck: from the midpoint of the shoulder line up to the head
+  // joint, as a thin capsule. Spine1 is between the shoulders so we
+  // anchor at its projection.
   const int headI = anim.jointIndex("Head");
+  if (spineI >= 0 && headI >= 0)
+  {
+    const auto sp = projectJoint(p, worldPos[spineI]);
+    const auto hh = projectJoint(p, worldPos[headI]);
+    drawCapsule(dst, w, h, ya, sp[0], sp[1], hh[0], hh[1],
+                bodyUnit * 0.7, bodyUnit * 0.7, bodyCol);
+  }
+
+  // 4) Head as a small disc.
   if (headI >= 0)
   {
     const auto hh = projectJoint(p, worldPos[headI]);
-    drawDisc(dst, w, h, ya, hh[0], hh[1], bodyUnit * 2.0, bodyCol);
+    drawDisc(dst, w, h, ya, hh[0], hh[1], bodyUnit * 1.6, bodyCol);
   }
 }
 }  // namespace Qdless
