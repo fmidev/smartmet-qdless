@@ -1,4 +1,5 @@
 #include "QdlessExitEffectCommon.h"
+#include "QdlessMarionette.h"
 
 namespace Qdless
 {
@@ -2718,6 +2719,169 @@ void effectMaryPoppins(const Renderer& renderer, const std::vector<Rgb>& src, in
         plotDot(dst, w, h, fcx - fh * 0.30F, waistY + fh * 0.08F, fh * 0.10F, ya,
                 Rgb{120, 80, 40, false});
         (void)hash;
+      });
+}
+
+// Marionette: ONE large figure cycling through 12 Carnegie Mellon
+// mocap motions (walk, run, sneak, ladder, jump, cartwheel, sit, wave,
+// punch, kick, salsa, throw). Captured at 120 Hz, played back at the
+// terminal redraw rate with linear inter-frame interpolation — at any
+// terminal frame rate the motion stays buttery smooth because we sample
+// the underlying 120 Hz dense trajectory.
+//
+// Each motion plays for ~3 seconds, with the motion name fading in at
+// the start and fading out near the end. The figure is drawn as a
+// capsule-silhouette puppet over the dimmed weather data.
+void effectMarionette(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+
+  struct Motion
+  {
+    const char* file;
+    const char* label;
+    float seconds;  // how long to display this motion in the cycle
+  };
+  static const std::array<Motion, 12> kMotions = {{
+      {"walk",      "Walking",        3.0F},
+      {"run",       "Running",        2.5F},
+      {"sneak",     "Sneaking",       3.5F},
+      {"ladder",    "Climbing",       3.5F},
+      {"jump",      "Jumping",        2.5F},
+      {"cartwheel", "Cartwheel",      2.0F},
+      {"sit",       "Sitting down",   3.5F},
+      {"wave",      "Waving",         2.5F},
+      {"punch",     "Punching",       3.5F},
+      {"kick",      "Kicking",        3.5F},
+      {"salsa",     "Salsa",          4.0F},
+      {"throw",     "Throwing",       3.0F},
+  }};
+
+  // Locate each BVH file via the same data-path resolution path the
+  // image loader uses (findDataImage), then parse once.
+  struct Loaded
+  {
+    BvhAnimation anim;
+    double refH = 1.0;
+    bool ok = false;
+  };
+  std::vector<Loaded> loaded(kMotions.size());
+  for (std::size_t i = 0; i < kMotions.size(); ++i)
+  {
+    char rel[64];
+    std::snprintf(rel, sizeof(rel), "cmu/%s.bvh", kMotions[i].file);
+    const std::string path = findDataImage(rel);
+    if (path.empty())
+      continue;
+    try
+    {
+      loaded[i].anim = loadBvhFile(path);
+      loaded[i].refH = bvhReferenceHeight(loaded[i].anim);
+      loaded[i].ok = true;
+    }
+    catch (const std::exception&)
+    {
+      loaded[i].ok = false;
+    }
+  }
+
+  float totalSec = 0;
+  for (const auto& m : kMotions)
+    totalSec += m.seconds;
+  const int totalMs = static_cast<int>(totalSec * 1000.0F);
+
+  runFrames(
+      renderer,
+      w,
+      h,
+      totalMs,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        // Find which motion is active at time t (0..1 over totalSec).
+        const float secNow = t * totalSec;
+        float acc = 0;
+        std::size_t mi = 0;
+        float local = secNow;
+        for (std::size_t i = 0; i < kMotions.size(); ++i)
+        {
+          if (secNow < acc + kMotions[i].seconds)
+          {
+            mi = i;
+            local = secNow - acc;
+            break;
+          }
+          acc += kMotions[i].seconds;
+        }
+        const float motionT = std::clamp(local / kMotions[mi].seconds, 0.0F, 1.0F);
+
+        // Dim weather data backdrop in cool slate-grey so the figure pops.
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                Rgb{u8(35 + l * 0.18F), u8(40 + l * 0.20F), u8(55 + l * 0.22F), false};
+          }
+
+        // Render the figure.
+        const Loaded& L = loaded[mi];
+        if (L.ok)
+        {
+          // Map motionT to a frame index. The animation plays once per
+          // slot (no loop) — for cyclic motions this still shows several
+          // full cycles since they're 1-2 s each. For one-shot motions
+          // (jump, throw) the captured arc plays start-to-end.
+          const float fIdx = motionT * (L.anim.frameCount - 1);
+          const int frame = static_cast<int>(std::round(fIdx));
+          const float figH = h * 0.78F;
+          const float cx = w * 0.5F;
+          const float cy = h * 0.93F;  // foot baseline near bottom
+          drawMarionette(dst, w, h, ya, L.anim, frame,
+                         cx, cy, figH, L.refH,
+                         Rgb{240, 230, 215, false});
+        }
+
+        // Caption with motion name. Fade in over the first 0.25 of the
+        // slot, hold, fade out over the last 0.20.
+        float capAlpha = 1.0F;
+        if (motionT < 0.25F) capAlpha = motionT / 0.25F;
+        else if (motionT > 0.80F) capAlpha = (1.0F - motionT) / 0.20F;
+        capAlpha = std::clamp(capAlpha, 0.0F, 1.0F);
+        const Rgb capCol{u8(255 * capAlpha + 35 * (1 - capAlpha)),
+                         u8(240 * capAlpha + 40 * (1 - capAlpha)),
+                         u8(200 * capAlpha + 55 * (1 - capAlpha)), false};
+        // Draw the label, scaled so longer words still fit. We pick the
+        // largest integer pixel scale that keeps the rendered string
+        // within 70 % of the screen width.
+        const char* label = kMotions[mi].label;
+        const int slen = static_cast<int>(std::strlen(label));
+        constexpr int kFW = 5, kFH = 7, kGap = 1;
+        const int totalFx = slen * kFW + (slen - 1) * kGap;
+        const int scale = std::max(1, std::min(static_cast<int>(0.7F * w / totalFx),
+                                              static_cast<int>(0.10F * h / kFH)));
+        const int ox = (w - totalFx * scale) / 2;
+        const int oy = static_cast<int>(h * 0.07F);
+        for (int ci = 0; ci < slen; ++ci)
+        {
+          const auto g = glyph5x7(static_cast<char>(
+              std::toupper(static_cast<unsigned char>(label[ci]))));
+          const int charOx = ci * (kFW + kGap) * scale;
+          for (int fy = 0; fy < kFH; ++fy)
+            for (int fx = 0; fx < kFW; ++fx)
+            {
+              if (g[fy][fx] != '1') continue;
+              for (int sy = 0; sy < scale; ++sy)
+                for (int sx = 0; sx < scale; ++sx)
+                {
+                  const int xx = ox + charOx + fx * scale + sx;
+                  const int yy = oy + fy * scale + sy;
+                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = capCol;
+                }
+            }
+        }
       });
 }
 

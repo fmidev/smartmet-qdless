@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 26%{?dist}.fmi
+Release: 27%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -112,8 +112,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/transfoot.png
 %{_datadir}/smartmet/qdless/muybridge/*/*.png
 %{_datadir}/smartmet/qdless/kenney/*/*.png
+%{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-27.fmi
+- New Marionette exit effect (Cinema theme, alphabetical roster index 163, between March of Progress and Mars Rover). One large procedurally-rendered humanoid figure cycles through twelve Carnegie Mellon mocap motions (walk, run, sneak, climb ladder, jump, cartwheel, sit, wave, punch, kick, salsa, throw) captured at 120 fps. Each motion plays for 2.5-4 s with the motion name fading in at the start and out near the end; the figure is drawn as a capsule-silhouette puppet (tapered limb capsules + wide torso capsule + head disc) over the dimmed weather-data backdrop. The smoothness comes from the source: 120 Hz dense joint trajectories, vastly higher framerate than the 2-frame Kenney walks or 12-frame Muybridge plates. New supporting infrastructure: include/QdlessBvh.h is a from-scratch BVH parser + forward-kinematics solver (handles arbitrary channel order, End Site leaves, intrinsic ZYX Euler rotations; ~200 lines); include/QdlessMarionette.h adds a tapered-capsule drawing primitive plus the CMU bone-table renderer that anchors the figure on its hip and scales it to a target screen height. Motion data lives in data/cmu/*.bvh (12 files, 1.8 MB total) prepared offline by scripts/cmu_preprocess.py from Daniel Holden's BVH-converted CMU mirror; each file is trimmed to one clean cycle and resampled 120 -> 60 Hz to halve disk footprint while staying well above the terminal redraw rate. Roster 328 -> 329; subsequent stomp-exclusion indices shift accordingly (Monty Python 177 -> 178, Python Wars 229 -> 230).
+
 * Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-26.fmi
 - New Kenney exit effect (Cartoon theme, alphabetical roster index 141, between JWST and King Kong). 4x4 gallery of CC0-licensed cartoon platformer sprites from Kenney.nl's "Platformer Art Deluxe" pack: the 11-frame player walk cycle is the showpiece, surrounded by jump/duck/hurt for the human, an alien character with walk/climb/swim/jump cycles, and small creature loops (snail, slime, spider, fish, fly, bee, bat, plus a three-character party shot). Unlike Muybridge's grayscale rotoscopes the Kenney art is full-colour and the renderer preserves it verbatim over a cool blue-grey scrapbook backdrop. Sprites are pre-extracted (alpha-clean, tightly cropped) by scripts/kenney2sprites.py into data/kenney/<motion>/frame_NN.png. The C++ side reuses the existing MuybridgeMotion struct but adds drawKenneyFrame which keeps the original RGB (vs Muybridge's tinted silhouette) and loadAllKenneyMotions which walks data/kenney/. Roster grows 327 -> 328; Monty Python stomp-exclusion shifts 176 -> 177 and Python Wars 228 -> 229 to follow the inserted slot.
 

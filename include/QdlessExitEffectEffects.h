@@ -172,6 +172,7 @@ void effectMagritteBowler(const Renderer& renderer, const std::vector<Rgb>& src,
 void effectMammatus(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectMandelbrot(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectMarchOfProgress(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectMarionette(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectMarsRover(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectMaryPoppins(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectMatrix(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng);

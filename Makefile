@@ -111,6 +111,10 @@ install:
 	    $(INSTALL_DATA) $$f $(datadir)/smartmet/qdless/kenney/$$name/; \
 	  done; \
 	done
+	mkdir -p $(datadir)/smartmet/qdless/cmu
+	@for f in data/cmu/*.bvh; do \
+	  $(INSTALL_DATA) $$f $(datadir)/smartmet/qdless/cmu/; \
+	done
 
 test:
 	@if [ -f test/Makefile ]; then cd test && $(MAKE) test; \
