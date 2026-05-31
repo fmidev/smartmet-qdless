@@ -509,6 +509,22 @@ class App
   // (e.g. "Saved foo.png"). Cleared by the next non-message-producing key.
   std::string itsLastMessage;
 
+  // Persistent automated phenomenon hint shown next to the timeline
+  // header (e.g. "Tropical convection peak near 5°N 120°E → press H for
+  // Hovmöller"). Refreshed by detectPhenomena() on param/level/file
+  // change; an empty string suppresses the line entirely. The dedicated
+  // field — rather than re-using itsLastMessage — keeps the hint
+  // persistent across user-driven message updates that would otherwise
+  // overwrite it.
+  std::string itsPhenomenonHint;
+  // Anchor coordinates from the most recent detection (used by the
+  // suggested-jump key); 0,0 means "no anchor".
+  double itsPhenomenonAnchorLat = 0;
+  double itsPhenomenonAnchorLon = 0;
+  bool itsPhenomenonHasAnchor = false;
+
+  void refreshPhenomenonHint();
+
   // Helper: apply the active panel's value transform (auto Kelvin → Celsius
   // etc.) before palette lookup, but keep missing/sentinel as-is.
   float transform(float v) const;

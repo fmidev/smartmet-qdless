@@ -1,6 +1,7 @@
 #include "QdlessApp.h"
 
 #include "QdlessExitEffect.h"
+#include "QdlessPhenomena.h"
 #include "QdlessExtrema.h"
 #include "QdlessMultiFileSource.h"
 #include "QdlessOdimVolumeSource.h"
@@ -720,6 +721,10 @@ void App::initFromSource()
   // The auto-shift toast from loadPalette() is informational; suppress it
   // on startup so we don't ship the splash with stale text.
   itsLastMessage.clear();
+  // Phenomenon detectors look at the currently-selected param/level. Run
+  // them now so the first redraw already shows the hint for whichever
+  // field the user landed on (or the CLI pinned).
+  refreshPhenomenonHint();
 }
 
 App::~App()
@@ -3171,6 +3176,14 @@ void App::renderTimeline(UI& ui)
     label += itsLastMessage;
     itsLastMessage.clear();
   }
+  else if (!itsPhenomenonHint.empty())
+  {
+    // Persistent hint from the phenomenon detectors. Yields to any
+    // transient itsLastMessage so user actions stay informative; comes
+    // back automatically the next redraw.
+    label += "   ";
+    label += itsPhenomenonHint;
+  }
   const bool isShape = itsSource->isVector();
   const bool pgMode = (itsPgDataset != nullptr);
   ui.drawTimeline(label,
@@ -3354,6 +3367,36 @@ std::vector<std::string> App::levelLabels() const
   return out;
 }
 
+void App::refreshPhenomenonHint()
+{
+  // Single-frame detectors are ~3-5 ms total on a 72×36 sample. Run
+  // them synchronously here — the brief pause is imperceptible.
+  // Temporal detectors (block, static) self-skip on files with fewer
+  // than 3 time steps and otherwise add ~25 ms of work. If that
+  // becomes a noticeable hitch on large files, this is the place to
+  // dispatch the call to a worker thread (it needs a mutex around the
+  // DataSource because NFmiQueryData isn't thread-safe — see notes
+  // in QdlessPhenomena.cpp).
+  if (!itsSource) {
+    itsPhenomenonHint.clear();
+    itsPhenomenonHasAnchor = false;
+    return;
+  }
+  const auto hint = detectPhenomena(*itsSource);
+  if (hint.score > 0)
+  {
+    itsPhenomenonHint = hint.message + "  " + hint.suggestion;
+    itsPhenomenonAnchorLat = hint.anchorLat;
+    itsPhenomenonAnchorLon = hint.anchorLon;
+    itsPhenomenonHasAnchor = hint.hasAnchor;
+  }
+  else
+  {
+    itsPhenomenonHint.clear();
+    itsPhenomenonHasAnchor = false;
+  }
+}
+
 void App::selectParam(int newIndex)
 {
   if (newIndex < 0 || newIndex >= static_cast<int>(itsParamIds.size()))
@@ -3373,6 +3416,7 @@ void App::selectParam(int newIndex)
   itsSource->selectLevelGroup(paramId, g);
   activePanel().levelIndex = itsSource->currentLevelIndex();
   loadPalette();  // re-resolve palette for the active panel's new parameter
+  refreshPhenomenonHint();
 }
 
 void App::selectLevel(int newIndex)
@@ -3382,6 +3426,7 @@ void App::selectLevel(int newIndex)
   itsSource->selectLevelIndex(static_cast<unsigned long>(newIndex));
   activePanel().levelIndex = static_cast<std::size_t>(newIndex);
   itsOpts.levelIndex = newIndex;
+  refreshPhenomenonHint();
 }
 
 std::vector<PanelRect> App::currentPanelRects(int row, int col, int height, int width) const
@@ -7714,7 +7759,10 @@ int App::runOnce()
             << (itsSource->currentLevelIndex() + 1) << "/" << itsSource->levelCount()
             << ") | range: [" << dataMin << ", " << dataMax
             << "] | palette: " << activePanel().palette.name()
-            << " | coast: " << itsCoastlines.size() << "+" << itsBorders.size() << " polylines\n";
+            << " | coast: " << itsCoastlines.size() << "+" << itsBorders.size() << " polylines";
+  if (!itsPhenomenonHint.empty())
+    std::cout << " | hint: " << itsPhenomenonHint;
+  std::cout << '\n';
 
   std::ostringstream os;
   itsRenderer.render(os, pixels, subWidth, subHeight, 1, 0);

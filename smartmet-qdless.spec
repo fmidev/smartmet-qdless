@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 32%{?dist}.fmi
+Release: 33%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,11 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-33.fmi
+- New phenomenon-detector framework (include/QdlessPhenomena.h, source/QdlessPhenomena.cpp). Six detectors pattern-match the loaded data against well-known meteorological signatures and surface a single-line hint on the timeline header suggesting the view that brings the feature out best. Detectors: tropical convection / MJO (precipitation, OLR, or cloud-cover spike inside ±15° latitude → "X then H for an equator Hovmöller"); cyclones / hurricanes (MSL pressure minimum with > 8 hPa drop in a 20° radius — labels the severity Cyclone / Strong cyclone / Hurricane-strength → "click the centre, spacebar to animate"); fronts (temperature/theta gradient peak well above the 99th percentile → "X for a cross-section across the front"); jet streams (wind speed > 40 m/s on a pressure level <= 400 hPa, or > 60 m/s otherwise → "L to browse upper levels"); atmospheric blocks (geopotential or pressure cell with top-decile time-mean and bottom-quartile temporal stdev, mid-latitudes only → "spacebar to time-loop"); static field (overall variance below 0.5 % of mean → "field is essentially static, Hovmöller will be flat"). Each detector picks coarse 72×36 lat/lon samples (5° resolution) so the whole sweep is a few ms; the temporal block/static detectors sample up to eight time steps and self-skip on files with fewer than three. The highest-scoring hint wins.
+- Wired into App: refreshPhenomenonHint() runs on file load, parameter change, and level change. The persistent hint is shown on the timeline header after the (transient) itsLastMessage, and is also appended to --dump output as "| hint: ...". On real test data: fmi.sqd (Pressure) fires the cyclone detector correctly ("Cyclone low 1013 hPa near 62°N 2°E (Δ 12 hPa)"). Thresholds are heuristic and meant for meteorologists to retune.
+- Threading: deferred. Detection runs synchronously on the main thread because NFmiQueryData isn't thread-safe (mutable cursors mean two threads cannot share a source); single-frame detectors total ~5 ms, the temporal sweep adds ~25 ms — perceptible only on the rare large-file param change. The natural follow-up is a worker thread holding a mutex around DataSource access in render(), which is a focused refactor.
+
 * Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-32.fmi
 - Convert seven more exit effects from the ad-hoc drawSkeleton helper to the marionette puppet driven by CMU mocap. Riverdance, Russian Dance use kick.bvh (high-kick footwork and Cossack squat-kicks). Thriller uses sneak.bvh (subject 120 "Mickey sneaky walk" = perfect zombie shamble). Greek Dance uses walk.bvh (sirtaki line step). Ballet and Macarena use salsa.bvh (continuous body sway). Atlas uses wave.bvh and pins the Python foot (standing in for the world) to whichever hand is currently raised by the wave cycle, so the world tracks the lifting arm with the wobble + tilt the original effect already had.
 - New shared helpers loadDancerMotion() and drawDancer() in include/QdlessMarionette.h — load a named CMU motion from data/cmu/*.bvh and render the marionette at the given anchor with a per-dancer phase frame. The seven music/myth conversions all use this helper, so each effect's body is ~10 lines of dance-orchestration code rather than 30 lines of hand-tuned Limb structures.
