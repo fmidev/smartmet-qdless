@@ -1,4 +1,5 @@
 #include "QdlessExitEffectCommon.h"
+#include "QdlessMarionette.h"
 
 namespace Qdless
 {
@@ -547,6 +548,10 @@ void effectAtlas(const Renderer& renderer, const std::vector<Rgb>& src, int w, i
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   FootSprite f = loadPythonFootSprite();
+  // Atlas-the-Titan as the marionette; the wave motion lifts an arm so
+  // the Python foot (standing in for the world he holds aloft) tracks
+  // the rising hand and gets the visible strain Atlas is famous for.
+  DancerMotion mot = loadDancerMotion("wave");
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
       for (int y = 0; y < h; ++y)
@@ -558,23 +563,31 @@ void effectAtlas(const Renderer& renderer, const std::vector<Rgb>& src, int w, i
               Rgb{u8(8 + l * 0.10F + 40 * sf), u8(6 + l * 0.10F + 20 * sf),
                   u8(20 + l * 0.10F), false};
         }
-      // Atlas silhouette: legs splayed (kneeling), torso, arms raised.
       const float cx = w * 0.5F, base = h * 0.95F;
       const Rgb sil{20, 20, 30, false};
-      // Legs (V-shape).
-      drawSeg(dst, w, h, cx - mn * 0.14F, base, cx, h * 0.62F, mn * 0.030F, ya, sil);
-      drawSeg(dst, w, h, cx + mn * 0.14F, base, cx, h * 0.62F, mn * 0.030F, ya, sil);
-      // Torso.
-      drawSeg(dst, w, h, cx, h * 0.62F, cx, h * 0.45F, mn * 0.040F, ya, sil);
-      // Head.
-      plotDot(dst, w, h, cx, h * 0.40F, mn * 0.035F, ya, sil);
-      // Arms — up and out, like supporting a globe.
-      drawSeg(dst, w, h, cx, h * 0.48F, cx - mn * 0.14F, h * 0.30F, mn * 0.025F, ya, sil);
-      drawSeg(dst, w, h, cx, h * 0.48F, cx + mn * 0.14F, h * 0.30F, mn * 0.025F, ya, sil);
-      // Foot held above his head — wobble with strain.
+      std::vector<std::array<double, 2>> joints;
+      const float figH = h * 0.70F;
+      const float phase = t * 1.5F * mot.anim.frameCount;
+      drawDancer(dst, w, h, ya, cx, base, figH, mot, phase, sil, &joints);
+
+      // Python foot rides whichever hand is currently higher (= the
+      // raised arm during the wave). Wobble + tilt make the world look
+      // genuinely heavy.
+      const int lH = mot.ok ? mot.anim.jointIndex("LeftHand")  : -1;
+      const int rH = mot.ok ? mot.anim.jointIndex("RightHand") : -1;
+      double fx = cx, fy = h * 0.22F;
+      if (lH >= 0 && rH >= 0 && lH < static_cast<int>(joints.size())
+          && rH < static_cast<int>(joints.size()))
+      {
+        const auto& L = joints[lH];
+        const auto& R = joints[rH];
+        const auto& hand = (L[1] < R[1]) ? L : R;
+        fx = hand[0];
+        fy = hand[1] - mn * 0.05F;
+      }
       const float wobble = std::sin(t * 4.0F) * mn * 0.012F;
       drawFootSprite(dst, w, h, ya, f.img.get(), f.fw, f.fh, f.needChromaKey,
-                     cx + wobble, h * 0.22F, mn * 0.25F, std::sin(t * 1.0F) * 0.08F + 0.05F);
+                     fx + wobble, fy, mn * 0.25F, std::sin(t * 1.0F) * 0.08F + 0.05F);
     });
 }
 

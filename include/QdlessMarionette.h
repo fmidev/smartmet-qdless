@@ -392,4 +392,52 @@ inline void drawMarionette(std::vector<Rgb>& dst, int w, int h, float ya,
     drawDisc(dst, w, h, ya, hh[0], hh[1], bodyUnit * 1.6, bodyCol);
   }
 }
+
+// Convenience wrapper used by the dance-style exit effects (Riverdance,
+// Ballet, Macarena, ...). Loads a CMU motion by short name from the
+// data/cmu/ directory and bundles it with its reference height so the
+// caller doesn't have to track both. ok=false means the motion file
+// was missing or unparseable — callers should treat the dancer as
+// invisible in that case.
+struct DancerMotion
+{
+  BvhAnimation anim;
+  double refH = 1.0;
+  bool ok = false;
+};
+
+inline DancerMotion loadDancerMotion(const char* name)
+{
+  DancerMotion d;
+  char rel[64];
+  std::snprintf(rel, sizeof(rel), "cmu/%s.bvh", name);
+  // findDataImage lives in Qdless::ee_detail (it ships with the
+  // exit-effect helpers); resolve via qualified name so this header
+  // doesn't depend on a using-directive at the call site.
+  const std::string path = ee_detail::findDataImage(rel);
+  if (path.empty()) return d;
+  try
+  {
+    d.anim = loadBvhFile(path);
+    d.refH = bvhReferenceHeight(d.anim);
+    d.ok = true;
+  }
+  catch (const std::exception&) { d.ok = false; }
+  return d;
+}
+
+// Draw one dancer at the given anchor. phaseFrame is a fractional frame
+// index along the BVH (effects compute it from the beat and a per-
+// dancer offset so each dancer is at a slightly different cycle phase).
+inline void drawDancer(std::vector<Rgb>& dst, int w, int h, float ya,
+                       double cx, double floorY, double figH,
+                       const DancerMotion& d, double phaseFrame, Rgb color,
+                       std::vector<std::array<double, 2>>* jointScreenOut = nullptr)
+{
+  if (!d.ok || d.anim.frameCount <= 0) return;
+  const int n = d.anim.frameCount;
+  const int fi = ((static_cast<int>(std::floor(phaseFrame)) % n) + n) % n;
+  drawMarionette(dst, w, h, ya, d.anim, fi, cx, floorY, figH, d.refH, color,
+                 jointScreenOut);
+}
 }  // namespace Qdless

@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 31%{?dist}.fmi
+Release: 32%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,11 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-32.fmi
+- Convert seven more exit effects from the ad-hoc drawSkeleton helper to the marionette puppet driven by CMU mocap. Riverdance, Russian Dance use kick.bvh (high-kick footwork and Cossack squat-kicks). Thriller uses sneak.bvh (subject 120 "Mickey sneaky walk" = perfect zombie shamble). Greek Dance uses walk.bvh (sirtaki line step). Ballet and Macarena use salsa.bvh (continuous body sway). Atlas uses wave.bvh and pins the Python foot (standing in for the world) to whichever hand is currently raised by the wave cycle, so the world tracks the lifting arm with the wobble + tilt the original effect already had.
+- New shared helpers loadDancerMotion() and drawDancer() in include/QdlessMarionette.h — load a named CMU motion from data/cmu/*.bvh and render the marionette at the given anchor with a per-dancer phase frame. The seven music/myth conversions all use this helper, so each effect's body is ~10 lines of dance-orchestration code rather than 30 lines of hand-tuned Limb structures.
+- YMCA, Conductor Baton, Beethoven Fifth, Hendrix Guitar, Lebowski, Nosferatu, Strangelove, Mary Poppins, Lawrence, Indy Idol, Neo, Garuda, William Tell are intentionally left on their existing renderers: YMCA's Y/M/C/A arm letters and Neo's deep-kneel Matrix stance are gesture-specific (the marionette body wouldn't preserve them), Conductor/Beethoven/Hendrix don't draw a human at all, Lebowski/Lawrence/Nosferatu don't draw a human at all either, Mary Poppins has a bell skirt that hides the legs, Strangelove rides a bomb (the bomb is the figure), Garuda is a bird-human hybrid with wings, William Tell's two figures are too small for the marionette's smoothness to matter.
+
 * Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-31.fmi
 - Dictator Globe: scale the marionette puppet down to ~half the screen (was nearly full-height) and choreograph the globe to bounce between six body parts in sequence — head, right hand, right foot, hips (the iconic Chaplin behind-bounce from The Great Dictator, drawn slightly below and behind the hip joint so it reads as a butt-bounce), left foot, left hand, and back to head. Each transition is a parabolic arc. Switched the body motion from the wave capture to the salsa capture so the hips actually swing while the globe is being volleyed off the puppet.
 - Silly Walk: amplify the CMU walk's leg rotations in place after loading so the gait reads as Cleese's Ministry of Silly Walks instead of a normal walk. Hip forward-swing (X) axis is multiplied by 2.6× for the high goose-step lift, the knee (LeftLeg / RightLeg) X axis by 1.8×, the hip splay (Z) axis by 1.5× for sideways flail, and the arms get all three rotation channels zeroed out so they hang stiffly at the sides instead of swinging naturally. A small lean offset on the Spine joints makes the figure carry itself pompously upright while the legs go nuts below.

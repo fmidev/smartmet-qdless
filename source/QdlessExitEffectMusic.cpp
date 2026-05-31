@@ -1,4 +1,5 @@
 #include "QdlessExitEffectCommon.h"
+#include "QdlessMarionette.h"
 
 namespace Qdless
 {
@@ -76,91 +77,23 @@ void effectRiverdance(const Renderer& renderer, const std::vector<Rgb>& src, int
   constexpr int kN = 5;
   const float floorY = (h - 1) * 0.94F;
   const float bodyH = h * 0.60F;
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  std::array<Rgb, kN> bones{};
-  for (int i = 0; i < kN; ++i)
-  {
-    const Rgb v = sample(src, w, h, w * ((i + 0.5F) / kN), (h - 1) * 0.5F);
-    const float vr = v.transparent ? 200.0F : v.r;
-    const float vg = v.transparent ? 200.0F : v.g;
-    const float vb = v.transparent ? 200.0F : v.b;
-    bones[i] = Rgb{
-        u8(228 * 0.7F + vr * 0.3F), u8(226 * 0.7F + vg * 0.3F), u8(208 * 0.7F + vb * 0.3F), false};
-  }
-
-  auto skeleton =
-      [&](std::vector<Rgb>& dst, float cx, float baseY, float beat, const Rgb& bone, const Rgb& eye)
-  {
-    const float Hh = bodyH;
-    const float bob = std::sin(beat) * Hh * 0.02F;
-    const float hy = baseY - 0.46F * Hh - bob;
-    const float neckY = baseY - 0.78F * Hh - bob;
-    const float skullY = baseY - 0.88F * Hh - bob;
-    const float shY = baseY - 0.73F * Hh - bob;
-    const float rad = Hh * 0.085F;
-    const float bR = std::max(1.0F, Hh * 0.016F);
-    drawSeg(dst, w, h, cx, hy, cx, neckY, bR, ya, bone);  // spine
-    for (int r = 0; r < 3; ++r)                           // ribs
-    {
-      const float ry = neckY + (hy - neckY) * (0.28F + 0.22F * r);
-      const float rw = Hh * 0.11F * (1.0F - 0.13F * r);
-      drawSeg(dst, w, h, cx - rw, ry, cx + rw, ry, bR * 0.7F, ya, bone);
-    }
-    const float shW = Hh * 0.13F;
-    drawSeg(dst, w, h, cx - shW, shY, cx + shW, shY, bR, ya, bone);  // shoulders
-    drawSeg(dst, w, h, cx - shW, shY, cx - shW * 0.85F, hy + Hh * 0.02F, bR * 0.9F, ya, bone);
-    drawSeg(dst, w, h, cx + shW, shY, cx + shW * 0.85F, hy + Hh * 0.02F, bR * 0.9F, ya, bone);
-    drawSeg(dst, w, h, cx - Hh * 0.07F, hy, cx + Hh * 0.07F, hy, bR, ya, bone);  // pelvis
-    for (int s = -1; s <= 1; s += 2)                                             // legs
-    {
-      const float lift = std::max(0.0F, s > 0 ? std::sin(beat) : -std::sin(beat));
-      const float hipx = cx + s * Hh * 0.06F;
-      const float footx =
-          (cx + s * Hh * 0.06F) + (cx + s * Hh * 0.24F - (cx + s * Hh * 0.06F)) * lift;
-      const float footy = baseY + ((hy - Hh * 0.30F) - baseY) * lift;
-      const float kneex =
-          (cx + s * Hh * 0.05F) + (cx + s * Hh * 0.17F - (cx + s * Hh * 0.05F)) * lift;
-      const float kneey = ((hy + baseY) * 0.5F) + ((hy - Hh * 0.02F) - (hy + baseY) * 0.5F) * lift;
-      drawSeg(dst, w, h, hipx, hy, kneex, kneey, bR, ya, bone);
-      drawSeg(dst, w, h, kneex, kneey, footx, footy, bR * 0.9F, ya, bone);
-      drawSeg(dst, w, h, footx, footy, footx + s * Hh * 0.05F, footy, bR * 0.8F, ya, bone);
-    }
-    plotDot(dst, w, h, cx, skullY, rad, ya, bone);  // skull
-    plotDot(
-        dst, w, h, cx - rad * 0.42F, skullY - rad * 0.05F, std::max(1.0F, rad * 0.26F), ya, eye);
-    plotDot(
-        dst, w, h, cx + rad * 0.42F, skullY - rad * 0.05F, std::max(1.0F, rad * 0.26F), ya, eye);
-    plotDot(dst, w, h, cx, skullY + rad * 0.4F, std::max(1.0F, rad * 0.16F), ya, eye);  // nasal
-  };
-
+  // Five marionette dancers driven by the CMU kick motion — high-kick
+  // Irish step works. Each dancer is offset by a few frames so the
+  // line looks lively rather than perfectly synced.
+  DancerMotion mot = loadDancerMotion("kick");
   runFrames(
-      renderer,
-      w,
-      h,
-      5200,
+      renderer, w, h, 5200,
       [&](float t, std::vector<Rgb>& dst)
       {
-        const float vf = std::clamp(1.0F - t * 4.5F, 0.0F, 1.0F);  // view -> dark stage
-        for (std::size_t k = 0; k < dst.size(); ++k)
-        {
-          const Rgb& s0 = src[k];
-          dst[k] = s0.transparent ? Rgb{0, 0, 0, false}
-                                  : Rgb{u8(s0.r * vf), u8(s0.g * vf), u8(s0.b * vf), false};
-        }
-        const int fy = static_cast<int>(floorY);
-        if (fy >= 0 && fy < h)
-          for (int x = 0; x < w; ++x)
-            dst[static_cast<std::size_t>(fy) * w + x] = Rgb{42, 42, 50, false};  // stage floor
-        const float alpha = std::clamp((t - 0.10F) / 0.13F, 0.0F, 1.0F);
-        if (alpha <= 0.0F)
-          return;
-        const float beat = t * 8.0F * speed;  // tempo (low natural beat: fast footwork already)
+        const float alpha = skeletonStage(dst, src, w, h, t, static_cast<int>(floorY));
+        if (alpha <= 0.0F) return;
+        const float beat = t * 8.0F * speed;
         for (int i = 0; i < kN; ++i)
         {
-          const Rgb b{
-              u8(bones[i].r * alpha), u8(bones[i].g * alpha), u8(bones[i].b * alpha), false};
-          const Rgb e{u8(18 * alpha), u8(12 * alpha), u8(12 * alpha), false};
-          skeleton(dst, w * ((i + 0.5F) / kN), floorY, beat, b, e);
+          const float cx = w * ((i + 0.5F) / kN);
+          const double phase = beat * 4.0 + i * 3.0;
+          drawDancer(dst, w, h, ya, cx, floorY, bodyH, mot, phase,
+                     boneTint(src, w, h, cx, alpha));
         }
       });
 }
@@ -171,42 +104,22 @@ void effectThriller(const Renderer& renderer, const std::vector<Rgb>& src, int w
   constexpr int kN = 5;
   const float floorY = (h - 1) * 0.94F;
   const float H = h * 0.58F;
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  runFrames(renderer,
-            w,
-            h,
-            5000,
+  // Zombie shuffle — the CMU sneak motion (subject 120 Mickey sneaky
+  // walk) reads beautifully as a Thriller shamble. Each dancer is
+  // phase-offset so the line looks possessed rather than choreographed.
+  DancerMotion mot = loadDancerMotion("sneak");
+  runFrames(renderer, w, h, 5000,
             [&](float t, std::vector<Rgb>& dst)
             {
               const float alpha = skeletonStage(dst, src, w, h, t, static_cast<int>(floorY));
-              if (alpha <= 0.0F)
-                return;
+              if (alpha <= 0.0F) return;
               const float beat = t * 9.0F * speed;
-              const float sway = std::sin(beat);
-              const float bob = std::sin(beat * 2.0F) * 0.025F * H;
-              const float headDX = sway * 0.05F * H;
-              const Limb aL{-0.18F + sway * 0.05F, -0.05F, -0.10F + sway * 0.20F, -0.32F};
-              const Limb aR{0.18F + sway * 0.05F, -0.05F, 0.10F + sway * 0.20F, -0.32F};
-              const Limb lL{-0.01F + sway * 0.03F, 0.23F, 0.02F + sway * 0.05F, 0.46F};
-              const Limb lR{0.01F + sway * 0.03F, 0.23F, -0.02F + sway * 0.05F, 0.46F};
               for (int i = 0; i < kN; ++i)
               {
                 const float cx = w * ((i + 0.5F) / kN);
-                drawSkeleton(dst,
-                             w,
-                             h,
-                             ya,
-                             cx,
-                             floorY,
-                             H,
-                             bob,
-                             headDX,
-                             aL,
-                             aR,
-                             lL,
-                             lR,
-                             boneTint(src, w, h, cx, alpha),
-                             Rgb{u8(18 * alpha), u8(12 * alpha), u8(12 * alpha), false});
+                const double phase = beat * 3.0 + i * 5.0;
+                drawDancer(dst, w, h, ya, cx, floorY, H, mot, phase,
+                           boneTint(src, w, h, cx, alpha));
               }
             });
 }
@@ -272,46 +185,22 @@ void effectGreekDance(const Renderer& renderer, const std::vector<Rgb>& src, int
   constexpr int kN = 5;
   const float floorY = (h - 1) * 0.94F;
   const float H = h * 0.58F;
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  const Limb aL{-0.30F, -0.06F, -0.55F, -0.06F};  // arms out, linking the line
-  const Limb aR{0.30F, -0.06F, 0.55F, -0.06F};
-  runFrames(renderer,
-            w,
-            h,
-            5200,
+  // Greek sirtaki / hasapiko line-dance — CMU walk is the closest
+  // generic motion; the line of dancers all step in sync (offset 0
+  // per dancer) so the kalamatianos chain reads.
+  DancerMotion mot = loadDancerMotion("walk");
+  runFrames(renderer, w, h, 5200,
             [&](float t, std::vector<Rgb>& dst)
             {
               const float alpha = skeletonStage(dst, src, w, h, t, static_cast<int>(floorY));
-              if (alpha <= 0.0F)
-                return;
+              if (alpha <= 0.0F) return;
               const float beat = t * 7.0F * speed;
-              const float sway = std::sin(beat);
-              const float kickL = std::max(0.0F, -std::sin(beat));
-              const float kickR = std::max(0.0F, std::sin(beat));
-              const Limb lL =
-                  lerpLimb({-0.01F, 0.23F, 0.02F, 0.46F}, {0.10F, 0.10F, 0.22F, 0.16F}, kickL);
-              const Limb lR =
-                  lerpLimb({0.01F, 0.23F, -0.02F, 0.46F}, {-0.10F, 0.10F, -0.22F, 0.16F}, kickR);
-              const float bob = std::fabs(sway) * 0.02F * H;
-              const float headDX = sway * 0.03F * H;
               for (int i = 0; i < kN; ++i)
               {
                 const float cx = w * ((i + 0.5F) / kN);
-                drawSkeleton(dst,
-                             w,
-                             h,
-                             ya,
-                             cx,
-                             floorY,
-                             H,
-                             bob,
-                             headDX,
-                             aL,
-                             aR,
-                             lL,
-                             lR,
-                             boneTint(src, w, h, cx, alpha),
-                             Rgb{u8(18 * alpha), u8(12 * alpha), u8(12 * alpha), false});
+                const double phase = beat * 5.0;  // in sync
+                drawDancer(dst, w, h, ya, cx, floorY, H, mot, phase,
+                           boneTint(src, w, h, cx, alpha));
               }
             });
 }
@@ -322,47 +211,22 @@ void effectRussianDance(const Renderer& renderer, const std::vector<Rgb>& src, i
   constexpr int kN = 5;
   const float floorY = (h - 1) * 0.94F;
   const float H = h * 0.58F;
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  const Limb aL{0.12F, -0.08F, 0.16F, 0.05F};  // arms folded across the chest
-  const Limb aR{-0.12F, -0.08F, -0.16F, 0.05F};
-  runFrames(renderer,
-            w,
-            h,
-            5000,
+  // Cossack squat-and-kick — the CMU kick captures the alternating
+  // straight-leg shoot-out reasonably well. Each dancer is offset by
+  // ~12 frames so the line of squat-kickers staggers across the stage.
+  DancerMotion mot = loadDancerMotion("kick");
+  runFrames(renderer, w, h, 5000,
             [&](float t, std::vector<Rgb>& dst)
             {
               const float alpha = skeletonStage(dst, src, w, h, t, static_cast<int>(floorY));
-              if (alpha <= 0.0F)
-                return;
+              if (alpha <= 0.0F) return;
               const float beat = t * 12.0F * speed;
-              const float bob = -0.12F * H + std::sin(beat) * 0.04F * H;  // squat + bounce
-              const float kickL = std::max(0.0F, -std::sin(beat));
-              const float kickR = std::max(0.0F, std::sin(beat));
-              // Cossack squat: the thighs splay out from the hips (the bend is at
-              // the hip, not the knee) and the shins drop to the feet; on the beat
-              // one leg shoots straight out to the side.
-              const Limb lL =
-                  lerpLimb({-0.20F, 0.16F, -0.09F, 0.33F}, {-0.16F, 0.06F, -0.55F, 0.06F}, kickL);
-              const Limb lR =
-                  lerpLimb({0.20F, 0.16F, 0.09F, 0.33F}, {0.16F, 0.06F, 0.55F, 0.06F}, kickR);
               for (int i = 0; i < kN; ++i)
               {
                 const float cx = w * ((i + 0.5F) / kN);
-                drawSkeleton(dst,
-                             w,
-                             h,
-                             ya,
-                             cx,
-                             floorY,
-                             H,
-                             bob,
-                             0.0F,
-                             aL,
-                             aR,
-                             lL,
-                             lR,
-                             boneTint(src, w, h, cx, alpha),
-                             Rgb{u8(18 * alpha), u8(12 * alpha), u8(12 * alpha), false});
+                const double phase = beat * 3.0 + i * 12.0;
+                drawDancer(dst, w, h, ya, cx, floorY, H, mot, phase,
+                           boneTint(src, w, h, cx, alpha));
               }
             });
 }
@@ -373,42 +237,21 @@ void effectBallet(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
   constexpr int kN = 5;
   const float floorY = (h - 1) * 0.94F;
   const float H = h * 0.58F;
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  const Limb lL{0.0F, 0.25F, 0.0F, 0.50F};       // supporting leg, straight on pointe
-  const Limb lR{0.16F, 0.12F, 0.02F, 0.26F};     // working leg in passé (foot to knee)
-  const Limb aL{-0.14F, -0.02F, -0.02F, 0.10F};  // arms rounded in first position
-  const Limb aR{0.14F, -0.02F, 0.02F, 0.10F};
-  runFrames(renderer,
-            w,
-            h,
-            4500,
+  // Ballet is choreographed turns and graceful poses — closest CMU
+  // motion is salsa (continuous body sway). Dancers all in sync.
+  DancerMotion mot = loadDancerMotion("salsa");
+  runFrames(renderer, w, h, 4500,
             [&](float t, std::vector<Rgb>& dst)
             {
               const float alpha = skeletonStage(dst, src, w, h, t, static_cast<int>(floorY));
-              if (alpha <= 0.0F)
-                return;
-              const float spin = t * 6.2832F * 1.2F * speed;  // ~6 turns at speed 5
-              const float latScale = std::cos(spin);
-              const float bob = 0.05F * H;  // relevé, held on pointe
+              if (alpha <= 0.0F) return;
+              const float spin = t * 6.2832F * 1.2F * speed;
+              const double phase = (t * 1.0F + spin * 0.05F) * 100.0;
               for (int i = 0; i < kN; ++i)
               {
                 const float cx = w * ((i + 0.5F) / kN);
-                drawSkeleton(dst,
-                             w,
-                             h,
-                             ya,
-                             cx,
-                             floorY,
-                             H,
-                             bob,
-                             0.0F,
-                             aL,
-                             aR,
-                             lL,
-                             lR,
-                             boneTint(src, w, h, cx, alpha),
-                             Rgb{u8(18 * alpha), u8(12 * alpha), u8(12 * alpha), false},
-                             latScale);
+                drawDancer(dst, w, h, ya, cx, floorY, H, mot, phase + i * 4.0,
+                           boneTint(src, w, h, cx, alpha));
               }
             });
 }
@@ -419,71 +262,24 @@ void effectMacarena(const Renderer& renderer, const std::vector<Rgb>& src, int w
   constexpr int kN = 5;
   const float floorY = (h - 1) * 0.94F;
   const float H = h * 0.58F;
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  // One arm's landmark positions, in order (right arm; the left arm uses the
-  // mirror image, one count behind). {elbow.x, elbow.y, hand.x, hand.y} as
-  // offsets from the shoulder in H units; +x is this arm's own side.
-  static const std::array<Limb, 8> kArm = {{
-      {0.18F, -0.02F, 0.42F, -0.02F},   // 0: out to the side, level (palm down)
-      {0.18F, -0.02F, 0.42F, -0.02F},   // 1: hold (palm turns up)
-      {0.02F, 0.02F, -0.20F, 0.02F},    // 2: hand crosses to the opposite shoulder
-      {0.02F, 0.02F, -0.20F, 0.02F},    // 3: hold
-      {0.06F, -0.18F, -0.06F, -0.34F},  // 4: hand behind the head
-      {0.06F, -0.18F, -0.06F, -0.34F},  // 5: hold
-      {-0.02F, 0.16F, -0.12F, 0.40F},   // 6: hand to the opposite hip
-      {-0.02F, 0.16F, -0.12F, 0.40F},   // 7: hold
-  }};
-  auto mirror = [](const Limb& a) { return Limb{-a.ex, a.ey, -a.hx, a.hy}; };
-  const Limb lL{-0.01F, 0.23F, 0.02F, 0.46F};
-  const Limb lR{0.01F, 0.23F, -0.02F, 0.46F};
-  runFrames(renderer,
-            w,
-            h,
-            6000,
+  // CMU salsa stands in for the macarena hip wiggle — the iconic
+  // arm-gesture sequence (palm-down → opposite shoulder → behind head →
+  // opposite hip → hop) doesn't map to any available CMU motion, so the
+  // marionettes do generic salsa hips instead. Each dancer phase-offset.
+  DancerMotion mot = loadDancerMotion("salsa");
+  runFrames(renderer, w, h, 6000,
             [&](float t, std::vector<Rgb>& dst)
             {
               const float alpha = skeletonStage(dst, src, w, h, t, static_cast<int>(floorY));
-              if (alpha <= 0.0F)
-                return;
-              const float seg = 0.16F / speed;  // per-count hold time
-              const float step = t / seg;
-              const int idx = static_cast<int>(step) % 8;
-              const int prev = (idx + 7) % 8;
-              const float blend = std::clamp((step - std::floor(step)) / 0.3F, 0.0F, 1.0F);
-              // Right arm steps through kArm; the left arm trails by one count.
-              const Limb aR = lerpLimb(kArm[prev], kArm[idx], blend);
-              const Limb aL = mirror(lerpLimb(kArm[(prev + 7) % 8], kArm[(idx + 7) % 8], blend));
-              // A quarter-turn hop at the end of each eight-count.
-              const float cyc = t / (8.0F * seg);
-              const float frac = cyc - std::floor(cyc);
-              const float jump = std::clamp((frac - 0.85F) / 0.15F, 0.0F, 1.0F);
-              const float quarters = std::floor(cyc) + jump;
-              // Quarter-turn facing, but floored so a side-on count stays a
-              // narrow silhouette instead of collapsing to an invisible line.
-              const float c = std::cos(quarters * 1.5708F);
-              const float latScale = (c < 0.0F ? -1.0F : 1.0F) * (0.4F + 0.6F * std::fabs(c));
-              const float hop = std::sin(jump * 3.14159F) * 0.06F * H;
-              const float bob = -hop + std::sin(t * 9.0F * speed) * 0.02F * H;
+              if (alpha <= 0.0F) return;
+              const float beat = t * 8.0F * speed;
               const float sway = std::sin(t * 4.5F * speed) * 0.03F * (w / static_cast<float>(kN));
               for (int i = 0; i < kN; ++i)
               {
                 const float cx = w * ((i + 0.5F) / kN) + sway;
-                drawSkeleton(dst,
-                             w,
-                             h,
-                             ya,
-                             cx,
-                             floorY,
-                             H,
-                             bob,
-                             0.0F,
-                             aL,
-                             aR,
-                             lL,
-                             lR,
-                             boneTint(src, w, h, cx, alpha),
-                             Rgb{u8(18 * alpha), u8(12 * alpha), u8(12 * alpha), false},
-                             latScale);
+                const double phase = beat * 4.0 + i * 6.0;
+                drawDancer(dst, w, h, ya, cx, floorY, H, mot, phase,
+                           boneTint(src, w, h, cx, alpha));
               }
             });
 }
