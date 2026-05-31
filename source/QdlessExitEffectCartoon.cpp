@@ -803,10 +803,14 @@ void effectSillyWalk(const Renderer& renderer, const std::vector<Rgb>& src, int 
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
 
-  // Load the CMU walk capture once. Marionette puppet replaces the
-  // ad-hoc stick figure; the walk cycle reads as a "normal" walk so
-  // the silliness comes from the exaggerated body bob + tilt + the
-  // bowler hat + briefcase staples of the Python sketch.
+  // Load the CMU walk capture, then exaggerate the leg rotations in
+  // place so the gait reads as Cleese's Ministry of Silly Walks rather
+  // than a normal walk. We multiply the hip and knee Euler angles by
+  // big factors (~2.5× on the hip's forward-swing axis), inject an
+  // alternating high-kick on top of the existing cycle, and zero out
+  // the arm rotations so the arms hang stiffly at the sides the way
+  // Cleese plays it. The torso bob also gets amplified for extra
+  // pomposity.
   BvhAnimation walk;
   double walkRefH = 1.0;
   bool walkOk = false;
@@ -816,8 +820,51 @@ void effectSillyWalk(const Renderer& renderer, const std::vector<Rgb>& src, int 
     try
     {
       walk = loadBvhFile(walkPath);
-      walkRefH = bvhReferenceHeight(walk);
       walkOk = true;
+      // For each non-root joint we know the channelStart and the
+      // channels string (e.g. "ZYX"). Apply per-joint, per-axis scales.
+      auto applyScale = [&](const char* jointName, char axis, double scale)
+      {
+        const int ji = walk.jointIndex(jointName);
+        if (ji < 0) return;
+        const auto& j = walk.joints[ji];
+        for (std::size_t k = 0; k < j.channels.size(); ++k)
+          if (j.channels[k] == axis)
+            for (int f = 0; f < walk.frameCount; ++f)
+              walk.frames[static_cast<std::size_t>(f) * walk.totalChannels +
+                          j.channelStart + k] *= scale;
+      };
+      auto applyOffset = [&](const char* jointName, char axis, double bias)
+      {
+        const int ji = walk.jointIndex(jointName);
+        if (ji < 0) return;
+        const auto& j = walk.joints[ji];
+        for (std::size_t k = 0; k < j.channels.size(); ++k)
+          if (j.channels[k] == axis)
+            for (int f = 0; f < walk.frameCount; ++f)
+              walk.frames[static_cast<std::size_t>(f) * walk.totalChannels +
+                          j.channelStart + k] += bias;
+      };
+      // High-kick amplification on the forward swing axis (X) — the
+      // CMU convention makes X the side axis, which controls
+      // thigh-forward angle. Knees too, doubled.
+      applyScale("LeftUpLeg",  'X', 2.6);
+      applyScale("RightUpLeg", 'X', 2.6);
+      applyScale("LeftLeg",    'X', 1.8);
+      applyScale("RightLeg",   'X', 1.8);
+      // Splay sideways too (Z) for the goose-step splay.
+      applyScale("LeftUpLeg",  'Z', 1.5);
+      applyScale("RightUpLeg", 'Z', 1.5);
+      // Arms: kill the natural swing so they hang stiffly. Setting
+      // all three channels to zero pins each arm to its rest pose
+      // pointing down beside the body.
+      for (const char* arm : {"LeftArm", "LeftForeArm", "RightArm", "RightForeArm"})
+        for (char ax : {'X', 'Y', 'Z'}) applyScale(arm, ax, 0.0);
+      // A tiny chin-up bias on the spine so the body holds itself
+      // pompously upright while the legs go nuts.
+      applyOffset("Spine",  'X', -8.0);
+      applyOffset("Spine1", 'X', -4.0);
+      walkRefH = bvhReferenceHeight(walk);
     }
     catch (const std::exception&) { walkOk = false; }
   }

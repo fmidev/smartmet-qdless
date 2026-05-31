@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 30%{?dist}.fmi
+Release: 31%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,10 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-31.fmi
+- Dictator Globe: scale the marionette puppet down to ~half the screen (was nearly full-height) and choreograph the globe to bounce between six body parts in sequence — head, right hand, right foot, hips (the iconic Chaplin behind-bounce from The Great Dictator, drawn slightly below and behind the hip joint so it reads as a butt-bounce), left foot, left hand, and back to head. Each transition is a parabolic arc. Switched the body motion from the wave capture to the salsa capture so the hips actually swing while the globe is being volleyed off the puppet.
+- Silly Walk: amplify the CMU walk's leg rotations in place after loading so the gait reads as Cleese's Ministry of Silly Walks instead of a normal walk. Hip forward-swing (X) axis is multiplied by 2.6× for the high goose-step lift, the knee (LeftLeg / RightLeg) X axis by 1.8×, the hip splay (Z) axis by 1.5× for sideways flail, and the arms get all three rotation channels zeroed out so they hang stiffly at the sides instead of swinging naturally. A small lean offset on the Spine joints makes the figure carry itself pompously upright while the legs go nuts below.
+
 * Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-30.fmi
 - Use the Marionette puppet in Silly Walk and Dictator Globe instead of their previous ad-hoc plotDot+drawSeg stick figures. Both effects now load a CMU mocap BVH at startup (cmu/walk.bvh for Silly Walk, cmu/wave.bvh for Dictator Globe), drive the marionette renderer, and attach effect-specific props to joints via the new jointScreenOut output of drawMarionette. Silly Walk: figure scrolls left -> right with the walk cycle playing in place; the bowler hat sits above the Head joint as a brim + dome, the briefcase dangles below the RightHand joint. Dictator Globe: figure stands on the chancellery floor with the wave motion cycling so an arm rises and falls; the globe orbits whichever hand is currently higher (so it tracks the waving arm regardless of cycle phase), and the Hitler mustache stays anchored to the Head joint. This is a proof-of-concept conversion — the existing Rocky / Riverdance / Russian Dance / YMCA / etc. human-figure effects are unchanged for now, pending review of how the puppet style reads in these first two.
 - New optional `jointScreenOut` argument on drawMarionette() returns the projected (col, row) of every BVH joint after rendering, so callers can pin props to body parts without duplicating the projection math.

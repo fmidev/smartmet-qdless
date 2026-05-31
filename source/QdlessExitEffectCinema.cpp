@@ -4718,24 +4718,32 @@ void effectGlobeDance(const Renderer& renderer, const std::vector<Rgb>& src, int
   const float mn = std::min(static_cast<float>(w), h * ya);
   const float floorY = h * 0.86F;
 
-  // Replace the old stick-figure dictator with the marionette puppet
-  // driven by the CMU "wave" motion — the raised arm becomes the hand
-  // that holds the globe aloft. Bot­h hands rise during the wave so the
-  // figure reads as a dictator holding the world.
-  BvhAnimation waveAnim;
-  double waveRefH = 1.0;
-  bool waveOk = false;
-  const std::string wavePath = findDataImage("cmu/wave.bvh");
-  if (!wavePath.empty())
+  // Marionette puppet driven by the CMU salsa motion — gives the
+  // figure continuous hip swing and arm sway like Chaplin's globe
+  // ballet from The Great Dictator. The globe bounces off body parts
+  // in a choreographed sequence including the iconic *behind* bounce.
+  BvhAnimation anim;
+  double animRefH = 1.0;
+  bool animOk = false;
+  const std::string animPath = findDataImage("cmu/salsa.bvh");
+  if (!animPath.empty())
   {
     try
     {
-      waveAnim = loadBvhFile(wavePath);
-      waveRefH = bvhReferenceHeight(waveAnim);
-      waveOk = true;
+      anim = loadBvhFile(animPath);
+      animRefH = bvhReferenceHeight(anim);
+      animOk = true;
     }
-    catch (const std::exception&) { waveOk = false; }
+    catch (const std::exception&) { animOk = false; }
   }
+
+  // Pre-cache joint indices used for ball-bouncing contact points.
+  const int idxHead  = animOk ? anim.jointIndex("Head")      : -1;
+  const int idxHips  = animOk ? anim.jointIndex("Hips")      : -1;
+  const int idxLHand = animOk ? anim.jointIndex("LeftHand")  : -1;
+  const int idxRHand = animOk ? anim.jointIndex("RightHand") : -1;
+  const int idxLFoot = animOk ? anim.jointIndex("LeftFoot")  : -1;
+  const int idxRFoot = animOk ? anim.jointIndex("RightFoot") : -1;
 
   runFrames(
       renderer,
@@ -4744,7 +4752,7 @@ void effectGlobeDance(const Renderer& renderer, const std::vector<Rgb>& src, int
       5600,
       [&](float t, std::vector<Rgb>& dst)
       {
-        for (int y = 0; y < h; ++y)  // chancellery: data dimmed warmly
+        for (int y = 0; y < h; ++y)
           for (int x = 0; x < w; ++x)
           {
             const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
@@ -4755,53 +4763,80 @@ void effectGlobeDance(const Renderer& renderer, const std::vector<Rgb>& src, int
                     : Rgb{u8(28 + l * 0.18F), u8(22 + l * 0.16F), u8(38 + l * 0.18F), false};
           }
 
-        // Figure: marionette in dark suit, feet planted on the floor line.
+        // Figure: marionette in dark suit, roughly half the screen
+        // tall (was full-height in v30 — too dominant). Feet stand on
+        // the chancellery floor line.
         const float fcx = w * 0.5F;
-        const float figH = floorY - h * 0.08F;  // top of figure ~8% from ceiling
+        const float figH = h * 0.50F;
         const Rgb suit{30, 28, 32, false};
         std::vector<std::array<double, 2>> joints;
-        int frameIdx = 0;
-        if (waveOk)
+        if (animOk)
         {
-          // Cycle through the wave ~2× over the effect (it's about 2 s
-          // each pass), so the arm comes up and back down repeatedly.
-          const float phase = t * 2.0F;
-          frameIdx = static_cast<int>(std::floor(phase * waveAnim.frameCount)) %
-                     std::max(1, waveAnim.frameCount);
-          drawMarionette(dst, w, h, ya, waveAnim, frameIdx,
-                         fcx, floorY, figH, waveRefH, suit, &joints);
+          // Loop the salsa ~3× over the runtime so hips visibly sway.
+          const float phase = t * 3.0F;
+          const int fi = static_cast<int>(std::floor(phase * anim.frameCount)) %
+                         std::max(1, anim.frameCount);
+          drawMarionette(dst, w, h, ya, anim, fi, fcx, floorY, figH, animRefH,
+                         suit, &joints);
         }
 
-        // Hitler mustache dot at the head joint.
-        const int headI = waveOk ? waveAnim.jointIndex("Head") : -1;
-        if (headI >= 0 && headI < static_cast<int>(joints.size()))
+        // Mustache anchored to the head joint.
+        if (idxHead >= 0 && idxHead < static_cast<int>(joints.size()))
         {
-          const double hx = joints[headI][0];
-          const double hy = joints[headI][1];
+          const double hx = joints[idxHead][0];
+          const double hy = joints[idxHead][1];
           plotDot(dst, w, h, hx, hy + mn * 0.006F, mn * 0.006F, ya,
                   Rgb{14, 12, 14, false});
         }
 
-        // Globe orbits a little around whichever hand is currently
-        // raised. We pick the higher of the two hands per frame so the
-        // globe tracks the waving arm regardless of cycle phase.
-        const int lH = waveOk ? waveAnim.jointIndex("LeftHand")  : -1;
-        const int rH = waveOk ? waveAnim.jointIndex("RightHand") : -1;
-        float ghX = fcx;
-        float ghY = h * 0.32F;
-        if (lH >= 0 && rH >= 0 && lH < static_cast<int>(joints.size())
-            && rH < static_cast<int>(joints.size()))
+        // Globe choreography: bounce off six contact points in a loop —
+        // Head → RightHand → RightFoot → Hips (behind) → LeftFoot →
+        // LeftHand → back to Head. The Hips contact is offset slightly
+        // below and behind the hip joint so the bounce reads as "ball
+        // hitting the butt" the way Chaplin played it.
+        struct Contact
         {
-          const auto& L = joints[lH];
-          const auto& R = joints[rH];
-          // "Higher" hand = smaller screen-y.
-          const auto& hand = (L[1] < R[1]) ? L : R;
-          ghX = static_cast<float>(hand[0]) +
-                std::cos(t * 1.7F) * mn * 0.03F;
-          ghY = static_cast<float>(hand[1]) - mn * 0.04F +
-                std::sin(t * 2.5F) * mn * 0.04F;
-        }
-        const float gR = mn * 0.10F;
+          int idx;        // joint index in the BVH skeleton
+          double offX;    // screen-x offset from the joint, fraction of mn
+          double offY;    // screen-y offset (negative = above joint)
+        };
+        const Contact contacts[] = {
+            {idxHead,  0.00, -0.06},  // above the head
+            {idxRHand, 0.04, -0.02},  // at the right hand
+            {idxRFoot, 0.02, -0.02},  // foot kick
+            {idxHips,  0.06,  0.04},  // BEHIND/below the hips — the butt bounce
+            {idxLFoot,-0.02, -0.02},
+            {idxLHand,-0.04, -0.02},
+        };
+        const int nC = static_cast<int>(sizeof(contacts) / sizeof(contacts[0]));
+
+        // 6 contacts per ~2 s loop, so the ball goes through the full
+        // cycle ~3 times over the 5.6 s effect — matches the salsa loop.
+        const float beats = t * 18.0F;
+        const int beatIdx = static_cast<int>(std::floor(beats)) % nC;
+        const int nextIdx = (beatIdx + 1) % nC;
+        const float frac = beats - std::floor(beats);
+
+        auto contactScreen = [&](const Contact& c) -> std::pair<double, double>
+        {
+          double cx = fcx, cy = h * 0.5F;
+          if (c.idx >= 0 && c.idx < static_cast<int>(joints.size()))
+          {
+            cx = joints[c.idx][0];
+            cy = joints[c.idx][1];
+          }
+          return {cx + c.offX * mn, cy + c.offY * mn / ya};
+        };
+        const auto from = contactScreen(contacts[beatIdx]);
+        const auto to   = contactScreen(contacts[nextIdx]);
+        // Parabolic arc between contacts — peak rises above the segment
+        // by ~10 % of mn so the ball clearly arcs rather than sliding.
+        const double midX = from.first + (to.first - from.first) * frac;
+        const double midY = from.second + (to.second - from.second) * frac;
+        const double arcH = mn * 0.10F;
+        const float ghX = static_cast<float>(midX);
+        const float ghY = static_cast<float>(midY - arcH * 4.0 * frac * (1.0 - frac));
+        const float gR = mn * 0.07F;  // globe was 0.10 — scaled down with figure
         drawSphere(dst, w, h, src, ghX, ghY, gR, gR, 0.45F, t * 1.2F, 0.45F, 0.65F, 0.55F);
         plotDot(dst,
                 w,
