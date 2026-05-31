@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 28%{?dist}.fmi
+Release: 29%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,10 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-29.fmi
+- Marionette: fix drawCapsule projection bug. The point-to-segment projection was using a unit vector computed in dst-pixel space but doing the dot product in aspect-corrected metric space; the resulting `t` parameter was scaled by L_dst rather than being in [0, 1], so after clamping the algorithm effectively treated each bone as a tiny disc near its A endpoint. Visually the figure looked like joint circles connected by nothing. Rewritten in metric space throughout (mdx, mdy, L²m, t = dot/L²m): the limbs are now continuous segments end-to-end with the proper round endpoint caps, and consecutive bones along a chain (knee, elbow) blend smoothly because they share the cap radius.
+- Removed stray data/fmi_Temperature_*.png that leaked into a previous commit; gitignore the pattern.
+
 * Sat May 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-28.fmi
 - Marionette body shape redrawn as a Prince-of-Persia-style continuous silhouette instead of separate tapered capsules per bone. The first cut drew each limb segment and the torso as its own tapered capsule; where capsules of different radii met at a shared joint (e.g. wide thigh capsule meets narrower shin at the knee, or the wide torso capsule meets the thin arm at the shoulder) the rounded caps poked perpendicular to each bone and looked like a balloon stuck on top of every joint. Fix: the torso is now drawn as a single filled quadrilateral with corners at LeftArm / RightArm / RightUpLeg / LeftUpLeg, so the hip and shoulder joints are *inside* the torso polygon and the limbs grow out of its corners with no cap balloon. Limbs are constant-width capsules (no taper) with the same radius at every joint along a chain, so where two bones share an endpoint the cap discs blend into a same-width round corner instead of poking out. Limb radius is reduced from figureH/20 to figureH/30 for a slenderer Prince-of-Persia profile. New fillQuad() scan-line polygon helper in include/QdlessMarionette.h alongside drawCapsule. Net effect: the silhouette reads as one body, not as twelve loosely-connected balloons.
 

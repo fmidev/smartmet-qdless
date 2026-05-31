@@ -140,55 +140,48 @@ inline void drawCapsule(std::vector<Rgb>& dst, int w, int h, float ya,
   const int ymin = std::max(0, static_cast<int>(std::floor(std::min(y0, y1) - maxR / ya)));
   const int ymax = std::min(h - 1, static_cast<int>(std::ceil(std::max(y0, y1) + maxR / ya)));
   if (xmax < xmin || ymax < ymin) return;
-  const double dx = x1 - x0;
-  const double dy = y1 - y0;
-  const double L2 = dx * dx + dy * dy;
-  const double L = std::sqrt(L2);
-  if (L < 1e-6)
+  // Capsule rasterisation in metric space (where y pixels are scaled by
+  // ya so a "round" capsule has equal radius in x and y). The metric
+  // segment runs from A_m = (x0, y0*ya) to B_m = (x1, y1*ya); the
+  // capsule is the set of points within `r` of any point on that
+  // segment (linearly interpolated when r0 != r1).
+  const double mdx = x1 - x0;            // metric_dx
+  const double mdy = (y1 - y0) * ya;     // metric_dy
+  const double L2m = mdx * mdx + mdy * mdy;
+  if (L2m < 1e-12)
   {
-    // Degenerate: just draw a disc of radius max(r0, r1).
+    // Degenerate segment — draw a disc of radius max(r0, r1).
     const double r = std::max(r0, r1);
+    const double r2 = r * r;
     for (int yy = ymin; yy <= ymax; ++yy)
     {
       const double yd = (yy - y0) * ya;
       for (int xx = xmin; xx <= xmax; ++xx)
       {
         const double xd = xx - x0;
-        if (xd * xd + yd * yd <= r * r)
+        if (xd * xd + yd * yd <= r2)
           dst[static_cast<std::size_t>(yy) * w + xx] = color;
       }
     }
     return;
   }
-  const double invL = 1.0 / L;
-  // Unit vector along the capsule axis.
-  const double ux = dx * invL;
-  const double uy = dy * invL;
   for (int yy = ymin; yy <= ymax; ++yy)
   {
-    const double py = yy * ya;
+    const double pmy = yy * ya;  // point y in metric
     for (int xx = xmin; xx <= xmax; ++xx)
     {
-      // Project (xx, yy) onto the segment in display-aspect-corrected
-      // space. We do this by transforming both endpoints into a uniform
-      // metric where vertical pixels are stretched by ya.
-      const double pxr = xx - x0;
-      const double pyr = py - y0 * ya;
-      const double udx = ux;
-      const double udy = uy * ya;  // segment direction in metric space
-      const double udL = std::sqrt(udx * udx + udy * udy);
-      if (udL < 1e-9) continue;
-      const double t = (pxr * udx + pyr * udy) / (udL * udL);
-      // Closest point on the (clamped) segment.
+      // Vector from A_m to the sample point, in metric space.
+      const double rx = xx - x0;
+      const double ry = pmy - y0 * ya;
+      // Project onto the segment, parameter t in [0, 1] along A → B.
+      const double t = (rx * mdx + ry * mdy) / L2m;
       const double tc = std::clamp(t, 0.0, 1.0);
-      const double qx = tc * udx;
-      const double qy = tc * udy;
-      const double rdx = pxr - qx;
-      const double rdy = pyr - qy;
-      const double d2 = rdx * rdx + rdy * rdy;
-      // Capsule radius linearly interpolated between endpoints (so it
-      // tapers when r0 != r1). For t outside [0, 1] we fall back to the
-      // endpoint radius the closest cap belongs to.
+      // Residual to the closest point on the (clamped) segment.
+      const double qx = tc * mdx;
+      const double qy = tc * mdy;
+      const double dxr = rx - qx;
+      const double dyr = ry - qy;
+      const double d2 = dxr * dxr + dyr * dyr;
       const double r = r0 + (r1 - r0) * tc;
       if (d2 <= r * r)
         dst[static_cast<std::size_t>(yy) * w + xx] = color;
