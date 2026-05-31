@@ -118,8 +118,21 @@ class QueryDataSource : public DataSource
   bool sampleSlab(int paramId,
                   const std::function<void(double lat, double lon, float value)>& cb) const;
 
+  // Returns a fresh QueryDataSource that shares the underlying
+  // NFmiQueryData but owns its own NFmiFastQueryInfo iterator. Per the
+  // newbase contract, two independent iterators over one NFmiQueryData
+  // are safe to use concurrently for read-only access — which is the
+  // mechanism the phenomenon-detector worker thread uses to inspect
+  // the data without locking the main thread out of rendering.
+  std::unique_ptr<DataSource> cloneForRead() const override;
+
  private:
-  std::unique_ptr<NFmiQueryData> itsData;
+  // Clone constructor — shares itsData with the parent and gives the
+  // clone its own iterator. Public only via cloneForRead().
+  QueryDataSource(std::shared_ptr<NFmiQueryData> data,
+                  std::vector<int> paramIds);
+
+  std::shared_ptr<NFmiQueryData> itsData;
   std::unique_ptr<NFmiFastQueryInfo> itsInfo;
   std::vector<int> itsParamIds;
 };

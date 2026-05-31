@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 33%{?dist}.fmi
+Release: 34%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-34.fmi
+- Phenomenon hint now identifies the location instead of leaving it as a bare lat/lon. After the detector fires we look up the nearest city in cities1000.tsv and append it to the hint, with phrasing that softens with distance: "(near Måløy, NO)" within 80 km, "(~148km from Måløy, NO)" within 400 km, "(~600km off Reykjavík, IS)" beyond. No city tag if the anchor is more than 1500 km from any populated place. Example: "Cyclone low 1013 hPa near 62°N 2°E (Δ 12 hPa) (~148km from Måløy, NO) → click the centre to time-series-probe; spacebar to animate."
+- New overlayPhenomenonMarker — an orange double-ring at the anchor coordinates so the user can see at a glance WHERE on the map the hint is pointing. Drawn after the existing user marker (red cross) and ignored when the anchor is off the current viewport.
+- New CityIndex::nearestCity(lat, lon, maxKm) — equirectangular linear scan, sub-millisecond for the 100k-row cities1000.tsv. Used by the phenomenon hint and available for other code that wants to label a point.
+- Threading prep (not yet active): QueryDataSource::itsData is now a std::shared_ptr<NFmiQueryData> and the new virtual DataSource::cloneForRead() returns a fresh QueryDataSource sharing the same data with its own NFmiFastQueryInfo iterator. The newbase contract says two iterators over one NFmiQueryData are safe to use concurrently for read-only access, which is exactly what a worker-thread detector needs. The actual worker thread is the next step; this change makes it possible without touching every render call site.
+
 * Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-33.fmi
 - New phenomenon-detector framework (include/QdlessPhenomena.h, source/QdlessPhenomena.cpp). Six detectors pattern-match the loaded data against well-known meteorological signatures and surface a single-line hint on the timeline header suggesting the view that brings the feature out best. Detectors: tropical convection / MJO (precipitation, OLR, or cloud-cover spike inside ±15° latitude → "X then H for an equator Hovmöller"); cyclones / hurricanes (MSL pressure minimum with > 8 hPa drop in a 20° radius — labels the severity Cyclone / Strong cyclone / Hurricane-strength → "click the centre, spacebar to animate"); fronts (temperature/theta gradient peak well above the 99th percentile → "X for a cross-section across the front"); jet streams (wind speed > 40 m/s on a pressure level <= 400 hPa, or > 60 m/s otherwise → "L to browse upper levels"); atmospheric blocks (geopotential or pressure cell with top-decile time-mean and bottom-quartile temporal stdev, mid-latitudes only → "spacebar to time-loop"); static field (overall variance below 0.5 % of mean → "field is essentially static, Hovmöller will be flat"). Each detector picks coarse 72×36 lat/lon samples (5° resolution) so the whole sweep is a few ms; the temporal block/static detectors sample up to eight time steps and self-skip on files with fewer than three. The highest-scoring hint wins.
 - Wired into App: refreshPhenomenonHint() runs on file load, parameter change, and level change. The persistent hint is shown on the timeline header after the (transient) itsLastMessage, and is also appended to --dump output as "| hint: ...". On real test data: fmi.sqd (Pressure) fires the cyclone detector correctly ("Cyclone low 1013 hPa near 62°N 2°E (Δ 12 hPa)"). Thresholds are heuristic and meant for meteorologists to retune.

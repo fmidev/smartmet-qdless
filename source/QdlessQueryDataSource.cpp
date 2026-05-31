@@ -18,7 +18,7 @@ namespace Qdless
 {
 QueryDataSource::QueryDataSource(const std::string& filename)
 {
-  itsData = std::make_unique<NFmiQueryData>(filename);
+  itsData = std::make_shared<NFmiQueryData>(filename);
   itsInfo = std::make_unique<NFmiFastQueryInfo>(itsData.get());
   if (!itsInfo->IsGrid())
     throw std::runtime_error("not gridded data: " + filename);
@@ -30,6 +30,27 @@ QueryDataSource::QueryDataSource(const std::string& filename)
     itsParamIds.push_back(itsInfo->Param().GetParamIdent());
   } while (itsInfo->NextParam(true));
   itsInfo->FirstParam();
+}
+
+QueryDataSource::QueryDataSource(std::shared_ptr<NFmiQueryData> data,
+                                 std::vector<int> paramIds)
+    : itsData(std::move(data)), itsParamIds(std::move(paramIds))
+{
+  itsInfo = std::make_unique<NFmiFastQueryInfo>(itsData.get());
+  itsInfo->FirstParam();
+}
+
+std::unique_ptr<DataSource> QueryDataSource::cloneForRead() const
+{
+  auto clone = std::unique_ptr<QueryDataSource>(
+      new QueryDataSource(itsData, itsParamIds));
+  // Sync the clone's selection to ours so detectors see the same
+  // (param, level, time) the user is looking at.
+  clone->itsInfo->Param(static_cast<FmiParameterName>(
+      itsInfo->Param().GetParamIdent()));
+  clone->itsInfo->LevelIndex(itsInfo->LevelIndex());
+  clone->itsInfo->TimeIndex(itsInfo->TimeIndex());
+  return clone;
 }
 
 QueryDataSource::~QueryDataSource() = default;

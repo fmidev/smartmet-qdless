@@ -55,6 +55,18 @@ class DataSource
   // Auto-detects the format and returns a DataSource. Throws on error.
   static std::unique_ptr<DataSource> open(const std::string& filename);
 
+  // Return a fresh, independently-iterable view of the same underlying
+  // data, safe to use concurrently with the original for READ-ONLY
+  // queries. Used by background threads (e.g. the phenomenon detector)
+  // that need to sample the data without blocking the main thread.
+  //
+  // The default returns nullptr — callers must then either fall back
+  // to running the analysis synchronously, or simply skip the
+  // background work. QueryDataSource implements this by sharing the
+  // underlying NFmiQueryData (a shared_ptr) and giving the clone its
+  // own NFmiFastQueryInfo iterator. Other sources can opt in later.
+  virtual std::unique_ptr<DataSource> cloneForRead() const { return nullptr; }
+
   // Parameter access — IDs use newbase / FMI numeric enums.
   virtual std::vector<int> paramIds() const = 0;
   virtual std::string paramShortName(int paramId) const = 0;

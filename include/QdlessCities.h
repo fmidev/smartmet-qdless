@@ -41,6 +41,13 @@ class CityIndex
 
   const City& at(std::size_t i) const { return itsCities[i]; }
 
+  // Return the index of the closest city to (lat, lon) in great-circle
+  // distance, capped at maxKm (so a North Atlantic phenomenon doesn't
+  // get tagged with a distant European city). Returns SIZE_MAX when no
+  // city is within range. Linear scan over the loaded set (≤200k
+  // entries — sub-millisecond for typical 100k-row cities1000.tsv).
+  std::size_t nearestCity(double lat, double lon, double maxKm = 1500.0) const;
+
  private:
   std::vector<City> itsCities;
 };

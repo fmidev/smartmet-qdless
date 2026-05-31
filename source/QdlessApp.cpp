@@ -3372,29 +3372,105 @@ void App::refreshPhenomenonHint()
   // Single-frame detectors are ~3-5 ms total on a 72×36 sample. Run
   // them synchronously here — the brief pause is imperceptible.
   // Temporal detectors (block, static) self-skip on files with fewer
-  // than 3 time steps and otherwise add ~25 ms of work. If that
-  // becomes a noticeable hitch on large files, this is the place to
-  // dispatch the call to a worker thread (it needs a mutex around the
-  // DataSource because NFmiQueryData isn't thread-safe — see notes
-  // in QdlessPhenomena.cpp).
+  // than 3 time steps and otherwise add ~25 ms of work. A worker
+  // thread (using QueryDataSource::cloneForRead) is the natural next
+  // step if that becomes perceptible.
   if (!itsSource) {
     itsPhenomenonHint.clear();
     itsPhenomenonHasAnchor = false;
     return;
   }
   const auto hint = detectPhenomena(*itsSource);
-  if (hint.score > 0)
-  {
-    itsPhenomenonHint = hint.message + "  " + hint.suggestion;
-    itsPhenomenonAnchorLat = hint.anchorLat;
-    itsPhenomenonAnchorLon = hint.anchorLon;
-    itsPhenomenonHasAnchor = hint.hasAnchor;
-  }
-  else
+  if (hint.score <= 0)
   {
     itsPhenomenonHint.clear();
     itsPhenomenonHasAnchor = false;
+    return;
   }
+  itsPhenomenonAnchorLat = hint.anchorLat;
+  itsPhenomenonAnchorLon = hint.anchorLon;
+  itsPhenomenonHasAnchor = hint.hasAnchor;
+
+  // Enrich the hint with the nearest named place — coordinates like
+  // "62°N 2°E" don't communicate location, but "near Bergen, Norway"
+  // does. The on-screen orange marker (overlayPhenomenonMarker) shows
+  // the exact pixel; the place name gives narrative context in the
+  // status line.
+  std::string place;
+  if (hint.hasAnchor && ensureCityIndex())
+  {
+    const std::size_t idx =
+        itsCityIndex.nearestCity(hint.anchorLat, hint.anchorLon);
+    if (idx != std::numeric_limits<std::size_t>::max())
+    {
+      const auto& c = itsCityIndex.at(idx);
+      // Equirectangular km from the anchor to the named city — used
+      // to soften the phrasing when the closest city is hundreds of km
+      // away (the phenomenon is over open water / wilderness).
+      const double phi0 = hint.anchorLat * M_PI / 180.0;
+      const double dLat = c.lat - hint.anchorLat;
+      double dLon = c.lon - hint.anchorLon;
+      while (dLon > 180) dLon -= 360;
+      while (dLon < -180) dLon += 360;
+      const double km =
+          std::sqrt(dLat * dLat + dLon * dLon * std::cos(phi0) * std::cos(phi0)) * 111.32;
+      char buf[160];
+      if (km < 80)
+        std::snprintf(buf, sizeof(buf), " (near %s, %s)", c.name.c_str(), c.country.c_str());
+      else if (km < 400)
+        std::snprintf(buf, sizeof(buf), " (~%dkm from %s, %s)",
+                      static_cast<int>(km), c.name.c_str(), c.country.c_str());
+      else
+        std::snprintf(buf, sizeof(buf), " (~%dkm off %s, %s)",
+                      static_cast<int>(km), c.name.c_str(), c.country.c_str());
+      place = buf;
+    }
+  }
+  itsPhenomenonHint = hint.message + place + "  " + hint.suggestion;
+}
+
+void App::overlayPhenomenonMarker(std::vector<Rgb>& pixels,
+                                  int subWidth, int subHeight) const
+{
+  if (!itsPhenomenonHasAnchor || subWidth <= 0 || subHeight <= 0) return;
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  if (spanU <= 0 || spanV <= 0) return;
+  double u = 0, v = 0;
+  itsSource->latLonToUV(itsPhenomenonAnchorLat, itsPhenomenonAnchorLon, u, v);
+  const double u01 = (u - itsViewport.uMin) / spanU;
+  const double v01 = (v - itsViewport.vMin) / spanV;
+  if (u01 < 0 || u01 > 1 || v01 < 0 || v01 > 1) return;  // off-viewport
+  const int cx = static_cast<int>(u01 * subWidth);
+  const int cy = static_cast<int>(v01 * subHeight);
+  // Orange double-ring so the phenomenon marker is visually distinct
+  // from the red-cross user marker. Outer ring radius 6, inner ring 4.
+  const Rgb fg{255, 165, 0};
+  const Rgb bg{255, 255, 255};
+  auto plot = [&](int x, int y, Rgb c)
+  {
+    if (x >= 0 && x < subWidth && y >= 0 && y < subHeight)
+      pixels[static_cast<std::size_t>(y) * subWidth + x] = c;
+  };
+  // Rasterise two circles at integer radii.
+  auto ring = [&](int r, Rgb c)
+  {
+    int x = r, y = 0, err = 0;
+    while (x >= y)
+    {
+      plot(cx + x, cy + y, c);  plot(cx + y, cy + x, c);
+      plot(cx - y, cy + x, c);  plot(cx - x, cy + y, c);
+      plot(cx - x, cy - y, c);  plot(cx - y, cy - x, c);
+      plot(cx + y, cy - x, c);  plot(cx + x, cy - y, c);
+      ++y;
+      if (err <= 0) { err += 2 * y + 1; }
+      else          { --x; err += 2 * (y - x) + 1; }
+    }
+  };
+  ring(7, bg);
+  ring(6, fg);
+  ring(5, fg);
+  ring(4, fg);
 }
 
 void App::selectParam(int newIndex)
@@ -5332,6 +5408,7 @@ void App::drawMap(UI& ui)
     overlayCities(pixels, subW, subH);
     overlayCrossSection(pixels, subW, subH);
     overlayMarker(pixels, subW, subH);
+    overlayPhenomenonMarker(pixels, subW, subH);
 
     switch (itsGraphicsMode)
     {
@@ -7746,6 +7823,7 @@ int App::runOnce()
     overlayPolylines(pixels, subWidth, subHeight, itsShapeOutlines, borderColor());
   overlayCities(pixels, subWidth, subHeight);
   overlayMarker(pixels, subWidth, subHeight);
+  overlayPhenomenonMarker(pixels, subWidth, subHeight);
 
   const int id = itsSource->currentParamId();
   std::string shortName = itsSource->paramShortName(id);

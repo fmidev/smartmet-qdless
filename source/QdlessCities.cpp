@@ -142,4 +142,37 @@ std::vector<std::size_t> CityIndex::search(const std::string& query, std::size_t
     hits.push_back(ranked[i].idx);
   return hits;
 }
+
+std::size_t CityIndex::nearestCity(double lat, double lon, double maxKm) const
+{
+  if (itsCities.empty()) return std::numeric_limits<std::size_t>::max();
+  // Haversine, but small-angle equirectangular is fine over the scale
+  // we care about (the answer is "the closest city by far", not "the
+  // exact distance to 3 decimals").
+  const double phi0 = lat * M_PI / 180.0;
+  const double cosPhi = std::cos(phi0);
+  double bestD2 = std::numeric_limits<double>::infinity();
+  std::size_t bestI = std::numeric_limits<std::size_t>::max();
+  for (std::size_t i = 0; i < itsCities.size(); ++i)
+  {
+    const auto& c = itsCities[i];
+    const double dLat = c.lat - lat;
+    double dLon = c.lon - lon;
+    while (dLon > 180) dLon -= 360;
+    while (dLon < -180) dLon += 360;
+    // Squared "metric" in equirectangular degrees; convert to km only
+    // at the very end. This keeps the inner loop cheap.
+    const double dx = dLon * cosPhi;
+    const double dy = dLat;
+    const double d2 = dx * dx + dy * dy;
+    if (d2 < bestD2)
+    {
+      bestD2 = d2;
+      bestI = i;
+    }
+  }
+  if (bestI == std::numeric_limits<std::size_t>::max()) return bestI;
+  const double bestKm = std::sqrt(bestD2) * 111.32;  // deg → km at equator
+  return (bestKm <= maxKm) ? bestI : std::numeric_limits<std::size_t>::max();
+}
 }  // namespace Qdless

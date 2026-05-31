@@ -518,12 +518,17 @@ class App
   // overwrite it.
   std::string itsPhenomenonHint;
   // Anchor coordinates from the most recent detection (used by the
-  // suggested-jump key); 0,0 means "no anchor".
+  // on-screen marker and the suggested-jump key).
   double itsPhenomenonAnchorLat = 0;
   double itsPhenomenonAnchorLon = 0;
   bool itsPhenomenonHasAnchor = false;
 
   void refreshPhenomenonHint();
+  // Draw a distinct orange circle marker at the phenomenon anchor so
+  // the user can see at a glance WHERE on the map the hint is pointing.
+  // Drawn on top of any user marker.
+  void overlayPhenomenonMarker(std::vector<Rgb>& pixels,
+                               int subWidth, int subHeight) const;
 
   // Helper: apply the active panel's value transform (auto Kelvin → Celsius
   // etc.) before palette lookup, but keep missing/sentinel as-is.
