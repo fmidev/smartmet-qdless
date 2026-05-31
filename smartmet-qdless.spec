@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 34%{?dist}.fmi
+Release: 35%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,13 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-35.fmi
+- Phenomenon-detector fixes after meteorologist review of v34: the cyclone location was off, often nowhere near the actual centre of the low, and the marker stayed planted while the user animated through time. Two root causes:
+  1) Sampling grid was 72x36 cells across the WHOLE globe (-180..180, -90..90) at 5° resolution. For a regional file (fmi.sqd is Nordic) the vast majority of samples landed outside the data area; the "minimum" picked from the few cells inside was always near the data boundary, not the actual low. Replaced with 200x100 cells across the source's NATIVE (u, v) area in [0,1]x[0,1] — every sample now lands inside the file's coverage and the resolution is 2-10x finer depending on the data extent. Per-cell (lat, lon) is computed from uvToLatLon and stored in the grid so the detectors can label anchors and the tropical-convection detector can still filter by latitude band.
+  2) Cyclone detector measured the surrounding pressure rim 4 grid CELLS away from the minimum — meaningful on a 5° global grid (~20°) but useless on a fine-resolution regional grid (~0.6°), the ring landed inside the cyclone's core and reported a tiny gradient. Now sizes the ring in KILOMETRES (~500 km haversine) so it scales with data resolution. Added 2D parabolic sub-cell refinement on the 3x3 neighbourhood of the minimum cell so the reported centre lands sub-cell-accurate.
+- Marker now tracks moving systems: refreshPhenomenonHint() runs on KEY_LEFT / KEY_RIGHT / KEY_HOME / KEY_END time-step changes and on the animation tick, so the orange anchor moves with the cyclone as the user scrubs through frames or plays the animation. Cost: ~20-30 ms per time step at 200x100 resolution; a noticeable but tolerable hit during animation. The worker-thread refactor (cloneForRead + std::thread, prepared in v34) is the natural next step if this becomes problematic on slow systems.
+- Live test on fmi.sqd: t=0 detects 1007 hPa low at 63°N 10°W (Δ 19 hPa, ~216km from Eiði, FO); t=30 traces to 66°N 1°E; t=60 to 70°N 6°E; t=90 to 64°N 12°W — each the deepest low in that frame, updating between frames as expected.
+
 * Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-34.fmi
 - Phenomenon hint now identifies the location instead of leaving it as a bare lat/lon. After the detector fires we look up the nearest city in cities1000.tsv and append it to the hint, with phrasing that softens with distance: "(near Måløy, NO)" within 80 km, "(~148km from Måløy, NO)" within 400 km, "(~600km off Reykjavík, IS)" beyond. No city tag if the anchor is more than 1500 km from any populated place. Example: "Cyclone low 1013 hPa near 62°N 2°E (Δ 12 hPa) (~148km from Måløy, NO) → click the centre to time-series-probe; spacebar to animate."
 - New overlayPhenomenonMarker — an orange double-ring at the anchor coordinates so the user can see at a glance WHERE on the map the hint is pointing. Drawn after the existing user marker (red cross) and ignored when the anchor is off the current viewport.

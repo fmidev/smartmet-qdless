@@ -4359,6 +4359,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       if (idx > 0)
       {
         itsSource->selectTimeIndex(idx - 1);
+        refreshPhenomenonHint();
         return true;
       }
       return false;
@@ -4369,16 +4370,19 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       if (idx + 1 < itsSource->timeCount())
       {
         itsSource->selectTimeIndex(idx + 1);
+        refreshPhenomenonHint();
         return true;
       }
       return false;
     }
     case KEY_HOME:
       itsSource->selectTimeIndex(0);
+      refreshPhenomenonHint();
       return true;
     case KEY_END:
       if (itsSource->timeCount() > 0)
         itsSource->selectTimeIndex(itsSource->timeCount() - 1);
+      refreshPhenomenonHint();
       return true;
 
     case 'p':
@@ -8053,6 +8057,9 @@ int App::runInteractive()
         auto idx = itsSource->currentTimeIndex();
         const auto n = itsSource->timeCount();
         itsSource->selectTimeIndex((idx + 1) % n);
+        // Re-run the phenomenon detectors so the marker tracks the
+        // moving system across animation frames.
+        refreshPhenomenonHint();
       }
       needRedraw = true;
       continue;

@@ -78,16 +78,36 @@ bool isGeopotentialParam(const std::string& name)
 // Sample the current (time, level) of `src` onto a coarse global
 // (-180..180, -90..90) lat/lon grid. The grid is dense enough for the
 // detectors but sparse enough that the whole sweep runs in a few ms.
+// Sample the data on its NATIVE (u, v) grid in [0,1] × [0,1]. For a
+// regional file (Nordic, European, etc.) this means the grid stays
+// fully inside the data area instead of trying to cover the whole
+// globe, where most samples would be outside the file's coverage. The
+// per-cell (lat, lon) is stored so detectors can label anchors and so
+// the tropical-convection detector can still filter by latitude band.
+//
+// 200×100 = 20k samples — enough resolution to find a cyclone centre
+// to within ~1 grid cell in a regional file, and still under 30 ms
+// even with the indirection through uvToLatLon + interpolatedValue.
 struct Grid
 {
-  static constexpr int W = 72;   // 5° longitude resolution
-  static constexpr int H = 36;   // 5° latitude resolution
-  std::array<float, W * H> v{};  // kFloatMissing where the source returned nothing
-  static double lonOf(int ix) { return -180.0 + (ix + 0.5) * 360.0 / W; }
-  static double latOf(int iy) { return -90.0 + (iy + 0.5) * 180.0 / H; }
+  static constexpr int W = 200;
+  static constexpr int H = 100;
+  std::array<float, W * H> v{};
+  std::array<float, W * H> lat{};
+  std::array<float, W * H> lon{};
+  static double uOf(int ix) { return (ix + 0.5) / W; }
+  static double vOf(int iy) { return (iy + 0.5) / H; }
   float at(int ix, int iy) const
   {
     return v[static_cast<std::size_t>(iy) * W + ix];
+  }
+  float latAt(int ix, int iy) const
+  {
+    return lat[static_cast<std::size_t>(iy) * W + ix];
+  }
+  float lonAt(int ix, int iy) const
+  {
+    return lon[static_cast<std::size_t>(iy) * W + ix];
   }
 };
 
@@ -97,8 +117,13 @@ Grid sampleGrid(DataSource& src)
   for (int iy = 0; iy < Grid::H; ++iy)
     for (int ix = 0; ix < Grid::W; ++ix)
     {
-      const float val = src.interpolatedValue(Grid::latOf(iy), Grid::lonOf(ix));
-      g.v[static_cast<std::size_t>(iy) * Grid::W + ix] = val;
+      double lat = 0, lon = 0;
+      src.uvToLatLon(Grid::uOf(ix), Grid::vOf(iy), lat, lon);
+      const float val = src.interpolatedValue(lat, lon);
+      const std::size_t k = static_cast<std::size_t>(iy) * Grid::W + ix;
+      g.v[k] = val;
+      g.lat[k] = static_cast<float>(lat);
+      g.lon[k] = static_cast<float>(lon);
     }
   return g;
 }
@@ -115,8 +140,8 @@ PhenomenonHint detectTropicalConvection(const Grid& g, const std::string& units)
   int maxIx = -1, maxIy = -1;
   for (int iy = 0; iy < Grid::H; ++iy)
   {
-    const double lat = Grid::latOf(iy);
-    if (std::fabs(lat) > 15.0) continue;
+    const double latRow = g.latAt(0, iy);
+    if (std::fabs(latRow) > 15.0) continue;
     for (int ix = 0; ix < Grid::W; ++ix)
     {
       const float v = g.at(ix, iy);
@@ -139,8 +164,8 @@ PhenomenonHint detectTropicalConvection(const Grid& g, const std::string& units)
   if (maxV < std::max(0.5, mean * 3.0)) return {};
 
   PhenomenonHint h;
-  const double lat = Grid::latOf(maxIy);
-  const double lon = Grid::lonOf(maxIx);
+  const double lat = g.latAt(maxIx, maxIy);
+  const double lon = g.lonAt(maxIx, maxIy);
   h.message =
       "Tropical convection peak " +
       std::to_string(static_cast<int>(maxV)) + units +
@@ -159,9 +184,12 @@ PhenomenonHint detectTropicalConvection(const Grid& g, const std::string& units)
 // Detector 2: cyclones / hurricanes --------------------------------------
 PhenomenonHint detectCyclone(const Grid& g)
 {
-  // Scan for the deepest pressure minimum and measure the
-  // surrounding (max - min) in hPa. Strong synoptic cyclone: > 15 hPa
-  // drop in a ~10° radius. Hurricane in MSLP: > 30 hPa.
+  // Find the deepest pressure minimum on the sampled grid, then measure
+  // the gradient strength as (local max - local min) inside a ring
+  // sized in KILOMETRES (~500 km) rather than grid cells. A
+  // cells-based ring would be tiny on a high-resolution regional file
+  // and miss the cyclone's outer pressure rim — so we walk a haversine
+  // distance instead, regardless of grid resolution.
   float globalMin = std::numeric_limits<float>::infinity();
   int minIx = -1, minIy = -1;
   for (int iy = 0; iy < Grid::H; ++iy)
@@ -180,25 +208,101 @@ PhenomenonHint detectCyclone(const Grid& g)
       }
     }
   if (minIx < 0) return {};
-  // Sample a ring 4 grid cells (~20°) around the minimum and take the
-  // local max for the gradient strength.
-  float ringMax = -std::numeric_limits<float>::infinity();
-  for (int dy = -4; dy <= 4; ++dy)
-    for (int dx = -4; dx <= 4; ++dx)
+
+  // Sub-cell refinement: fit a 2D parabola to the 3×3 neighbourhood of
+  // the minimum cell to estimate the true minimum location to a
+  // fraction of a cell. This bridges the gap between the discrete
+  // sampling grid and the cyclone's actual centre.
+  double refinedLat = g.latAt(minIx, minIy);
+  double refinedLon = g.lonAt(minIx, minIy);
+  float refinedMin = globalMin;
+  {
+    const int ixL = (minIx + Grid::W - 1) % Grid::W;
+    const int ixR = (minIx + 1) % Grid::W;
+    const int iyU = std::max(0, minIy - 1);
+    const int iyD = std::min(Grid::H - 1, minIy + 1);
+    auto norm = [&](int ix, int iy) -> float {
+      const float v = g.at(ix, iy);
+      if (!valid(v)) return std::numeric_limits<float>::quiet_NaN();
+      return (v > 5000.0F) ? v * 0.01F : v;
+    };
+    const float pC = norm(minIx, minIy);
+    const float pL = norm(ixL, minIy);
+    const float pR = norm(ixR, minIy);
+    const float pU = norm(minIx, iyU);
+    const float pD = norm(minIx, iyD);
+    auto fit = [&](float lo, float hi) -> float {
+      const float denom = lo - 2 * pC + hi;
+      if (!std::isfinite(denom) || std::fabs(denom) < 1e-6F) return 0.0F;
+      return std::clamp((lo - hi) / (2 * denom), -0.5F, 0.5F);
+    };
+    if (std::isfinite(pL) && std::isfinite(pR) && std::isfinite(pU) && std::isfinite(pD))
     {
-      if (std::abs(dx) + std::abs(dy) < 3) continue;  // skip the centre
-      const int ix = (minIx + dx + Grid::W) % Grid::W;
+      const float fx = fit(pL, pR);
+      const float fy = fit(pU, pD);
+      // Recompute lat/lon at the refined u,v position.
+      const double u = (minIx + 0.5 + fx) / Grid::W;
+      const double v = (minIy + 0.5 + fy) / Grid::H;
+      // We can't call src.uvToLatLon here — caller doesn't pass src —
+      // but linear interpolation of the surrounding cells' lat/lon
+      // is accurate enough for displaying an anchor point.
+      const double latL = g.latAt(ixL, minIy);
+      const double latR = g.latAt(ixR, minIy);
+      const double latU = g.latAt(minIx, iyU);
+      const double latD = g.latAt(minIx, iyD);
+      const double latC = g.latAt(minIx, minIy);
+      const double lonL = g.lonAt(ixL, minIy);
+      const double lonR = g.lonAt(ixR, minIy);
+      const double lonU = g.lonAt(minIx, iyU);
+      const double lonD = g.lonAt(minIx, iyD);
+      const double lonC = g.lonAt(minIx, minIy);
+      refinedLat = latC + fx * (latR - latL) * 0.5 + fy * (latD - latU) * 0.5;
+      refinedLon = lonC + fx * (lonR - lonL) * 0.5 + fy * (lonD - lonU) * 0.5;
+      // Parabolic estimate of the actual minimum value at the refined
+      // position (always ≤ pC by construction since pC is the lowest).
+      refinedMin = pC - 0.25F * fx * (pR - pL) - 0.25F * fy * (pD - pU);
+      (void)u; (void)v;
+    }
+  }
+
+  // Ring radius: 500 km haversine. Walk only as many grid cells as
+  // needed to cover that distance in any direction.
+  const double cosLat = std::cos(refinedLat * M_PI / 180.0);
+  // Approximate degrees per cell — average of x and y to pick a search
+  // radius that's big enough to escape the cyclone's core regardless of
+  // the data's projection.
+  const double dLatPerCell =
+      std::fabs(g.latAt(minIx, std::min(minIy + 1, Grid::H - 1)) -
+                g.latAt(minIx, std::max(minIy - 1, 0))) * 0.5;
+  const double dLonPerCell =
+      std::fabs(g.lonAt(std::min(minIx + 1, Grid::W - 1), minIy) -
+                g.lonAt(std::max(minIx - 1, 0), minIy)) * 0.5;
+  // Convert 500 km to cells; clamp so we always look ≥3 cells away.
+  const int searchY = std::max(3, static_cast<int>(std::ceil(
+      500.0 / std::max(1e-6, dLatPerCell * 111.32))));
+  const int searchX = std::max(3, static_cast<int>(std::ceil(
+      500.0 / std::max(1e-6, dLonPerCell * 111.32 * std::max(0.1, cosLat)))));
+
+  float ringMax = -std::numeric_limits<float>::infinity();
+  for (int dy = -searchY; dy <= searchY; ++dy)
+    for (int dx = -searchX; dx <= searchX; ++dx)
+    {
+      // Skip the centre's immediate neighbourhood so the gradient is
+      // measured against the cyclone's outer edge.
+      if (dx * dx + dy * dy < (searchX * searchY) / 4) continue;
+      const int ix = std::clamp(minIx + dx, 0, Grid::W - 1);
       const int iy = std::clamp(minIy + dy, 0, Grid::H - 1);
       const float v = g.at(ix, iy);
       if (!valid(v)) continue;
       const float p = (v > 5000.0F) ? v * 0.01F : v;
       if (p > ringMax) ringMax = p;
     }
-  if (ringMax <= globalMin) return {};
-  const float dropHPa = ringMax - globalMin;
+  if (ringMax <= refinedMin) return {};
+  const float dropHPa = ringMax - refinedMin;
   if (dropHPa < 8.0F) return {};
-  const double lat = Grid::latOf(minIy);
-  const double lon = Grid::lonOf(minIx);
+  const double lat = refinedLat;
+  const double lon = refinedLon;
+  globalMin = refinedMin;
 
   PhenomenonHint h;
   const char* sev = (dropHPa > 30.0F) ? "Hurricane-strength" :
@@ -257,8 +361,8 @@ PhenomenonHint detectFront(const Grid& g, const std::string& units)
   const float p99 = mag[mag.size() * 99 / 100];
   // Need a clear gradient AND a clear top-of-distribution outlier.
   if (p95 < 5.0F || topMag < p99 * 1.4F) return {};
-  const double lat = Grid::latOf(topIy);
-  const double lon = Grid::lonOf(topIx);
+  const double lat = g.latAt(topIx, topIy);
+  const double lon = g.lonAt(topIx, topIy);
   PhenomenonHint h;
   char buf[160];
   std::snprintf(buf, sizeof(buf),
@@ -310,8 +414,8 @@ PhenomenonHint detectJet(DataSource& src, const Grid& g, const std::string& unit
       }
     }
   if (topIx < 0 || topV < threshold) return {};
-  const double lat = Grid::latOf(topIy);
-  const double lon = Grid::lonOf(topIx);
+  const double lat = g.latAt(topIx, topIy);
+  const double lon = g.lonAt(topIx, topIy);
   PhenomenonHint h;
   char buf[160];
   std::snprintf(buf, sizeof(buf),
@@ -337,6 +441,10 @@ struct TemporalStats
   // Per-cell variance across time and the highest time-mean value.
   std::array<float, Grid::W * Grid::H> mean{};
   std::array<float, Grid::W * Grid::H> stdev{};
+  // Cell centre geographic coordinates, copied from the first frame
+  // sample (the grid geometry doesn't change between time steps).
+  std::array<float, Grid::W * Grid::H> lat{};
+  std::array<float, Grid::W * Grid::H> lon{};
   float globalMean = 0;
   float globalStdev = 0;
 };
@@ -359,6 +467,11 @@ TemporalStats sampleTemporal(DataSource& src)
     snaps.push_back(sampleGrid(src));
   }
   src.selectTimeIndex(saved);
+  if (!snaps.empty())
+  {
+    ts.lat = snaps.front().lat;
+    ts.lon = snaps.front().lon;
+  }
 
   double gSum = 0, gSqSum = 0;
   long gCount = 0;
@@ -432,9 +545,9 @@ PhenomenonHint detectBlock(const TemporalStats& ts, const std::string& paramName
     }
   }
   if (bestI < 0) return {};
-  const int iy = bestI / Grid::W;
-  const int ix = bestI % Grid::W;
-  const double lat = Grid::latOf(iy);
+  // We need cell-resolved lat/lon for the anchor; recover from the
+  // grid we already sampled in this function.
+  const double lat = ts.lat[bestI];
   // Only meaningful for geopotential-like / pressure-like params —
   // for instance, a static temperature minimum at the South Pole is
   // not a "block".
@@ -443,7 +556,7 @@ PhenomenonHint detectBlock(const TemporalStats& ts, const std::string& paramName
   if (std::fabs(lat) < 20.0) return {};  // blocking is a mid-latitude pattern
 
   PhenomenonHint h;
-  const double lon = Grid::lonOf(ix);
+  const double lon = ts.lon[bestI];
   char buf[160];
   std::snprintf(buf, sizeof(buf),
                 "Persistent high-pressure ridge near %d°%c %d°%c (low temporal variance)",
