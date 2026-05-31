@@ -4717,6 +4717,26 @@ void effectGlobeDance(const Renderer& renderer, const std::vector<Rgb>& src, int
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   const float mn = std::min(static_cast<float>(w), h * ya);
   const float floorY = h * 0.86F;
+
+  // Replace the old stick-figure dictator with the marionette puppet
+  // driven by the CMU "wave" motion — the raised arm becomes the hand
+  // that holds the globe aloft. Bot­h hands rise during the wave so the
+  // figure reads as a dictator holding the world.
+  BvhAnimation waveAnim;
+  double waveRefH = 1.0;
+  bool waveOk = false;
+  const std::string wavePath = findDataImage("cmu/wave.bvh");
+  if (!wavePath.empty())
+  {
+    try
+    {
+      waveAnim = loadBvhFile(wavePath);
+      waveRefH = bvhReferenceHeight(waveAnim);
+      waveOk = true;
+    }
+    catch (const std::exception&) { waveOk = false; }
+  }
+
   runFrames(
       renderer,
       w,
@@ -4734,69 +4754,53 @@ void effectGlobeDance(const Renderer& renderer, const std::vector<Rgb>& src, int
                     ? Rgb{40, 30, 22, false}
                     : Rgb{u8(28 + l * 0.18F), u8(22 + l * 0.16F), u8(38 + l * 0.18F), false};
           }
-        // figure on tip-toe
-        const float fcx = w * 0.5F, ftop = h * 0.36F;
-        const float bob = std::sin(t * 3.5F) * mn * 0.012F;
+
+        // Figure: marionette in dark suit, feet planted on the floor line.
+        const float fcx = w * 0.5F;
+        const float figH = floorY - h * 0.08F;  // top of figure ~8% from ceiling
         const Rgb suit{30, 28, 32, false};
-        plotDot(dst, w, h, fcx, ftop + bob, mn * 0.022F, ya, suit);
-        drawSeg(dst,
-                w,
-                h,
-                fcx,
-                ftop + mn * 0.022F + bob,
-                fcx,
-                floorY - mn * 0.05F,
-                std::max(1.0F, mn * 0.014F),
-                ya,
-                suit);
-        // pointing tip-toes
-        drawSeg(dst,
-                w,
-                h,
-                fcx,
-                floorY - mn * 0.05F,
-                fcx - mn * 0.025F,
-                floorY,
-                std::max(1.0F, mn * 0.010F),
-                ya,
-                suit);
-        drawSeg(dst,
-                w,
-                h,
-                fcx,
-                floorY - mn * 0.05F,
-                fcx + mn * 0.025F,
-                floorY,
-                std::max(1.0F, mn * 0.010F),
-                ya,
-                suit);
-        // little Hitler-mustache dot
-        plotDot(dst, w, h, fcx, ftop + bob + mn * 0.012F, mn * 0.006F, ya, Rgb{14, 12, 14, false});
-        // hands held up; globe juggled above
-        const float ghY = ftop - mn * 0.04F + std::sin(t * 2.5F) * mn * 0.10F;  // rises/falls
-        const float ghX = fcx + std::cos(t * 1.7F) * mn * 0.04F;
-        const float arm = (ghY < ftop) ? 1.0F : 0.5F;  // arms reach up when ball is high
-        drawSeg(dst,
-                w,
-                h,
-                fcx - mn * 0.016F,
-                ftop + bob + mn * 0.014F,
-                ghX - mn * 0.022F,
-                ghY + mn * 0.020F * arm,
-                std::max(1.0F, mn * 0.010F),
-                ya,
-                suit);
-        drawSeg(dst,
-                w,
-                h,
-                fcx + mn * 0.016F,
-                ftop + bob + mn * 0.014F,
-                ghX + mn * 0.022F,
-                ghY + mn * 0.020F * arm,
-                std::max(1.0F, mn * 0.010F),
-                ya,
-                suit);
-        // the Earth-balloon (data wrapped on a slowly spinning sphere)
+        std::vector<std::array<double, 2>> joints;
+        int frameIdx = 0;
+        if (waveOk)
+        {
+          // Cycle through the wave ~2× over the effect (it's about 2 s
+          // each pass), so the arm comes up and back down repeatedly.
+          const float phase = t * 2.0F;
+          frameIdx = static_cast<int>(std::floor(phase * waveAnim.frameCount)) %
+                     std::max(1, waveAnim.frameCount);
+          drawMarionette(dst, w, h, ya, waveAnim, frameIdx,
+                         fcx, floorY, figH, waveRefH, suit, &joints);
+        }
+
+        // Hitler mustache dot at the head joint.
+        const int headI = waveOk ? waveAnim.jointIndex("Head") : -1;
+        if (headI >= 0 && headI < static_cast<int>(joints.size()))
+        {
+          const double hx = joints[headI][0];
+          const double hy = joints[headI][1];
+          plotDot(dst, w, h, hx, hy + mn * 0.006F, mn * 0.006F, ya,
+                  Rgb{14, 12, 14, false});
+        }
+
+        // Globe orbits a little around whichever hand is currently
+        // raised. We pick the higher of the two hands per frame so the
+        // globe tracks the waving arm regardless of cycle phase.
+        const int lH = waveOk ? waveAnim.jointIndex("LeftHand")  : -1;
+        const int rH = waveOk ? waveAnim.jointIndex("RightHand") : -1;
+        float ghX = fcx;
+        float ghY = h * 0.32F;
+        if (lH >= 0 && rH >= 0 && lH < static_cast<int>(joints.size())
+            && rH < static_cast<int>(joints.size()))
+        {
+          const auto& L = joints[lH];
+          const auto& R = joints[rH];
+          // "Higher" hand = smaller screen-y.
+          const auto& hand = (L[1] < R[1]) ? L : R;
+          ghX = static_cast<float>(hand[0]) +
+                std::cos(t * 1.7F) * mn * 0.03F;
+          ghY = static_cast<float>(hand[1]) - mn * 0.04F +
+                std::sin(t * 2.5F) * mn * 0.04F;
+        }
         const float gR = mn * 0.10F;
         drawSphere(dst, w, h, src, ghX, ghY, gR, gR, 0.45F, t * 1.2F, 0.45F, 0.65F, 0.55F);
         plotDot(dst,

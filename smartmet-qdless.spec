@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 29%{?dist}.fmi
+Release: 30%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,10 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-30.fmi
+- Use the Marionette puppet in Silly Walk and Dictator Globe instead of their previous ad-hoc plotDot+drawSeg stick figures. Both effects now load a CMU mocap BVH at startup (cmu/walk.bvh for Silly Walk, cmu/wave.bvh for Dictator Globe), drive the marionette renderer, and attach effect-specific props to joints via the new jointScreenOut output of drawMarionette. Silly Walk: figure scrolls left -> right with the walk cycle playing in place; the bowler hat sits above the Head joint as a brim + dome, the briefcase dangles below the RightHand joint. Dictator Globe: figure stands on the chancellery floor with the wave motion cycling so an arm rises and falls; the globe orbits whichever hand is currently higher (so it tracks the waving arm regardless of cycle phase), and the Hitler mustache stays anchored to the Head joint. This is a proof-of-concept conversion — the existing Rocky / Riverdance / Russian Dance / YMCA / etc. human-figure effects are unchanged for now, pending review of how the puppet style reads in these first two.
+- New optional `jointScreenOut` argument on drawMarionette() returns the projected (col, row) of every BVH joint after rendering, so callers can pin props to body parts without duplicating the projection math.
+
 * Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-29.fmi
 - Marionette: fix drawCapsule projection bug. The point-to-segment projection was using a unit vector computed in dst-pixel space but doing the dot product in aspect-corrected metric space; the resulting `t` parameter was scaled by L_dst rather than being in [0, 1], so after clamping the algorithm effectively treated each bone as a tiny disc near its A endpoint. Visually the figure looked like joint circles connected by nothing. Rewritten in metric space throughout (mdx, mdy, L²m, t = dot/L²m): the limbs are now continuous segments end-to-end with the proper round endpoint caps, and consecutive bones along a chain (knee, elbow) blend smoothly because they share the cap radius.
 - Removed stray data/fmi_Temperature_*.png that leaked into a previous commit; gitignore the pattern.

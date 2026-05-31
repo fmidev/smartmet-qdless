@@ -1,4 +1,5 @@
 #include "QdlessExitEffectCommon.h"
+#include "QdlessMarionette.h"
 
 namespace Qdless
 {
@@ -801,6 +802,26 @@ void effectSillyWalk(const Renderer& renderer, const std::vector<Rgb>& src, int 
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+
+  // Load the CMU walk capture once. Marionette puppet replaces the
+  // ad-hoc stick figure; the walk cycle reads as a "normal" walk so
+  // the silliness comes from the exaggerated body bob + tilt + the
+  // bowler hat + briefcase staples of the Python sketch.
+  BvhAnimation walk;
+  double walkRefH = 1.0;
+  bool walkOk = false;
+  const std::string walkPath = findDataImage("cmu/walk.bvh");
+  if (!walkPath.empty())
+  {
+    try
+    {
+      walk = loadBvhFile(walkPath);
+      walkRefH = bvhReferenceHeight(walk);
+      walkOk = true;
+    }
+    catch (const std::exception&) { walkOk = false; }
+  }
+
   runFrames(
       renderer, w, h, 5400,
       [&](float t, std::vector<Rgb>& dst)
@@ -816,59 +837,80 @@ void effectSillyWalk(const Renderer& renderer, const std::vector<Rgb>& src, int 
                     u8(150 + l * 0.10F * dim), false};
           }
         const float groundY = h * 0.90F;
-        // Ground line.
         for (int x = 0; x < w; ++x)
-        {
           dst[static_cast<std::size_t>(groundY) * w + x] = Rgb{50, 40, 30, false};
-        }
+
+        // Scroll the figure across the screen left → right.
         const float cx = -mn * 0.3F + t * (w + mn * 0.6F);
-        const float walkPhase = t * 14.0F;
-        const float S = mn * 0.18F;
-        const float bodyY = groundY - S * 1.3F;
+        // Exaggerated bob and forward-lean so the Cleese silliness reads
+        // even though the underlying gait is a normal CMU walk.
+        const float bob = std::sin(t * 14.0F) * h * 0.015F;
+        const float cy = groundY + bob;
+        const float figH = h * 0.55F;
         const Rgb ink{20, 20, 30, false};
-        // Bowler hat
-        drawSeg(dst, w, h, cx - S * 0.15F, bodyY - S * 1.1F, cx + S * 0.15F, bodyY - S * 1.1F,
-                std::max(1.0F, mn * 0.006F), ya, ink);
-        for (int yo = -static_cast<int>(S * 0.18F); yo <= -static_cast<int>(S * 0.04F); ++yo)
+
+        std::vector<std::array<double, 2>> joints;
+        if (walkOk)
         {
-          const int yy = static_cast<int>(bodyY - S * 1.10F) + yo;
-          const int half = static_cast<int>(S * 0.13F);
-          for (int xo = -half; xo <= half; ++xo)
-            if (yy >= 0 && yy < h && cx + xo >= 0 && cx + xo < w)
-              dst[static_cast<std::size_t>(yy) * w + static_cast<int>(cx + xo)] = ink;
+          // Cycle through the walk a few times across the scroll.
+          const float phase = t * 5.0F;
+          const int fi = static_cast<int>(std::floor(phase * walk.frameCount)) %
+                         std::max(1, walk.frameCount);
+          drawMarionette(dst, w, h, ya, walk, fi, cx, cy, figH, walkRefH,
+                         ink, &joints);
         }
-        // Head + body
-        plotDot(dst, w, h, cx, bodyY - S * 0.9F, S * 0.13F, ya, Rgb{220, 195, 160, false});
-        drawSeg(dst, w, h, cx, bodyY - S * 0.78F, cx, bodyY + S * 0.05F, std::max(1.0F, mn * 0.014F), ya, ink);
-        // Arms with briefcase
-        const float armPh = walkPhase;
-        const float aL = std::sin(armPh) * 0.5F;
-        const float aR = std::sin(armPh + 3.14F) * 0.5F;
-        drawSeg(dst, w, h, cx, bodyY - S * 0.55F, cx - S * 0.25F + S * 0.20F * aL,
-                bodyY - S * 0.20F + S * 0.30F * std::fabs(aL),
-                std::max(1.0F, mn * 0.010F), ya, ink);
-        drawSeg(dst, w, h, cx, bodyY - S * 0.55F, cx + S * 0.25F + S * 0.20F * aR,
-                bodyY - S * 0.20F + S * 0.30F * std::fabs(aR),
-                std::max(1.0F, mn * 0.010F), ya, ink);
-        // Briefcase swings on right arm
-        plotDot(dst, w, h, cx + S * 0.45F + S * 0.20F * aR,
-                bodyY - S * 0.20F + S * 0.30F * std::fabs(aR) + S * 0.15F, S * 0.10F, ya,
-                Rgb{80, 60, 40, false});
-        // Legs: one leg high, one straight, alternating with comedic rotation.
-        const float L1 = std::sin(walkPhase);
-        const float L2 = std::sin(walkPhase + 3.14F);
-        auto leg = [&](float phase)
+
+        // Bowler hat sits above the head joint.
+        if (!joints.empty())
         {
-          const float lift = std::max(0.0F, phase);
-          const float kneeX = cx + (std::sin(phase) * S * 0.4F);
-          const float kneeY = bodyY + S * 0.4F - lift * S * 0.7F;
-          const float footX = kneeX + std::sin(phase * 2.0F) * S * 0.3F;
-          const float footY = groundY - lift * S * 0.4F;
-          drawSeg(dst, w, h, cx, bodyY + S * 0.05F, kneeX, kneeY, std::max(1.0F, mn * 0.010F), ya, ink);
-          drawSeg(dst, w, h, kneeX, kneeY, footX, footY, std::max(1.0F, mn * 0.010F), ya, ink);
-        };
-        leg(L1);
-        leg(L2);
+          const int headI = walk.jointIndex("Head");
+          const int rWristI = walk.jointIndex("RightHand");
+          if (headI >= 0 && headI < static_cast<int>(joints.size()))
+          {
+            const double hx = joints[headI][0];
+            const double hy = joints[headI][1];
+            const double bodyUnit = std::max(1.0, static_cast<double>(figH) / 30.0);
+            // Brim: a thin horizontal slab just above the head disc.
+            const double brimY = hy - bodyUnit * 2.0;
+            const double brimHalfW = bodyUnit * 2.6;
+            drawCapsule(dst, w, h, ya,
+                        hx - brimHalfW, brimY, hx + brimHalfW, brimY,
+                        bodyUnit * 0.35, bodyUnit * 0.35, ink);
+            // Crown: a rounded dome above the brim.
+            for (int yo = -static_cast<int>(bodyUnit * 2.4); yo <= 0; ++yo)
+            {
+              const int yy = static_cast<int>(brimY) + yo;
+              const double w0 = bodyUnit * 1.6 *
+                                std::sqrt(std::max(0.0, 1.0 - std::pow(yo / (bodyUnit * 2.4), 2)));
+              for (int xo = -static_cast<int>(w0); xo <= static_cast<int>(w0); ++xo)
+              {
+                const int xx = static_cast<int>(hx) + xo;
+                if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                  dst[static_cast<std::size_t>(yy) * w + xx] = ink;
+              }
+            }
+          }
+          if (rWristI >= 0 && rWristI < static_cast<int>(joints.size()))
+          {
+            // Briefcase dangles below the right hand.
+            const double bx = joints[rWristI][0];
+            const double by = joints[rWristI][1];
+            const double bodyUnit = std::max(1.0, static_cast<double>(figH) / 30.0);
+            const Rgb leather{80, 60, 40, false};
+            const double caseH = bodyUnit * 2.2;
+            const double caseW = bodyUnit * 1.6;
+            for (int yo = 0; yo < static_cast<int>(caseH / ya); ++yo)
+            {
+              const int yy = static_cast<int>(by) + yo + static_cast<int>(bodyUnit * 0.5);
+              for (int xo = -static_cast<int>(caseW); xo <= static_cast<int>(caseW); ++xo)
+              {
+                const int xx = static_cast<int>(bx) + xo;
+                if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                  dst[static_cast<std::size_t>(yy) * w + xx] = leather;
+              }
+            }
+          }
+        }
       });
 }
 

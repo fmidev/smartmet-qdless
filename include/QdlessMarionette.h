@@ -260,10 +260,15 @@ inline void drawDisc(std::vector<Rgb>& dst, int w, int h, float ya,
 // is the target on-screen height in pixels — the BVH is scaled so its
 // bounding-box height maps to figureH. unitRefH is the BVH reference
 // height precomputed by bvhReferenceHeight() at load time.
+// Optional output: caller passes a pointer to a vector<array<double,2>>
+// to receive the screen (col, row) of every joint after projection.
+// Used by effects that attach props to body parts — bowler hat above
+// the head, briefcase at a wrist, boxing gloves at the hands, etc.
 inline void drawMarionette(std::vector<Rgb>& dst, int w, int h, float ya,
                            const BvhAnimation& anim, int frameIdx,
                            double cx, double cy, double figureH,
-                           double unitRefH, Rgb bodyCol)
+                           double unitRefH, Rgb bodyCol,
+                           std::vector<std::array<double, 2>>* jointScreenOut = nullptr)
 {
   if (anim.frameCount == 0 || unitRefH <= 0.0) return;
   const auto worldPos = bvhJointPositions(anim, frameIdx);
@@ -291,6 +296,20 @@ inline void drawMarionette(std::vector<Rgb>& dst, int w, int h, float ya,
   p.cx = cx;
   p.cy = cy;
   p.ya = ya;
+
+  // Optional: project every joint to screen space for the caller. Same
+  // projection used internally below, so props attached to a joint by
+  // the caller (hat above head, briefcase at wrist) land on the
+  // pixel-accurate joint position.
+  if (jointScreenOut)
+  {
+    jointScreenOut->resize(worldPos.size());
+    for (std::size_t i = 0; i < worldPos.size(); ++i)
+    {
+      const auto pj = projectJoint(p, worldPos[i]);
+      (*jointScreenOut)[i] = {{pj[0], pj[1]}};
+    }
+  }
 
   // Slender Prince-of-Persia-ish proportions: limb half-width is ~1/30
   // of figure height. The torso is a filled polygon (not a capsule), so
