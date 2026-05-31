@@ -283,31 +283,79 @@ PhenomenonHint detectCyclone(const Grid& g)
   const int searchX = std::max(3, static_cast<int>(std::ceil(
       500.0 / std::max(1e-6, dLonPerCell * 111.32 * std::max(0.1, cosLat)))));
 
-  float ringMax = -std::numeric_limits<float>::infinity();
+  // 8-sector gradient test. A "low" is only a CYCLONE if the pressure
+  // rises sharply in every direction — concentric isobars. A broad
+  // trough, a thermal low, or a frontal kink can all look like deep
+  // central pressure without the strong symmetric gradient that drives
+  // cyclonic wind. Split the ring into 8 angular sectors (45° each),
+  // take the local MAX pressure in each sector, and require the
+  // MINIMUM of those eight rises to clear the gradient threshold —
+  // i.e. every direction has to show a real pressure climb, not just
+  // the side facing a neighbouring high.
+  std::array<float, 8> sectorMax{};
+  sectorMax.fill(-std::numeric_limits<float>::infinity());
+  std::array<int, 8> sectorCount{};
+  sectorCount.fill(0);
   for (int dy = -searchY; dy <= searchY; ++dy)
     for (int dx = -searchX; dx <= searchX; ++dx)
     {
-      // Skip the centre's immediate neighbourhood so the gradient is
-      // measured against the cyclone's outer edge.
       if (dx * dx + dy * dy < (searchX * searchY) / 4) continue;
       const int ix = std::clamp(minIx + dx, 0, Grid::W - 1);
       const int iy = std::clamp(minIy + dy, 0, Grid::H - 1);
       const float v = g.at(ix, iy);
       if (!valid(v)) continue;
       const float p = (v > 5000.0F) ? v * 0.01F : v;
-      if (p > ringMax) ringMax = p;
+      // Sector index: angle from centre, 0 = +x (East), counter-clockwise.
+      const double ang = std::atan2(static_cast<double>(-dy), static_cast<double>(dx));
+      int s = static_cast<int>(std::floor((ang + M_PI) * 4.0 / M_PI));
+      if (s < 0) s = 0;
+      if (s > 7) s = 7;
+      if (p > sectorMax[s]) sectorMax[s] = p;
+      ++sectorCount[s];
     }
-  if (ringMax <= refinedMin) return {};
-  const float dropHPa = ringMax - refinedMin;
-  if (dropHPa < 8.0F) return {};
+
+  // Need data in at least 6 of the 8 sectors so the symmetry test is
+  // meaningful — fewer than that and the centre is too close to the
+  // data boundary to call this a cyclone.
+  int populated = 0;
+  for (int s = 0; s < 8; ++s) if (sectorCount[s] > 0) ++populated;
+  if (populated < 6) return {};
+
+  // Pressure rise in each populated sector. Min across sectors is the
+  // gradient floor; only when even the weakest direction shows a
+  // strong climb is this a properly cyclonic feature.
+  float minDelta = std::numeric_limits<float>::infinity();
+  float sumDelta = 0;
+  int validDeltas = 0;
+  for (int s = 0; s < 8; ++s)
+  {
+    if (sectorCount[s] == 0) continue;
+    const float delta = sectorMax[s] - refinedMin;
+    if (delta < minDelta) minDelta = delta;
+    sumDelta += delta;
+    ++validDeltas;
+  }
+  if (validDeltas == 0) return {};
+  const float meanDelta = sumDelta / validDeltas;
+
+  // Cyclone thresholds, expressed as min-sector pressure rise over
+  // ~500 km. This translates to geostrophic wind speed:
+  //   8 hPa / 500 km  ≈  10 m/s (gale)
+  //  15 hPa / 500 km  ≈  20 m/s (storm)
+  //  25 hPa / 500 km  ≈  30 m/s (severe storm / cat-1 hurricane)
+  // A "deep low" that doesn't make 8 hPa in every sector is some
+  // other feature (thermal low, broad trough, frontal kink) — silent.
+  if (minDelta < 8.0F) return {};
+  const float dropHPa = minDelta;
   const double lat = refinedLat;
   const double lon = refinedLon;
   globalMin = refinedMin;
 
   PhenomenonHint h;
-  const char* sev = (dropHPa > 30.0F) ? "Hurricane-strength" :
+  const char* sev = (dropHPa > 25.0F) ? "Hurricane-strength" :
                     (dropHPa > 15.0F) ? "Strong cyclone"     :
                                         "Cyclone";
+  (void)meanDelta;  // available for a future "mean-vs-min" symmetry check
   char buf[160];
   std::snprintf(buf, sizeof(buf),
                 "%s low %d hPa near %d°%c %d°%c (Δ %d hPa)",

@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 35%{?dist}.fmi
+Release: 36%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,10 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-36.fmi
+- Cyclone detector now requires a symmetric pressure gradient, not just a deep central low. A "low" alone is not a cyclone — a thermal low, a broad trough, or a frontal kink can all hit deep central pressure without the concentric isobars that drive cyclonic wind. The ring around the candidate minimum is now split into 8 angular sectors (45° each, ~500 km radius), the local MAX pressure is taken in each sector, and the detector fires only when the MIN sector-rise clears the gradient threshold — i.e. every direction has to show a real pressure climb, not just the side facing a neighbouring high. The reported Δ is the min-sector delta, a true gradient floor rather than a max-anywhere number. A populated-sector check (≥6 of 8) keeps the centre away from the data boundary where the symmetry test would be unreliable. Thresholds (min sector rise over ~500 km): 8 hPa = Cyclone (~10 m/s geostrophic), 15 hPa = Strong cyclone (~20 m/s), 25 hPa = Hurricane-strength (~30 m/s).
+- Observable change on fmi.sqd: frames where the previous max-anywhere check fired on broad / asymmetric lows now go silent (and the block detector surfaces an actual ridge instead). Marginal cyclones report a smaller Δ that reflects the weakest gradient direction.
+
 * Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-35.fmi
 - Phenomenon-detector fixes after meteorologist review of v34: the cyclone location was off, often nowhere near the actual centre of the low, and the marker stayed planted while the user animated through time. Two root causes:
   1) Sampling grid was 72x36 cells across the WHOLE globe (-180..180, -90..90) at 5° resolution. For a regional file (fmi.sqd is Nordic) the vast majority of samples landed outside the data area; the "minimum" picked from the few cells inside was always near the data boundary, not the actual low. Replaced with 200x100 cells across the source's NATIVE (u, v) area in [0,1]x[0,1] — every sample now lands inside the file's coverage and the resolution is 2-10x finer depending on the data extent. Per-cell (lat, lon) is computed from uvToLatLon and stored in the grid so the detectors can label anchors and the tropical-convection detector can still filter by latitude band.
