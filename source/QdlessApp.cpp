@@ -675,7 +675,21 @@ void App::initFromSource()
     return static_cast<std::size_t>(requested);
   };
   itsSource->selectTimeIndex(resolveIndex(itsOpts.timeIndex, itsSource->timeCount()));
-  const std::size_t levelIdx = resolveIndex(itsOpts.levelIndex, itsSource->levelCount());
+  std::size_t levelIdx = resolveIndex(itsOpts.levelIndex, itsSource->levelCount());
+  // Model (hybrid, type 109) levels run 0/1..N with the LARGEST number closest
+  // to the surface. Storage order varies between producers (some ascending,
+  // some descending), so when the user hasn't asked for a specific level
+  // (--level still at its 0 default) start at the surface — the most useful
+  // level — rather than whatever happens to sit at storage index 0.
+  if (itsOpts.levelIndex == 0)
+  {
+    const auto groups = itsSource->levelGroupsForParam(itsSource->currentParamId());
+    if (groups.size() == 1 && groups[0].typeId == 109 && !groups[0].values.empty())
+    {
+      const auto& vals = groups[0].values;
+      levelIdx = static_cast<std::size_t>(std::max_element(vals.begin(), vals.end()) - vals.begin());
+    }
+  }
   itsSource->selectLevelIndex(levelIdx);
   activePanel().levelIndex = levelIdx;
 
@@ -1543,7 +1557,11 @@ void App::beginCrossSection(int x1, int y1, int x2, int y2, UI& ui)
   double lat2 = 0;
   double lon2 = 0;
   if (!cellToLatLon(ui, x1, y1, lat1, lon1) || !cellToLatLon(ui, x2, y2, lat2, lon2))
+  {
+    if (itsModeGlobe)
+      itsLastMessage = "Cross-section: endpoint off the globe — cancelled";
     return;
+  }
 
   if (itsSource->levelCount() < 2)
   {
@@ -3672,8 +3690,36 @@ bool App::cellToViewport(const UI& ui, int cellX, int cellY, float& u, float& v)
   return true;
 }
 
+bool App::globeCellToLatLon(int cellX, int cellY, double& lat, double& lon) const
+{
+  const auto& g = itsGlobeProjection;
+  if (!g.valid || g.xscale <= 0 || g.yscale <= 0 || g.subRows <= 0)
+    return false;
+  // Sample the centre of the clicked terminal cell: two sub-columns wide and
+  // subRows sub-rows tall, matching drawGlobe's pixel grid.
+  const double c = (cellX - g.mapCol) * 2 + 1.0;
+  const double r = (cellY - g.mapRow) * g.subRows + g.subRows / 2.0;
+  const double sx = (c - g.cx0) / g.xscale;
+  const double sy = (g.cy0 - r) / g.yscale;
+  const double rr = sx * sx + sy * sy;
+  if (rr > 1.0)
+    return false;  // clicked off the globe — empty space, not a location
+  const double d = std::sqrt(1.0 - rr);  // depth toward the viewer
+  // Near intersection P = sx·east + sy·up + d·forward (already unit length).
+  const double px = sx * g.ex + sy * g.ux + d * g.nx;
+  const double py = sx * g.ey + sy * g.uy + d * g.ny;
+  const double pz = sx * g.ez + sy * g.uz + d * g.nz;
+  lat = std::asin(std::clamp(pz, -1.0, 1.0)) * 180.0 / M_PI;
+  lon = std::atan2(py, px) * 180.0 / M_PI;
+  return true;
+}
+
 bool App::cellToLatLon(const UI& ui, int cellX, int cellY, double& lat, double& lon) const
 {
+  // Globe mode ray-casts onto a sphere, so the flat viewport mapping below is
+  // meaningless — invert the orthographic projection instead.
+  if (itsModeGlobe)
+    return globeCellToLatLon(cellX, cellY, lat, lon);
   float u = 0;
   float v = 0;
   if (!cellToViewport(ui, cellX, cellY, u, v))
@@ -3725,6 +3771,19 @@ void App::openProbe(int cellX, int cellY, UI& ui)
       click = ui.popupMetadata("Feature attributes", next);
     }
     return;
+  }
+  // On the globe a click can land on bare sphere outside a regional file's
+  // coverage. The user asked for the click to hit actual data, so skip the
+  // empty time-series there. (2D mode keeps probing — its click is always
+  // inside the projected area.)
+  if (itsModeGlobe)
+  {
+    const float val = itsSource->interpolatedValue(lat, lon);
+    if (val == kFloatMissing || !std::isfinite(val) || std::abs(val) > 1e10F)
+    {
+      itsLastMessage = "No data at this location";
+      return;
+    }
   }
   itsMarker = std::make_pair(lat, lon);
   openProbeAt(lat, lon, ui);
@@ -3862,7 +3921,20 @@ void App::openProbeAt(double lat, double lon, UI& ui)
     double newLat = 0;
     double newLon = 0;
     if (!cellToLatLon(ui, clickCol, clickRow, newLat, newLon))
-      break;
+      break;  // re-clicked off the globe disc — close the probe
+
+    // On the globe a re-click can land on bare sphere outside the data; don't
+    // re-open the chart on missing values (32700 for querydata) — close it,
+    // mirroring the entry guard in openProbe.
+    if (itsModeGlobe)
+    {
+      const float val = itsSource->interpolatedValue(newLat, newLon);
+      if (val == kFloatMissing || !std::isfinite(val) || std::abs(val) > 1e10F)
+      {
+        itsLastMessage = "No data at this location";
+        break;
+      }
+    }
 
     itsMarker = std::make_pair(newLat, newLon);
     drawMap(ui);
@@ -4433,7 +4505,18 @@ bool App::handleKey(int key, UI& ui, bool& quit)
           rows.push_back(std::move(h));
           rowToGL.emplace_back(-1, -1);
         }
-        for (std::size_t li = 0; li < groups[gi].values.size(); ++li)
+        // Display order within the group. Model (hybrid, type 109) levels
+        // run 0/1..N with the LARGEST number closest to the surface, so list
+        // them surface-first: the auto-assigned 1-9 hotkeys then land on the
+        // near-ground levels users reach for most. Other level types keep
+        // their natural order. rowToGL still maps each row to its original
+        // level index, so selection is unaffected by the reordering.
+        std::vector<std::size_t> order(groups[gi].values.size());
+        std::iota(order.begin(), order.end(), std::size_t{0});
+        if (groups[gi].typeId == 109)
+          std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b)
+                    { return groups[gi].values[a] > groups[gi].values[b]; });
+        for (const std::size_t li : order)
         {
           UI::MenuRow r;
           // Per-row label: just the type-aware value string (the header
@@ -4481,9 +4564,9 @@ bool App::handleKey(int key, UI& ui, bool& quit)
                                             ss.push_back(r.label);
                                           return ss;
                                         }(),
-                                        savedLevel,
+                                        currentRow,
                                         false,
-                                        [&](int li) { preview(li); });
+                                        [&](int row) { preview(row); });
       if (picked < 0)
       {
         // Cancelled — restore everything to what it was when the popup opened.
@@ -5284,10 +5367,21 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       {
         if (itsCrossPicks == 2)
         {
-          itsCrossX1 = ev.x;
-          itsCrossY1 = ev.y;
-          itsCrossPicks = 1;
-          itsLastMessage = "Cross-section: click second endpoint";
+          // Reject a first endpoint that misses the globe rather than
+          // advancing to the second pick on a bogus location.
+          double la = 0;
+          double lo = 0;
+          if (!cellToLatLon(ui, ev.x, ev.y, la, lo))
+          {
+            itsLastMessage = "Cross-section: click on the globe";
+          }
+          else
+          {
+            itsCrossX1 = ev.x;
+            itsCrossY1 = ev.y;
+            itsCrossPicks = 1;
+            itsLastMessage = "Cross-section: click second endpoint";
+          }
         }
         else
         {
@@ -7487,6 +7581,11 @@ void App::drawGlobe(const Layout& layout)
   const double cx0 = subW / 2.0;
   const double cy0 = subH / 2.0;
 
+  // Cache everything a mouse click needs to invert this projection.
+  itsGlobeProjection = {true,  l.map.row, l.map.col, subRows, cx0, cy0, xscale, yscale,
+                        ex,    ey,        ez,        ux,      uy,  uz,  nx,     ny,
+                        nz};
+
   std::vector<Rgb> pixels(static_cast<std::size_t>(subW) * subH, Rgb{0, 0, 0, true});
   std::vector<float> zbuf(static_cast<std::size_t>(subW) * subH,
                           std::numeric_limits<float>::infinity());
@@ -7629,7 +7728,8 @@ void App::drawGlobe(const Layout& layout)
     const bool bGrat = itsGraticuleStyle == LineStyle::Braille;
     const bool bBord = itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
     const bool bCoast = itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
-    if (bGrat || bBord || bCoast)
+    // Always runs: even with every overlay off we still draw the crisp limb
+    // circle so the Earth reads as a smooth disc over the chunky block fill.
     {
       const int bW = subW;       // width is always 2 sub-columns per cell
       const int bH = cellH * 4;  // braille packs 4 dot-rows per cell
@@ -7701,6 +7801,28 @@ void App::drawGlobe(const Layout& layout)
         polyB(itsBorders, bordCol);
       if (bCoast)
         polyB(itsCoastlines, coastCol);
+
+      // Crisp circular limb: trace the disc boundary directly in the braille
+      // grid so the Earth reads as a smooth circle regardless of the chunky
+      // 2x3-block fill underneath. It is the planet's edge (not a toggled
+      // overlay), drawn unconditionally and set directly — never z-culled,
+      // since nothing occludes the silhouette.
+      {
+        const Rgb limbCol{90, 120, 170};  // soft atmosphere blue
+        const double rDot = std::max(xscale, yscale * yFine);
+        const int nseg = std::max(512, static_cast<int>(std::ceil(2.0 * M_PI * rDot * 1.5)));
+        for (int i = 0; i < nseg; ++i)
+        {
+          const double th = 2.0 * M_PI * i / nseg;
+          const int bx = static_cast<int>(std::round(bcx0 + xscale * std::cos(th)));
+          const int by = static_cast<int>(std::round(bcy0 - yscale * yFine * std::sin(th)));
+          if (bx < 0 || bx >= bW || by < 0 || by >= bH)
+            continue;
+          const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+          dotMask[bidx] = 1;
+          dotColor[bidx] = limbCol;
+        }
+      }
 
       // Pack the dot grid into positioned braille glyphs; BG sampled from the
       // underlying quadrant pixel so the sphere shading shows through.

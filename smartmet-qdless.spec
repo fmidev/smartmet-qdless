@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 37%{?dist}.fmi
+Release: 38%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun Jun 08 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-38.fmi
+- Globe view: mouse clicks now invert the orthographic projection instead of falling back to the flat 2D viewport mapping, so a click hits the correct (lat, lon) on the sphere. Clicks that land off the disc (empty space) no longer open a probe, and a click on bare sphere outside a regional file's coverage reports "No data at this location" rather than charting missing values. The same applies to the time-series re-probe loop and to picking cross-section endpoints (off-globe picks are cancelled with a message).
+- Globe view: the Earth now has a crisp circular limb drawn at braille (2×4) resolution over the chunky block fill, so it reads as a smooth disc rather than a jagged block silhouette.
+- Parameter / level selection popups: the cursor keys now wrap around (top↔bottom).
+- Level menu: model (hybrid) levels are listed surface-first (largest level value, closest to the ground), so the auto-assigned 1-9/a-z hotkeys land on the near-surface levels, and a model-level file now opens at the surface by default instead of the model top. Rows past the hotkey range pad the shortcut slot with spaces so the level values stay column-aligned.
+
 * Sun Jun 08 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-37.fmi
 - Context-sensitive help: the `?` popup now shows only the keys that act in the active view. The main 2D screen lists the data-navigation keys plus clearly-flagged entry points (`3` 3D point-cloud, `v` cross-section curtain, `G` orthographic globe); entering a mode and pressing `?` shows that mode's own cheat sheet (titled "Help — 3D view" / "— curtain view" / "— globe view") with no more "in 3D" / "in v" suffixes. Keys that fall through to shared handlers (parameter/level menus, export, metadata) are listed at the foot of each mode screen. The previously-undocumented `G` globe view and the `x` extrema toggle are now in the help.
 - Panel keys (F2 layout cycle, Tab / Shift+Tab, 1/2/4) report "Panels are not available in 3D / globe views" instead of silently mutating panel state — the 3D / curtain / globe renderers draw full-screen and ignore the panel layout, so the layout change had no visible effect.

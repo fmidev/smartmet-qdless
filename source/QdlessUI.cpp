@@ -332,6 +332,11 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
           }
           consumed += 4;
         }
+        else
+        {
+          os << "    ";  // pad the [X] slot so labels stay column-aligned
+          consumed += 4;
+        }
         os << items[idx];
         consumed += utf8Width(items[idx]);
         pad(os, interiorW - consumed);
@@ -379,9 +384,9 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
     {
       const int last = static_cast<int>(items.size()) - 1;
       if (key == KEY_UP || key == 'k')
-        sel = std::max(0, sel - 1);
+        sel = (sel <= 0) ? last : sel - 1;  // wrap top -> bottom
       else if (key == KEY_DOWN || key == 'j')
-        sel = std::min(last, sel + 1);
+        sel = (sel >= last) ? 0 : sel + 1;  // wrap bottom -> top
       else if (key == KEY_HOME)
         sel = 0;
       else if (key == KEY_END)
@@ -570,11 +575,39 @@ int UI::popupMenuSections(const std::string& title, const std::vector<MenuRow>& 
       sel = target;
       return true;
     };
+    // First / last non-header row, for wraparound at the ends.
+    auto firstSelectable = [&]() -> int
+    {
+      int t = 0;
+      const int last = static_cast<int>(rows.size()) - 1;
+      while (t <= last && isHeader(t)) ++t;
+      return t <= last ? t : sel;
+    };
+    auto lastSelectable = [&]() -> int
+    {
+      int t = static_cast<int>(rows.size()) - 1;
+      while (t >= 0 && isHeader(t)) --t;
+      return t >= 0 ? t : sel;
+    };
     auto applyMove = [&](int key) -> bool
     {
       const int last = static_cast<int>(rows.size()) - 1;
-      if (key == KEY_UP || key == 'k')        return moveTo(sel - 1);
-      if (key == KEY_DOWN || key == 'j')      return moveTo(sel + 1);
+      // Up/down wrap around: moveTo returns false only when already at the
+      // boundary in that direction, so jump to the opposite selectable end.
+      if (key == KEY_UP || key == 'k')
+      {
+        const int before = sel;
+        if (moveTo(sel - 1)) return true;
+        sel = lastSelectable();
+        return sel != before;
+      }
+      if (key == KEY_DOWN || key == 'j')
+      {
+        const int before = sel;
+        if (moveTo(sel + 1)) return true;
+        sel = firstSelectable();
+        return sel != before;
+      }
       if (key == KEY_HOME)                    return moveTo(0);
       if (key == KEY_END)                     return moveTo(last);
       if (key == KEY_NPAGE)                   return moveTo(sel + innerH);

@@ -326,6 +326,25 @@ class App
   // source — global data benefits most, but it also gives a distortion-free
   // polar view of arctic data.
   bool itsModeGlobe = false;
+
+  // Inverse of the orthographic globe projection, cached by drawGlobe each
+  // frame so a mouse click can be mapped back to (lat, lon) on the sphere
+  // (globeCellToLatLon). Without this a click in globe mode would fall back
+  // to the flat 2D viewport mapping and probe the wrong location.
+  struct GlobeProjection
+  {
+    bool valid = false;
+    int mapRow = 0;
+    int mapCol = 0;
+    int subRows = 0;        // sub-pixel rows per terminal cell
+    double cx0 = 0, cy0 = 0;  // disc centre in sub-pixel coords
+    double xscale = 0, yscale = 0;
+    double ex = 0, ey = 0, ez = 0;  // camera east basis
+    double ux = 0, uy = 0, uz = 0;  // camera up basis
+    double nx = 0, ny = 0, nz = 0;  // camera forward (toward viewer) basis
+  };
+  mutable GlobeProjection itsGlobeProjection;
+
   float itsThreshold3D = -10.0F;  // drop bins below this threshold. Units
                                   // depend on the source: dBZ for PVOL
                                   // (default −10), percent for QueryData
@@ -541,6 +560,9 @@ class App
   // Helpers for mouse handling.
   bool cellToLatLon(const UI& ui, int cellX, int cellY, double& lat, double& lon) const;
   bool cellToViewport(const UI& ui, int cellX, int cellY, float& u, float& v) const;
+  // Invert the cached globe projection: terminal cell -> (lat, lon) on the
+  // sphere. Returns false when the click lands off the disc (empty space).
+  bool globeCellToLatLon(int cellX, int cellY, double& lat, double& lon) const;
   void zoomAt(float factor, float anchorU, float anchorV);
   void openProbe(int cellX, int cellY, UI& ui);
   void openProbeAt(double lat, double lon, UI& ui);
