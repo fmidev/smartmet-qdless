@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.5.29
-Release: 36%{?dist}.fmi
+Release: 37%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sun Jun 08 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-37.fmi
+- Context-sensitive help: the `?` popup now shows only the keys that act in the active view. The main 2D screen lists the data-navigation keys plus clearly-flagged entry points (`3` 3D point-cloud, `v` cross-section curtain, `G` orthographic globe); entering a mode and pressing `?` shows that mode's own cheat sheet (titled "Help — 3D view" / "— curtain view" / "— globe view") with no more "in 3D" / "in v" suffixes. Keys that fall through to shared handlers (parameter/level menus, export, metadata) are listed at the foot of each mode screen. The previously-undocumented `G` globe view and the `x` extrema toggle are now in the help.
+- Panel keys (F2 layout cycle, Tab / Shift+Tab, 1/2/4) report "Panels are not available in 3D / globe views" instead of silently mutating panel state — the 3D / curtain / globe renderers draw full-screen and ignore the panel layout, so the layout change had no visible effect.
+- Globe view now honours the Braille line style for coastlines, borders and the graticule (it was previously drawn only into the block-pixel buffer, so Braille looked identical to Thick). Braille overlays project onto a 2×4-dot sub-cell grid composited as glyphs over the raster, z-tested against the disc depth buffer so dots behind the limb are culled — the same mechanism the 3D views use.
+- Globe view highlights both the equator and the prime meridian in a warm tint (only the equator was highlighted before); every other parallel / meridian uses the dim graticule colour, so the viewer can orient the globe at a glance.
+
 * Sun May 31 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.29-36.fmi
 - Cyclone detector now requires a symmetric pressure gradient, not just a deep central low. A "low" alone is not a cyclone — a thermal low, a broad trough, or a frontal kink can all hit deep central pressure without the concentric isobars that drive cyclonic wind. The ring around the candidate minimum is now split into 8 angular sectors (45° each, ~500 km radius), the local MAX pressure is taken in each sector, and the detector fires only when the MIN sector-rise clears the gradient threshold — i.e. every direction has to show a real pressure climb, not just the side facing a neighbouring high. The reported Δ is the min-sector delta, a true gradient floor rather than a max-anywhere number. A populated-sector check (≥6 of 8) keeps the centre away from the data boundary where the symmetry test would be unreliable. Thresholds (min sector rise over ~500 km): 8 hPa = Cyclone (~10 m/s geostrophic), 15 hPa = Strong cyclone (~20 m/s), 25 hPa = Hurricane-strength (~30 m/s).
 - Observable change on fmi.sqd: frames where the previous max-anywhere check fired on broad / asymmetric lows now go silent (and the block detector surfaces an actual ridge instead). Marginal cyclones report a smaller Δ that reflects the weakest gradient direction.

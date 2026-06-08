@@ -5,6 +5,7 @@
 
 #include <ncurses.h>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -105,6 +106,18 @@ class UI
   // the current source so the help reads as a contextually relevant
   // cheat sheet rather than an exhaustive list. Defaults match the
   // gridded data path (the original full help).
+  // Which view is active. Keys are overloaded per mode (h/j/k/l, +/-, x,
+  // arrows, Space all rebind once you enter 3D / curtain / globe), so the
+  // help is partitioned: each context lists only the keys that act right
+  // now, with the others reachable via clearly-flagged entry points.
+  enum class HelpView : std::uint8_t
+  {
+    Main,     // 2D map view
+    View3D,   // 3D point-cloud (entered with '3')
+    Curtain,  // 3D + cross-section curtain (entered with 'v')
+    Globe,    // orthographic globe (entered with 'G')
+  };
+
   struct HelpContext
   {
     bool isImage = false;        // raw image: no projection / no time
@@ -115,6 +128,8 @@ class UI
     bool hasMultipleLevels = true;
     bool hasNativeHeight = false;  // source supports cross-section [Y] toggle
     bool has3DVolume = false;      // source has a renderable 3D volume
+    bool hasGlobe = false;         // source can be drawn on the orthographic globe
+    HelpView view = HelpView::Main;  // active view — selects the key set shown
   };
   void popupHelp(HelpContext ctx);
   void popupHelp();  // gridded-data default — calls popupHelp({}) internally

@@ -4552,6 +4552,11 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       ctx.hasMultipleLevels = itsSource->levelCount() > 1;
       ctx.hasNativeHeight = itsSource->hasNativeHeight();
       ctx.has3DVolume = sourceSupports3D();
+      ctx.hasGlobe = sourceSupportsGlobe();
+      ctx.view = itsModeGlobe       ? UI::HelpView::Globe
+                 : itsMode3DCurtain ? UI::HelpView::Curtain
+                 : itsMode3D        ? UI::HelpView::View3D
+                                    : UI::HelpView::Main;
       ui.popupHelp(ctx);
     }
       return true;
@@ -4985,19 +4990,36 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       return true;
 
     case KEY_F(2):
-      cyclePanelLayout();
+      // The 3D point-cloud / curtain / globe renderers draw full-screen and
+      // ignore the panel layout, so cycling it here would silently mutate
+      // state with no visible effect. Report instead of no-op'ing in the dark.
+      if (itsMode3D || itsMode3DCurtain || itsModeGlobe)
+        itsLastMessage = "Panels are not available in 3D / globe views";
+      else
+        cyclePanelLayout();
       return true;
 
     case '\t':
-      cycleActivePanel(+1);
+      if (itsMode3D || itsMode3DCurtain || itsModeGlobe)
+        itsLastMessage = "Panels are not available in 3D / globe views";
+      else
+        cycleActivePanel(+1);
       return true;
     case KEY_BTAB:
-      cycleActivePanel(-1);
+      if (itsMode3D || itsMode3DCurtain || itsModeGlobe)
+        itsLastMessage = "Panels are not available in 3D / globe views";
+      else
+        cycleActivePanel(-1);
       return true;
 
     case '1':
     case '2':
     case '4':
+      if (itsMode3D || itsMode3DCurtain || itsModeGlobe)
+      {
+        itsLastMessage = "Panels are not available in 3D / globe views";
+        return true;
+      }
       setActivePanel(key - '1');
       return true;
 
@@ -7569,27 +7591,160 @@ void App::drawGlobe(const Layout& layout)
         drawGeoLine(p.lats[i - 1], p.lons[i - 1], p.lats[i], p.lons[i], color);
   };
 
-  // Graticule first (dimmest), then borders, then coastlines on top.
-  if (itsGraticuleStyle != LineStyle::None)
+  // Reference grid lines. The equator (lat 0) and the prime meridian
+  // (lon 0) are drawn in a warm tint so the viewer can orient the globe at a
+  // glance; every other parallel / meridian uses the dim graticule colour.
+  const Rgb grat{70, 70, 82};
+  const Rgb refLine{165, 145, 80};  // equator + prime meridian
+  const Rgb bordCol{120, 120, 120};
+  const Rgb coastCol{210, 210, 210};
+
+  // Walk the graticule through whatever `line(lat0,lon0,lat1,lon1,color)`
+  // rasteriser the caller supplies (thick-into-pixels or the braille dots).
+  auto drawGraticule = [&](const auto& line)
   {
-    const Rgb grat{70, 70, 82};
-    const Rgb equ{120, 110, 70};
     for (int lat = -60; lat <= 60; lat += 30)
       for (int lon = -180; lon < 180; lon += 5)
-        drawGeoLine(lat, lon, lat, lon + 5, lat == 0 ? equ : grat);
+        line(lat, lon, lat, lon + 5, lat == 0 ? refLine : grat);
     for (int lon = -180; lon < 180; lon += 30)
       for (int lat = -85; lat < 85; lat += 5)
-        drawGeoLine(lat, lon, lat + 5, lon, grat);
+        line(lat, lon, lat + 5, lon, lon == 0 ? refLine : grat);
+  };
+
+  // Thick style rasterises straight into the sub-pixel buffer, before the
+  // renderer turns pixels into block glyphs below.
+  if (itsGraticuleStyle == LineStyle::Thick)
+    drawGraticule(drawGeoLine);
+  if (itsBorderStyle == LineStyle::Thick)
+    drawPolys(itsBorders, bordCol);
+  if (itsCoastlineStyle == LineStyle::Thick)
+    drawPolys(itsCoastlines, coastCol);
+
+  // Braille style: project onto a 2×4-dot sub-cell grid and composite as
+  // braille glyphs over the final raster — the same mechanism the 3D views
+  // use, giving crisp pixel-thin lines the block grid can't resolve. The
+  // glyph string is emitted right after the renderer call below.
+  std::string brailleOut;
+  {
+    const bool bGrat = itsGraticuleStyle == LineStyle::Braille;
+    const bool bBord = itsBorderStyle == LineStyle::Braille && !itsBorders.empty();
+    const bool bCoast = itsCoastlineStyle == LineStyle::Braille && !itsCoastlines.empty();
+    if (bGrat || bBord || bCoast)
+    {
+      const int bW = subW;       // width is always 2 sub-columns per cell
+      const int bH = cellH * 4;  // braille packs 4 dot-rows per cell
+      const double bcx0 = bW / 2.0;
+      const double bcy0 = bH / 2.0;
+      const double yFine = 4.0 / subRows;  // same world unit -> finer row grid
+      std::vector<unsigned char> dotMask(static_cast<std::size_t>(bW) * bH, 0);
+      std::vector<Rgb> dotColor(static_cast<std::size_t>(bW) * bH, Rgb{0, 0, 0});
+
+      auto plotB = [&](int bx, int by, float depth, Rgb color)
+      {
+        if (bx < 0 || bx >= bW || by < 0 || by >= bH)
+          return;
+        // Z-test against the disc's depth buffer at the nearest sub-pixel so
+        // dots on the far side of the limb stay culled.
+        const int qy = by * subRows / 4;
+        const std::size_t qidx = static_cast<std::size_t>(qy) * subW + bx;
+        if (depth >= zbuf[qidx])
+          return;
+        const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+        dotMask[bidx] = 1;
+        dotColor[bidx] = color;
+      };
+
+      auto lineB = [&](double lat0, double lon0, double lat1, double lon1, Rgb color)
+      {
+        double x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0;
+        ecef(lat0 * M_PI / 180.0, lon0 * M_PI / 180.0, x0, y0, z0);
+        ecef(lat1 * M_PI / 180.0, lon1 * M_PI / 180.0, x1, y1, z1);
+        const double X0 = kLift * x0, Y0 = kLift * y0, Z0 = kLift * z0;
+        const double X1 = kLift * x1, Y1 = kLift * y1, Z1 = kLift * z1;
+        const double f0 = X0 * nx + Y0 * ny + Z0 * nz;
+        const double f1 = X1 * nx + Y1 * ny + Z1 * nz;
+        if (f0 <= 0 && f1 <= 0)
+          return;  // entire segment on the far hemisphere
+        const double c0 = bcx0 + xscale * (X0 * ex + Y0 * ey + Z0 * ez);
+        const double r0 = bcy0 - yscale * yFine * (X0 * ux + Y0 * uy + Z0 * uz);
+        const double c1 = bcx0 + xscale * (X1 * ex + Y1 * ey + Z1 * ez);
+        const double r1 = bcy0 - yscale * yFine * (X1 * ux + Y1 * uy + Z1 * uz);
+        const int steps =
+            static_cast<int>(std::ceil(std::max(std::abs(c1 - c0), std::abs(r1 - r0))));
+        if (steps <= 0)
+        {
+          if (f0 > 0)
+            plotB(static_cast<int>(std::round(c0)), static_cast<int>(std::round(r0)),
+                  static_cast<float>(-f0), color);
+          return;
+        }
+        for (int i = 0; i <= steps; ++i)
+        {
+          const double t = static_cast<double>(i) / steps;
+          const double f = f0 + t * (f1 - f0);
+          if (f <= 0)
+            continue;  // crossed the limb -- drop the back-facing part
+          plotB(static_cast<int>(std::round(c0 + t * (c1 - c0))),
+                static_cast<int>(std::round(r0 + t * (r1 - r0))), static_cast<float>(-f), color);
+        }
+      };
+      auto polyB = [&](const std::vector<Polyline>& polys, Rgb color)
+      {
+        for (const auto& p : polys)
+          for (std::size_t i = 1; i < p.lats.size(); ++i)
+            lineB(p.lats[i - 1], p.lons[i - 1], p.lats[i], p.lons[i], color);
+      };
+
+      if (bGrat)
+        drawGraticule(lineB);
+      if (bBord)
+        polyB(itsBorders, bordCol);
+      if (bCoast)
+        polyB(itsCoastlines, coastCol);
+
+      // Pack the dot grid into positioned braille glyphs; BG sampled from the
+      // underlying quadrant pixel so the sphere shading shows through.
+      for (int cy = 0; cy < cellH; ++cy)
+        for (int cx = 0; cx < cellW; ++cx)
+        {
+          unsigned cellMask = 0;
+          Rgb cellFg{200, 200, 200};
+          for (int sy = 0; sy < 4; ++sy)
+            for (int sx = 0; sx < 2; ++sx)
+            {
+              const int bx = cx * 2 + sx;
+              const int by = cy * 4 + sy;
+              const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+              if (dotMask[bidx] != 0U)
+              {
+                cellMask |= 1U << brailleBit(sx, sy);
+                cellFg = dotColor[bidx];
+              }
+            }
+          if (cellMask == 0U)
+            continue;
+          const int qy = cy * subRows;
+          const Rgb bg = pixels[static_cast<std::size_t>(qy) * subW + cx * 2];
+          brailleOut += "\x1b[";
+          brailleOut += std::to_string(l.map.row + cy + 1);
+          brailleOut += ';';
+          brailleOut += std::to_string(l.map.col + cx + 1);
+          brailleOut += 'H';
+          brailleOut += itsRenderer.bgEscape(bg);
+          brailleOut += itsRenderer.fgEscape(cellFg);
+          brailleOut += brailleGlyph(cellMask);
+        }
+    }
   }
-  if (itsBorderStyle != LineStyle::None)
-    drawPolys(itsBorders, Rgb{120, 120, 120});
-  if (itsCoastlineStyle != LineStyle::None)
-    drawPolys(itsCoastlines, Rgb{210, 210, 210});
 
   // --- Emit. Cache the raster so playExitEffect can animate the globe too.
   std::ostringstream os;
   cache3DRaster(pixels, subW, subH);
   itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
+
+  // Braille overlays composite as glyphs on top of the rendered block cells.
+  if (!brailleOut.empty())
+    os << brailleOut << "\x1b[0m";
 
   const std::string hud = fmt::format(" Globe  lat={:.0f}°  lon={:.0f}°  zoom={:.2f}×  [G] exit ",
                                       cLat * 180.0 / M_PI,

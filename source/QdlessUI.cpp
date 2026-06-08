@@ -901,111 +901,161 @@ void UI::popupHelp(HelpContext ctx)
   const bool noProj = ctx.isImage;
   const bool multiPanel = !(ctx.isImage || ctx.isShape);
 
-  add("q  Esc", "Quit");
-  if (ctx.hasMultipleParams && !ctx.isImage && !ctx.isShape) add("p", "Parameter menu");
-  if (ctx.hasMultipleLevels && !ctx.isImage && !ctx.isShape)
+  // Keys that stay live in every view: they fall through the mode-specific
+  // switches in App::handleKey to the shared handlers. Emitted at the foot of
+  // the 3D / curtain / globe key sets so those screens still advertise the way
+  // out and the always-available menus.
+  auto addSharedTail = [&]()
   {
-    add("L (Shift)", "Level menu");
-    add("< > or , .", "Step level down / up");
-  }
-  if (!noTime)
-  {
-    add("\xe2\x86\x90 \xe2\x86\x92", "Previous / next time");
-    add("Home  End", "First / last time");
     add("", "");
-    add("Space", "Play / pause animation");
-    add("\xe2\x86\x91 \xe2\x86\x93", "Animation speed up / down");
-  }
-  add("", "");
-  add("+  -", "Zoom in / out (centre)");
-  add("dbl-click L / R", "Zoom in / out at cursor");
-  add("0", "Reset view");
-  add("h j k l", "Pan left / down / up / right");
-  add("Shift+arrow", "Pan");
-  add("drag (mouse)", "Pan");
-  add("", "");
-  if (!noProbe)
+    if (ctx.hasMultipleParams) add("p", "Parameter menu");
+    if (ctx.hasMultipleLevels) add("L (Shift)", "Level menu");
+    add("e", "Export PNG");
+    add("M", "File metadata");
+    add("?", "This help");
+  };
+
+  if (ctx.view == HelpView::View3D)
   {
-    add("click (mouse)", "Time-series probe at point");
-    add("\xe2\x86\x90 \xe2\x86\x92 in probe", "Step time, map updates");
-    add("Space in probe", "Play / pause animation (\xe2\x86\x91\xe2\x86\x93 speed)");
-    add("s in probe", "Toggle viewport min/mean/max overlay");
+    // 3D point-cloud. hjkl/arrows orbit, +/- zoom, ,/. threshold, x extrema.
+    add("q  Esc", "Quit");
+    add("3", "Back to 2D map view");
+    add("", "");
+    add("h l", "Yaw left / right");
+    add("j k", "Pitch down / up");
+    add("+  -", "Zoom in / out");
+    add(", .", "Lower / raise threshold (dBZ for PVOL, % for QD)");
+    add("PgUp PgDn", "Vertical exaggeration: more / less");
+    add("0", "Reset camera");
+    add("x",
+        "Persistent anomaly air masses (merge-tree extrema) \xe2\x86\x94 full cloud "
+        "(QD hybrid/pressure)");
+    addSharedTail();
   }
-  if (ctx.isShape)
+  else if (ctx.view == HelpView::Curtain)
   {
-    add("click (mouse)", "Show clicked polygon's attributes");
-    add("a", "Attributes table (search, pick to highlight)");
-    add("o", "Shape outlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
-    add("r", "Palette cycle: rainbow \xe2\x86\x94 flat fill");
-    if (ctx.isPg) add("d", "Re-open PostGIS layer picker");
+    // 3D + cross-section curtain. Arrow keys are sub-mode dependent; hjkl
+    // always drives the camera so the binding never gets ambiguous.
+    add("q  Esc", "Quit");
+    add("v", "Back to 2D map view");
+    add("", "");
+    add("Tab", "Cycle sub-mode: A \xe2\x86\x92 B \xe2\x86\x92 A+B \xe2\x86\x92 View");
+    add("arrows (Edit)", "Move active endpoint A / B / both");
+    add("arrows (View)", "Orbit / pitch the camera");
+    add("h l j k", "Camera yaw / pitch (always, regardless of sub-mode)");
+    add("+ - (Edit)", "Animation speed: faster / slower");
+    add("+ - (View)", "Zoom camera in / out");
+    add("0", "Reset camera");
+    add("x", "X-cross: add a second perpendicular plane");
+    add("s", "Swing: oscillate the plane azimuth +/-45\xc2\xb0");
+    add("r", "Continuous rotation about the centre");
+    add("o", "Centre orbit (the cross-section drifts in a circle)");
+    add("T", "3D tilt: rotate the plane(s) about their long axis");
+    add("PgUp PgDn", "Raise / lower curtain ceiling");
+    add("Space", "Animate over time \xe2\x80\x94 surface + curtain re-sample each step");
+    addSharedTail();
   }
-  add("", "");
-  if (!noProj)
+  else if (ctx.view == HelpView::Globe)
   {
-    add("g", "Legend");
-    add("c", "Coastlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
-    add("b", "Borders: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
+    // Orthographic globe. hjkl spin/tilt, +/- zoom, 0 recenter on the data.
+    add("q  Esc", "Quit");
+    add("G", "Back to 2D map view");
+    add("", "");
+    add("h l", "Spin west / east");
+    add("j k", "Tilt down / up");
+    add("+  -", "Zoom in / out");
+    add("0", "Recentre on the data");
+    addSharedTail();
   }
-  add("t", "Cell style: sextants \xe2\x86\x92 triangles \xe2\x86\x92 squares (font fallback)");
-  if (!noProj)
+  else
   {
-    add("n", "Graticule: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
-    if (!ctx.isShape) add("w", "Toggle wind arrows");
-    add("i", "Toggle city overlay");
-    add("PgUp PgDn", "Cities: sparser / denser");
-    add("/", "Place search");
+    // Main 2D map view. The 3D / curtain / globe detail keys live on their own
+    // help screens (press ? after entering those modes); here we only
+    // advertise the entry points so the views are still discoverable.
+    add("q  Esc", "Quit");
+    if (ctx.hasMultipleParams && !ctx.isImage && !ctx.isShape) add("p", "Parameter menu");
+    if (ctx.hasMultipleLevels && !ctx.isImage && !ctx.isShape)
+    {
+      add("L (Shift)", "Level menu");
+      add("< > or , .", "Step level down / up");
+    }
+    if (!noTime)
+    {
+      add("\xe2\x86\x90 \xe2\x86\x92", "Previous / next time");
+      add("Home  End", "First / last time");
+      add("", "");
+      add("Space", "Play / pause animation");
+      add("\xe2\x86\x91 \xe2\x86\x93", "Animation speed up / down");
+    }
+    add("", "");
+    add("+  -", "Zoom in / out (centre)");
+    add("dbl-click L / R", "Zoom in / out at cursor");
+    add("0", "Reset view");
+    add("h j k l", "Pan left / down / up / right");
+    add("Shift+arrow", "Pan");
+    add("drag (mouse)", "Pan");
+    add("", "");
     if (!noProbe)
     {
-      add("x", "Cross-section");
-      if (ctx.hasNativeHeight)
-        add("y in section", "Y-axis: height (km) \xe2\x86\x94 elevation angle");
-      add("H in section",
-          "Hovmöller: chart Y-axis becomes time (multi-time files only)");
+      add("click (mouse)", "Time-series probe at point");
+      add("\xe2\x86\x90 \xe2\x86\x92 in probe", "Step time, map updates");
+      add("Space in probe", "Play / pause animation (\xe2\x86\x91\xe2\x86\x93 speed)");
+      add("s in probe", "Toggle viewport min/mean/max overlay");
     }
-    if (ctx.has3DVolume)
+    if (ctx.isShape)
     {
-      add("", "");
-      add("3", "Toggle 3D point-cloud view");
-      add("h l in 3D", "Yaw left / right");
-      add("j k in 3D", "Pitch down / up");
-      add("+ - in 3D", "Zoom in / out");
-      add(", . in 3D", "Lower / raise threshold (dBZ for PVOL, % for QD)");
-      add("PgUp PgDn in 3D", "Vertical exaggeration: more / less");
-      add("0 in 3D", "Reset camera");
+      add("click (mouse)", "Show clicked polygon's attributes");
+      add("a", "Attributes table (search, pick to highlight)");
+      add("o", "Shape outlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
+      add("r", "Palette cycle: rainbow \xe2\x86\x94 flat fill");
+      if (ctx.isPg) add("d", "Re-open PostGIS layer picker");
     }
-    if (ctx.hasNativeHeight)
-    {
-      add("", "");
-      add("v", "Toggle 3D + cross-section curtain (vertical slice)");
-      add("Tab in v",
-          "Cycle sub-mode: A \xe2\x86\x92 B \xe2\x86\x92 A+B \xe2\x86\x92 View");
-      add("arrows in v (Edit)", "Move active endpoint A / B / both");
-      add("arrows in v (View)", "Orbit / pitch the camera (no endpoint motion)");
-      add("+ - in v (Edit)", "Animation speed: faster / slower");
-      add("+ - in v (View)", "Zoom camera in / out");
-      add("h l j k", "Camera yaw / pitch (always, regardless of sub-mode)");
-      add("x in v", "Toggle X-cross: add a second perpendicular plane");
-      add("s in v", "Toggle swing: oscillate the plane azimuth +/-45\xc2\xb0");
-      add("r in v", "Toggle continuous rotation about the centre");
-      add("o in v", "Toggle centre orbit (the cross-section drifts in a circle)");
-      add("T in v", "Toggle 3D tilt: rotate the plane(s) about their long axis");
-      add("PgUp PgDn in v", "Raise / lower curtain ceiling");
-      add("0 in v", "Reset camera");
-      add("Space in v", "Animate over time \xe2\x80\x94 surface + curtain re-sample each step");
-    }
-  }
-  add("e", "Export PNG");
-  add("", "");
-  add("M", "File metadata");
-  if (multiPanel)
-  {
-    add("F2", "Cycle layout: single \xe2\x86\x92 side \xe2\x86\x92 2x2");
-    add("Tab  Shift+Tab", "Next / previous active panel");
-    add("1 2 3 4", "Activate panel by number");
-    add("click (mouse)", "Activate the panel under the cursor");
     add("", "");
+    if (!noProj)
+    {
+      add("g", "Legend");
+      add("c", "Coastlines: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
+      add("b", "Borders: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
+    }
+    add("t", "Cell style: sextants \xe2\x86\x92 triangles \xe2\x86\x92 squares (font fallback)");
+    if (!noProj)
+    {
+      add("n", "Graticule: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
+      if (!ctx.isShape) add("w", "Toggle wind arrows");
+      add("i", "Toggle city overlay");
+      add("PgUp PgDn", "Cities: sparser / denser");
+      add("/", "Place search");
+      if (!noProbe)
+      {
+        add("x", "Cross-section");
+        if (ctx.hasNativeHeight)
+          add("y in section", "Y-axis: height (km) \xe2\x86\x94 elevation angle");
+        add("H in section", "Hovmöller: chart Y-axis becomes time (multi-time files only)");
+      }
+      if (ctx.has3DVolume || ctx.hasNativeHeight || ctx.hasGlobe)
+      {
+        add("", "");
+        if (ctx.has3DVolume)
+          add("3", "Enter 3D point-cloud view (\xe2\x86\x92 ? for its keys)");
+        if (ctx.hasNativeHeight)
+          add("v", "Enter 3D + cross-section curtain (\xe2\x86\x92 ? for its keys)");
+        if (ctx.hasGlobe)
+          add("G (Shift)", "Enter orthographic globe view (\xe2\x86\x92 ? for its keys)");
+      }
+    }
+    add("e", "Export PNG");
+    add("", "");
+    add("M", "File metadata");
+    if (multiPanel)
+    {
+      add("F2", "Cycle layout: single \xe2\x86\x92 side \xe2\x86\x92 2x2");
+      add("Tab  Shift+Tab", "Next / previous active panel");
+      add("1 2 3 4", "Activate panel by number");
+      add("click (mouse)", "Activate the panel under the cursor");
+      add("", "");
+    }
+    add("?", "This help");
   }
-  add("?", "This help");
 
   // Collapse leading, trailing, and back-to-back empty separators.
   std::vector<Pair> kEntries;
@@ -1030,7 +1080,10 @@ void UI::popupHelp(HelpContext ctx)
     maxR = std::max(maxR, utf8Width(r));
   }
   const int sep = 3;  // gap between key column and action column
-  const std::string title = "Help";
+  const std::string title = (ctx.view == HelpView::View3D)    ? "Help \xe2\x80\x94 3D view"
+                            : (ctx.view == HelpView::Curtain) ? "Help \xe2\x80\x94 curtain view"
+                            : (ctx.view == HelpView::Globe)   ? "Help \xe2\x80\x94 globe view"
+                                                              : "Help";
   const int contentW = maxL + sep + maxR;
   const int width = std::min(COLS - 4, std::max({contentW + 4, utf8Width(title) + 8, 40}));
   const int interiorW = width - 2;
