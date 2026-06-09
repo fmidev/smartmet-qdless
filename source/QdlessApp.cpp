@@ -534,6 +534,13 @@ void Viewport::pan(float duFrac, float dvFrac)
 
 App::App(Options opts) : itsOpts(std::move(opts))
 {
+  if (itsOpts.globeSurface == "ocean")
+    itsGlobeSurface = GlobeSurface::Ocean;
+  else if (itsOpts.globeSurface == "land")
+    itsGlobeSurface = GlobeSurface::Land;
+  else if (itsOpts.globeSurface == "both")
+    itsGlobeSurface = GlobeSurface::Both;
+
   if (!itsOpts.pgConn.empty())
   {
     // PostGIS browser mode. Open the connection once and keep it
@@ -1378,6 +1385,44 @@ void App::loadCoastlines(int subPixelsW, int subPixelsH)
       itsBorders = Coastline::read(path);
       itsBorderPath = path;
     }
+  }
+}
+
+std::string App::globeSurfaceLabel() const
+{
+  switch (itsGlobeSurface)
+  {
+    case GlobeSurface::Outline: return "outline";
+    case GlobeSurface::Ocean: return "ocean";
+    case GlobeSurface::Land: return "land";
+    case GlobeSurface::Both: return "land + ocean";
+  }
+  return "outline";
+}
+
+void App::loadLandSea(int subPixels)
+{
+  // Resolution to rasterise at: roughly one mask cell per globe sub-pixel,
+  // clamped so a zoomed-in rebuild stays a sub-200 ms hitch (it is cached, so
+  // the cost is paid once per zoom level, not per frame).
+  const int rows = std::clamp(subPixels, 180, 540);
+
+  // Pick the GSHHS file by the visible degrees-per-pixel, but never finer than
+  // 'low' — finer shorelines are wasted on a braille stipple and push the
+  // one-off build past a noticeable hitch. (Detail can be raised later once the
+  // scanline fill is latitude-bucketed.)
+  const float degPerPix = std::max(0.05F, 180.0F / static_cast<float>(std::max(1, subPixels)));
+  const auto path = Coastline::pickFile(itsOpts.coastlineDir, "GSHHS", degPerPix);
+  if (path.empty())
+    return;  // GSHHS package not installed — leave the mask invalid
+
+  if (path == itsLandSeaPath && rows == itsLandSeaRows && itsLandSea.valid())
+    return;  // cache hit
+
+  if (itsLandSea.build(path, rows))
+  {
+    itsLandSeaPath = path;
+    itsLandSeaRows = rows;
   }
 }
 
@@ -4197,6 +4242,20 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         itsCamZoom = 1.0;
         return true;
       }
+      case 'o':
+      case 'O':
+      {
+        // Cycle the surface fill: Outline → Ocean → Land → Both → Outline.
+        switch (itsGlobeSurface)
+        {
+          case GlobeSurface::Outline: itsGlobeSurface = GlobeSurface::Ocean; break;
+          case GlobeSurface::Ocean: itsGlobeSurface = GlobeSurface::Land; break;
+          case GlobeSurface::Land: itsGlobeSurface = GlobeSurface::Both; break;
+          case GlobeSurface::Both: itsGlobeSurface = GlobeSurface::Outline; break;
+        }
+        itsLastMessage = std::string("Globe surface: ") + globeSurfaceLabel();
+        return true;
+      }
       case 'G':
         break;  // fall through to the toggle handler below (lowercase g = legend)
       default:
@@ -5175,7 +5234,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
           itsCamPitch =
               std::clamp(((bb.minLat + bb.maxLat) * 0.5) * M_PI / 180.0, -kLatLimit, kLatLimit);
           itsCamZoom = 1.0;
-          itsLastMessage = "Globe: h/l spin, j/k tilt, +/- zoom, 0 recenter, G off";
+          itsLastMessage = "Globe: h/l spin, j/k tilt, +/- zoom, 0 recenter, o surface, G off";
         }
         else
         {
@@ -7790,6 +7849,51 @@ void App::drawGlobe(const Layout& layout)
             lineB(p.lats[i - 1], p.lons[i - 1], p.lats[i], p.lons[i], color);
       };
 
+      // Surface fill (key [o]): stipple the near hemisphere with land / ocean
+      // braille from the GSHHS mask. Drawn first, beneath the line overlays, so
+      // coastlines / borders / graticule / limb still win their dots. A checker
+      // dither (not every dot) reads as texture and lets any weather-data
+      // colour underneath show through the gaps.
+      if (itsGlobeSurface != GlobeSurface::Outline)
+      {
+        loadLandSea(static_cast<int>(std::lround(2.0 * std::max(xscale, yscale * yFine))));
+        if (itsLandSea.valid())
+        {
+          const Rgb oceanCol{40, 90, 170};  // deep braille blue
+          const Rgb landCol{150, 140, 90};  // khaki
+          const bool wantOcean = itsGlobeSurface == GlobeSurface::Ocean ||
+                                 itsGlobeSurface == GlobeSurface::Both;
+          const bool wantLand =
+              itsGlobeSurface == GlobeSurface::Land || itsGlobeSurface == GlobeSurface::Both;
+          for (int by = 0; by < bH; ++by)
+          {
+            const double sy = (bcy0 - (by + 0.5)) / (yscale * yFine);
+            for (int bx = 0; bx < bW; ++bx)
+            {
+              if (((bx ^ by) & 1) != 0)
+                continue;  // 1-in-2 checker dither
+              const double sx = ((bx + 0.5) - bcx0) / xscale;
+              const double rr = sx * sx + sy * sy;
+              if (rr > 1.0)
+                continue;  // outside the disc
+              const double d = std::sqrt(1.0 - rr);
+              const double px = sx * ex + sy * ux + d * nx;
+              const double py = sx * ey + sy * uy + d * ny;
+              const double pz = sx * ez + sy * uz + d * nz;
+              const double lat = std::asin(std::clamp(pz, -1.0, 1.0)) * 180.0 / M_PI;
+              const double lon = std::atan2(py, px) * 180.0 / M_PI;
+              const bool land = itsLandSea.isLand(lat, lon);
+              if (land ? wantLand : wantOcean)
+              {
+                const std::size_t bidx = static_cast<std::size_t>(by) * bW + bx;
+                dotMask[bidx] = 1;
+                dotColor[bidx] = land ? landCol : oceanCol;
+              }
+            }
+          }
+        }
+      }
+
       if (bGrat)
         drawGraticule(lineB);
       if (bBord)
@@ -7901,10 +8005,12 @@ void App::drawGlobe(const Layout& layout)
   if (!brailleOut.empty())
     os << brailleOut << "\x1b[0m";
 
-  const std::string hud = fmt::format(" Globe  lat={:.0f}°  lon={:.0f}°  zoom={:.2f}×  [G] exit ",
-                                      cLat * 180.0 / M_PI,
-                                      cLon * 180.0 / M_PI,
-                                      itsCamZoom);
+  const std::string hud =
+      fmt::format(" Globe  lat={:.0f}°  lon={:.0f}°  zoom={:.2f}×  [o] {}  [G] exit ",
+                  cLat * 180.0 / M_PI,
+                  cLon * 180.0 / M_PI,
+                  itsCamZoom,
+                  globeSurfaceLabel());
   const int hudRow = l.map.row + l.map.height - 1;
   const int hudCol =
       std::max(l.map.col, l.map.col + l.map.width - static_cast<int>(hud.size()) - 1);

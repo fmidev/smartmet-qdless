@@ -4,6 +4,7 @@
 #include "QdlessCoastline.h"
 #include "QdlessDataSource.h"
 #include "QdlessExtrema.h"
+#include "QdlessLandSea.h"
 #include "QdlessPalette.h"
 #include "QdlessGraphics.h"
 #include "QdlessRenderer.h"
@@ -69,6 +70,7 @@ struct Options
   bool dumpAndExit = false;        // print one frame to stdout and exit (no curses)
   bool start3D = false;            // start in 3D point-cloud mode (e.g. --dump --3d)
   bool startGlobe = false;         // start in globe view (e.g. --dump --globe)
+  std::string globeSurface;        // initial globe fill: outline|ocean|land|both
   bool dumpExtrema = false;        // --extrema: print persistent 3D extrema and exit
   bool noExitEffect = false;       // skip the random quit animation
   // Text spelled out by the word-reveal exit effect. Empty (the default) means
@@ -326,6 +328,24 @@ class App
   // source — global data benefits most, but it also gives a distortion-free
   // polar view of arctic data.
   bool itsModeGlobe = false;
+
+  // Globe surface fill, cycled with [o] (Ocean). Outline keeps the bare
+  // limb/data look; Ocean stipples the sea with blue braille; Land stipples
+  // the continents with khaki braille; Both draws sea and land together. The
+  // fill is derived from a GSHHS land/sea mask (itsLandSea), independent of the
+  // weather data — so it reads as a recognisable Earth even where the field is
+  // sparse or absent.
+  enum class GlobeSurface
+  {
+    Outline,
+    Ocean,
+    Land,
+    Both
+  };
+  GlobeSurface itsGlobeSurface = GlobeSurface::Outline;
+  Qdless::LandSea itsLandSea;  // cached land/sea mask for the globe fill
+  std::string itsLandSeaPath;  // GSHHS file the cached mask was built from
+  int itsLandSeaRows = 0;      // mask row count it was built at
 
   // Inverse of the orthographic globe projection, cached by drawGlobe each
   // frame so a mouse click can be mapped back to (lat, lon) on the sphere
@@ -665,6 +685,15 @@ class App
   // True if the active source can be drawn on the globe — any gridded
   // geographic source (images / vector layers have no scalar field).
   bool sourceSupportsGlobe() const;
+
+  // Status-line label for the current globe surface fill mode.
+  std::string globeSurfaceLabel() const;
+
+  // Ensure itsLandSea holds a mask suitable for `subPixels` of globe diameter,
+  // (re)building from the best-matching GSHHS file only when the file or row
+  // count would change. No-op (and leaves the mask invalid) when the GSHHS
+  // data package isn't installed.
+  void loadLandSea(int subPixels);
 
   // --extrema verification path: run the persistence / merge-tree extrema
   // finder on the active volumetric QueryData parameter (per-level-median

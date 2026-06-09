@@ -83,6 +83,8 @@ int main(int argc, char* argv[])
          "start in 3D point-cloud mode (PVOL or multi-level QueryData with height field)") //
         ("globe", po::bool_switch(&opts.startGlobe),
          "start in globe view (orthographic 3D sphere; any gridded geographic source)") //
+        ("globe-surface", po::value<std::string>(&opts.globeSurface),
+         "initial globe surface fill: outline|ocean|land|both (cycle live with 'o')") //
         ("extrema", po::bool_switch(&opts.dumpExtrema),
          "print persistent 3D local maxima/minima (per-level-median anomaly) and exit") //
         ("dir",

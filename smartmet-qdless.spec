@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.6.9
-Release: 1%{?dist}.fmi
+Release: 2%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,7 +115,8 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
-* Tue Jun 09 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.9-1.fmi
+* Tue Jun 09 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.9-2.fmi
+- Globe view: new surface fill cycled with the [o] key — Outline (the bare limb/data look), Ocean (sea stippled with blue braille), Land (continents stippled with khaki braille), and Both. The fill comes from a self-contained GSHHS land/sea classifier (new QdlessLandSea): the binned shoreline segments are continuous across bin walls, so an even-odd scanline fill keyed on each segment's GSHHS level (odd = land) rasterises a correct mask with no GMT bin-polygon assembly. The scan is anchored at the north pole (always open sea) to sidestep Antarctica's special ANT open-arc storage, with an explicit "south of the polar coastline = land" rule for the Antarctic interior; bin origins are shifted into [-180,180) so a shoreline touching the antimeridian no longer fabricates a full-width edge. The mask is cached per zoom level and drawn beneath the coastline/border/graticule/limb overlays as a checker dither, so any weather field underneath still shows through. New --globe-surface outline|ocean|land|both selects the initial mode (handy with --dump --globe).
 - Fixed the RPM version/release numbering scheme to YY.MM.DD-N: the Version is now the date of the change with a per-date release counter N, instead of leaving Version frozen at 26.5.29 while the release counter climbed across later dates.
 - New exit effect "Rube Goldberg" (Maths & physics theme): a chain-reaction contraption whose only purpose is the trivial task of dismissing the weather map. The data snapshot is integral throughout — it is the marble that rolls down the ramps (a spinning data sphere), the colour of every domino face (sampled from the pixels behind it), and the confetti that drains the screen to black. Staged timeline: release -> ramp roll -> domino topple -> see-saw fling -> pulley bucket -> pendulum swing -> balloon pop -> drain.
 - Globe view: dropped the dark bare-sphere fill. No-data sub-pixels are now left transparent (terminal default) and the braille limb circle alone outlines the Earth; the sphere depth is still recorded so the braille overlay's far-hemisphere culling is unaffected. To keep the globe useful for sparse fields (precipitation etc.) now that the fill is gone, the source's native grid edge is traced as a footprint outline (uvToLatLon over the [0,1]^2 viewport rectangle, so rotated/projected grids follow their true boundary), drawn for sub-global grids and suppressed for near-global extents.

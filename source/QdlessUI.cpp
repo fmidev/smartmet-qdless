@@ -998,6 +998,7 @@ void UI::popupHelp(HelpContext ctx)
     add("j k", "Tilt down / up");
     add("+  -", "Zoom in / out");
     add("0", "Recentre on the data");
+    add("o", "Surface fill: outline / ocean / land / both");
     addSharedTail();
   }
   else
