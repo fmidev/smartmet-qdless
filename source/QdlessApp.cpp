@@ -7604,7 +7604,6 @@ void App::drawGlobe(const Layout& layout)
 
   // --- Data fill: inverse-orthographic ray-cast onto the near hemisphere.
   const Palette& pal = activePanel().palette;
-  const Rgb ocean{16, 26, 48};  // bare-sphere base, limb-darkened below
   for (int r = 0; r < subH; ++r)
   {
     const double sy = (cy0 - (r + 0.5)) / yscale;
@@ -7622,25 +7621,21 @@ void App::drawGlobe(const Layout& layout)
       const double lat = std::asin(std::clamp(pz, -1.0, 1.0)) * 180.0 / M_PI;
       const double lon = std::atan2(py, px) * 180.0 / M_PI;
 
+      const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
+      // Record the sphere depth for every in-disc sub-pixel — even where there
+      // is no data — so the braille overlay's z-test still culls far-side dots.
+      zbuf[idx] = static_cast<float>(-d);
+
       const float val = transform(itsSource->interpolatedValue(lat, lon));
-      Rgb color{};
-      bool painted = false;
       if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e6F)
       {
-        color = pal.lookup(val);
-        painted = !color.transparent;
+        const Rgb color = pal.lookup(val);
+        if (!color.transparent)
+          pixels[idx] = color;
+        // Out-of-palette / missing: leave transparent. No bare-sphere fill —
+        // the braille limb circle outlines the globe, and the grid footprint
+        // outline (below) shows where sparse data (e.g. precip) actually lives.
       }
-      if (!painted)
-      {
-        // No data here: shade the bare sphere so it still reads as a globe.
-        const double sh = 0.35 + 0.65 * d;  // 1 at the centre, 0.35 at the limb
-        color = Rgb{static_cast<std::uint8_t>(ocean.r * sh),
-                    static_cast<std::uint8_t>(ocean.g * sh),
-                    static_cast<std::uint8_t>(ocean.b * sh)};
-      }
-      const std::size_t idx = static_cast<std::size_t>(r) * subW + c;
-      zbuf[idx] = static_cast<float>(-d);
-      pixels[idx] = color;
     }
   }
 
@@ -7801,6 +7796,44 @@ void App::drawGlobe(const Layout& layout)
         polyB(itsBorders, bordCol);
       if (bCoast)
         polyB(itsCoastlines, coastCol);
+
+      // Data-grid footprint: trace the source's native grid edge — the
+      // [0,1]² viewport rectangle mapped through uvToLatLon, so rotated /
+      // projected grids follow their true boundary, not a loose lat/lon box.
+      // Drawn unconditionally for sub-global grids: now that the bare-sphere
+      // fill is gone, a sparse field (precip with mostly-missing cells) would
+      // otherwise show nothing, so this outline marks where the data sits.
+      // Skipped for (near-)global extents, where the edge would just trace the
+      // antimeridian seam and the poles. lineB works in ECEF, so a grid that
+      // crosses the dateline draws correctly (short 3D chords, no wrap glitch).
+      {
+        const auto bb = itsSource->boundingBox();
+        const bool nearGlobal =
+            (bb.maxLat - bb.minLat) > 170.0 && (bb.maxLon - bb.minLon) > 350.0;
+        if (!nearGlobal)
+        {
+          const Rgb gridCol{95, 140, 120};  // muted teal, distinct from graticule
+          constexpr int kEdgeSteps = 64;
+          auto edge = [&](double u0, double v0, double u1, double v1)
+          {
+            double pLat = 0, pLon = 0;
+            itsSource->uvToLatLon(u0, v0, pLat, pLon);
+            for (int i = 1; i <= kEdgeSteps; ++i)
+            {
+              const double t = static_cast<double>(i) / kEdgeSteps;
+              double lat = 0, lon = 0;
+              itsSource->uvToLatLon(u0 + (u1 - u0) * t, v0 + (v1 - v0) * t, lat, lon);
+              lineB(pLat, pLon, lat, lon, gridCol);
+              pLat = lat;
+              pLon = lon;
+            }
+          };
+          edge(0, 0, 1, 0);  // north edge (v=0 top)
+          edge(1, 0, 1, 1);  // east edge
+          edge(1, 1, 0, 1);  // south edge
+          edge(0, 1, 0, 0);  // west edge
+        }
+      }
 
       // Crisp circular limb: trace the disc boundary directly in the braille
       // grid so the Earth reads as a smooth circle regardless of the chunky
