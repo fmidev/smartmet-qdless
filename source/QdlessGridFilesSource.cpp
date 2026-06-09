@@ -13,6 +13,7 @@ using namespace SmartMet;
 #include <algorithm>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <set>
 #include <stdexcept>
 
