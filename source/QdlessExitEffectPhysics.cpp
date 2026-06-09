@@ -4158,5 +4158,300 @@ void effectVoyager(const Renderer& renderer, const std::vector<Rgb>& src, int w,
     });
 }
 
+// "Rube Goldberg" — a chain of cause-and-effect mechanisms whose only purpose is
+// the trivial task of dismissing the weather map. The data snapshot is integral
+// throughout: it is the rolling marble (a spinning data sphere), the colour of
+// every domino face (sampled from the pixels behind it), and the confetti that
+// drains the screen to black at the end. The timeline t∈[0,1] is carved into
+// stages, each driving the next:
+//   release → ramp roll → domino topple → see-saw fling → pulley bucket →
+//   pendulum swing → balloon pop → drain.
+void effectRubeGoldberg(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+{
+  const float ya = yAspectFor(renderer);
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  auto seg01 = [](float t, float a, float b) { return std::clamp((t - a) / (b - a), 0.0F, 1.0F); };
+  auto smooth = [](float x) { return x * x * (3.0F - 2.0F * x); };
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  constexpr float kPi = 3.14159265F;
+
+  // --- Static contraption layout (fractions of the frame, so it scales). ---
+  const float floorY = h * 0.70F;  // rail the dominoes stand on
+  constexpr int kN = 12;           // number of dominoes
+  const float domX0 = w * 0.24F, domX1 = w * 0.62F;
+  const float domL = mn * 0.14F;                   // domino length
+  const float domW = std::max(1.0F, mn * 0.016F);  // domino half-thickness
+  auto domBaseX = [&](int i) { return domX0 + (domX1 - domX0) * i / static_cast<float>(kN - 1); };
+
+  // Ball path waypoints: release platform → down two ramps → the first domino.
+  const std::array<std::pair<float, float>, 4> wp = {
+      {{w * 0.07F, h * 0.12F},
+       {w * 0.30F, h * 0.40F},
+       {w * 0.18F, h * 0.56F},
+       {domBaseX(0) - mn * 0.06F, floorY - domL * 0.5F}}};
+  const float rBall = mn * 0.045F;
+
+  // See-saw lever: the last domino lands on its short (left) arm, flinging the
+  // counterweight resting on the long (right) arm.
+  const float levX = w * 0.70F, levY = floorY - mn * 0.05F;
+  const float levShort = mn * 0.12F, levLong = mn * 0.20F;
+
+  // Pulley + bucket on the right; pendulum hung from top-centre over a balloon.
+  const float wheelX = w * 0.90F, wheelY = h * 0.16F, wheelR = mn * 0.05F;
+  const float bucketX = w * 0.84F, bucketY0 = h * 0.30F;
+  const float bw = mn * 0.07F, bh = mn * 0.06F;
+  const float pivX = w * 0.50F, pivY = h * 0.10F;
+  const float balloonX = w * 0.50F, balloonY = h * 0.60F;
+  const float pendL = balloonY - pivY;  // bob reaches the balloon at vertical
+  const float rBalloon = mn * 0.05F;
+  const float rBob = mn * 0.04F;
+
+  const Rgb wood{120, 82, 44, false};
+  const Rgb frame{46, 40, 36, false};
+  const Rgb steel{200, 200, 215, false};
+  const Rgb cordCol{170, 158, 138, false};
+  const Rgb balloonCol{220, 52, 64, false};
+
+  runFrames(renderer,
+            w,
+            h,
+            8200,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              // --- Background: the data map, dimmed to a workshop wall. ---
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      s.transparent ? Rgb{16, 14, 12, false}
+                                    : Rgb{u8(s.r * 0.26F), u8(s.g * 0.24F), u8(s.b * 0.20F), false};
+                }
+
+              // --- Ramps + floor rail (dark frame timber). ---
+              for (std::size_t i = 0; i + 1 < wp.size(); ++i)
+                drawSeg(dst,
+                        w,
+                        h,
+                        wp[i].first,
+                        wp[i].second,
+                        wp[i + 1].first,
+                        wp[i + 1].second,
+                        std::max(1.0F, mn * 0.012F),
+                        ya,
+                        wood);
+              drawSeg(dst,
+                      w,
+                      h,
+                      domX0 - mn * 0.10F,
+                      floorY,
+                      levX + levLong,
+                      floorY,
+                      std::max(1.0F, mn * 0.010F),
+                      ya,
+                      frame);
+
+              // --- Dominoes: each topples in a left→right wave once the ball hits.
+              // Face colour is sampled from the data pixel it stands in front of. ---
+              for (int i = 0; i < kN; ++i)
+              {
+                const float startI = 0.30F + 0.16F * i / static_cast<float>(kN - 1);
+                const float ang = smooth(seg01(t, startI, startI + 0.06F)) * (kPi * 0.5F);
+                const float bx = domBaseX(i);
+                const float tipX = bx + domL * std::sin(ang);
+                const float tipY = floorY - domL * std::cos(ang);
+                const Rgb behind = sample(src, w, h, bx, floorY - domL * 0.5F);
+                const Rgb face = behind.transparent ? Rgb{210, 200, 178, false}
+                                                    : Rgb{u8(70 + behind.r * 0.7F),
+                                                          u8(70 + behind.g * 0.7F),
+                                                          u8(70 + behind.b * 0.7F),
+                                                          false};
+                drawSeg(dst, w, h, bx, floorY, tipX, tipY, domW, ya, face);
+              }
+
+              // --- The data marble: rolls the ball path, then rests on domino 0. ---
+              if (t < 0.34F)
+              {
+                const float u = smooth(seg01(t, 0.0F, 0.30F)) * 3.0F;
+                const int si = std::min(2, static_cast<int>(u));
+                const float ff = u - si;
+                const float bx = wp[si].first + (wp[si + 1].first - wp[si].first) * ff;
+                const float by = wp[si].second + (wp[si + 1].second - wp[si].second) * ff;
+                drawDataDisk(
+                    dst, w, h, src, bx, by, rBall, ya, 0.85F, t * 22.0F, Rgb{210, 200, 180, false});
+              }
+
+              // --- See-saw lever: tilts when the last domino lands (~t=0.50). ---
+              const float phi = smooth(seg01(t, 0.50F, 0.60F)) * 0.5F;
+              const float lLx = levX - levShort * std::cos(phi);
+              const float lLy = levY + levShort * std::sin(phi);
+              const float lRx = levX + levLong * std::cos(phi);
+              const float lRy = levY - levLong * std::sin(phi);
+              drawSeg(dst, w, h, lLx, lLy, lRx, lRy, std::max(1.0F, mn * 0.012F), ya, wood);
+              plotDot(dst, w, h, levX, levY, mn * 0.018F, ya, frame);  // pivot block
+
+              // --- Counterweight: rides the long arm, then is flung into the bucket. ---
+              const float bucketY = bucketY0 + smooth(seg01(t, 0.66F, 0.80F)) * h * 0.34F;
+              const float bucketMouthY = bucketY0 - bh * 0.5F;
+              float cwx = lRx, cwy = lRy - rBob;
+              if (t >= 0.58F)
+              {
+                const float a = seg01(t, 0.58F, 0.70F);
+                cwx = lRx + (bucketX - lRx) * a;
+                cwy = (lRy - rBob) + (bucketMouthY - (lRy - rBob)) * a -
+                      mn * 0.20F * std::sin(kPi * a);
+              }
+              if (t < 0.70F)
+                plotDot(dst, w, h, cwx, cwy, rBob * 0.8F, ya, steel);
+
+              // --- Pulley wheel, cord and bucket. ---
+              plotDot(dst, w, h, wheelX, wheelY, wheelR, ya, frame);
+              plotDot(dst, w, h, wheelX, wheelY, wheelR * 0.4F, ya, steel);
+              drawSeg(dst,
+                      w,
+                      h,
+                      wheelX,
+                      wheelY,
+                      bucketX,
+                      bucketY - bh * 0.5F,
+                      std::max(1.0F, mn * 0.004F),
+                      ya,
+                      cordCol);
+              // Bucket as an open U.
+              drawSeg(dst,
+                      w,
+                      h,
+                      bucketX - bw * 0.5F,
+                      bucketY - bh * 0.5F,
+                      bucketX - bw * 0.5F,
+                      bucketY + bh * 0.5F,
+                      std::max(1.0F, mn * 0.008F),
+                      ya,
+                      steel);
+              drawSeg(dst,
+                      w,
+                      h,
+                      bucketX + bw * 0.5F,
+                      bucketY - bh * 0.5F,
+                      bucketX + bw * 0.5F,
+                      bucketY + bh * 0.5F,
+                      std::max(1.0F, mn * 0.008F),
+                      ya,
+                      steel);
+              drawSeg(dst,
+                      w,
+                      h,
+                      bucketX - bw * 0.5F,
+                      bucketY + bh * 0.5F,
+                      bucketX + bw * 0.5F,
+                      bucketY + bh * 0.5F,
+                      std::max(1.0F, mn * 0.008F),
+                      ya,
+                      steel);
+
+              // --- Release cord from the wheel to the pendulum latch: taut until the
+              // descending bucket yanks it free (~t=0.76), then it vanishes. ---
+              if (t < 0.76F)
+                drawSeg(dst,
+                        w,
+                        h,
+                        wheelX,
+                        wheelY,
+                        pivX + mn * 0.04F,
+                        pivY,
+                        std::max(1.0F, mn * 0.004F),
+                        ya,
+                        cordCol);
+
+              // --- Pendulum: held aside until release, then swings to vertical and
+              // strikes the balloon at the pop time (t=0.88). ---
+              const float tPop = 0.88F;
+              const float held = -0.85F;  // radians, swung to the left
+              const float alpha = held * (1.0F - smooth(seg01(t, 0.76F, tPop)));
+              const float bobX = pivX + pendL * std::sin(alpha);
+              const float bobY = pivY + pendL * std::cos(alpha);
+              drawSeg(dst, w, h, pivX, pivY, bobX, bobY, std::max(1.0F, mn * 0.004F), ya, cordCol);
+              plotDot(dst, w, h, bobX, bobY, rBob, ya, steel);
+
+              // --- Balloon (the trivial task's target) — pops at tPop. ---
+              if (t < tPop)
+              {
+                drawSeg(dst,
+                        w,
+                        h,
+                        balloonX,
+                        balloonY + rBalloon,
+                        balloonX,
+                        floorY,
+                        std::max(1.0F, mn * 0.004F),
+                        ya,
+                        cordCol);
+                plotDot(dst, w, h, balloonX, balloonY, rBalloon, ya, balloonCol);
+                plotDot(dst,
+                        w,
+                        h,
+                        balloonX - rBalloon * 0.3F,
+                        balloonY - rBalloon * 0.3F,
+                        rBalloon * 0.25F,
+                        ya,
+                        Rgb{255, 180, 188, false});
+              }
+              else
+              {
+                // Burst fragments fly outward from where the balloon was.
+                const float burst = seg01(t, tPop, tPop + 0.08F);
+                for (int k = 0; k < 14; ++k)
+                {
+                  const float a = hash(k) * 6.2832F;
+                  const float d = burst * rBalloon * 4.0F * (0.6F + hash(k * 5));
+                  plotDot(dst,
+                          w,
+                          h,
+                          balloonX + std::cos(a) * d,
+                          balloonY + std::sin(a) * d * 0.6F,
+                          std::max(1.0F, mn * 0.01F) * (1.0F - burst),
+                          ya,
+                          balloonCol);
+                }
+              }
+
+              // --- Drain: the machine's job done, the map falls away to black, the
+              // last of it scattering as data confetti. ---
+              const float drain = seg01(t, tPop, 1.0F);
+              if (drain > 0.0F)
+              {
+                for (std::size_t k = 0; k < dst.size(); ++k)
+                {
+                  Rgb& p = dst[k];
+                  p = Rgb{u8(p.r * (1.0F - drain)),
+                          u8(p.g * (1.0F - drain)),
+                          u8(p.b * (1.0F - drain)),
+                          false};
+                }
+                for (int k = 0; k < 60; ++k)
+                {
+                  const float sx = hash(k * 3) * (w - 1);
+                  const float startY = hash(k * 7) * floorY;
+                  const float cy = startY + drain * drain * (h - startY) * (0.6F + hash(k * 11));
+                  const Rgb s = sample(src, w, h, sx, startY);
+                  if (!s.transparent && cy < h)
+                    plotDot(dst,
+                            w,
+                            h,
+                            sx,
+                            cy,
+                            std::max(1.0F, mn * 0.008F),
+                            ya,
+                            Rgb{u8(s.r * (1.0F - drain * 0.5F)),
+                                u8(s.g * (1.0F - drain * 0.5F)),
+                                u8(s.b * (1.0F - drain * 0.5F)),
+                                false});
+                }
+              }
+            });
+}
+
 }  // namespace ee_detail
 }  // namespace Qdless

@@ -339,4 +339,6 @@ void effectYggdrasil(const Renderer& renderer, const std::vector<Rgb>& src, int 
 void effectYMCA(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 void effectYorick(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 
+void effectRubeGoldberg(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+
 }}  // namespace Qdless::ee_detail

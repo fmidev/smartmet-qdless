@@ -127,7 +127,12 @@ const char* exitEffectName(int effectIndex)
       "Vinyl Spin"          , "Voyager"             , "Walker Cell"         , "Warhol Banana",
       "Warp"                , "Wildfire Smoke"      , "William Tell"        , "Wizard of Oz",
       "Word Reveal"         , "Wormhole"            , "Wright Flyer"        , "Yggdrasil",
-      "YMCA"                , "Yorick"};
+      "YMCA"                , "Yorick",
+      // Appended at the end (index 329) rather than inserted alphabetically:
+      // kNames is index-aligned with the dispatch switch, so an in-order insert
+      // would renumber ~100 cases. It is the lone member of its own theme, so
+      // the out-of-order placement is invisible in the theme-first picker.
+      "Rube Goldberg"};
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return "random";
   return kNames[effectIndex];
@@ -582,6 +587,7 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
     case 326: effectYggdrasil(renderer, frame, subW, subH); break;
     case 327: effectYMCA(renderer, frame, subW, subH); break;
     case 328: effectYorick(renderer, frame, subW, subH); break;
+    case 329: effectRubeGoldberg(renderer, frame, subW, subH); break;
     default: effectFade(renderer, frame, subW, subH); break;
   }
 

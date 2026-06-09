@@ -1503,7 +1503,7 @@ inline void drawKenneyFrame(std::vector<Rgb>& dst, int w, int h, float ya,
   }
 }
 
-constexpr int kEffectCount = 329;
+constexpr int kEffectCount = 330;
 
 enum class Theme : std::uint8_t
 {
@@ -1866,6 +1866,10 @@ constexpr Theme kThemes[kEffectCount] = {
     /* 326 Yggdrasil              */ Theme::Myth,
     /* 327 YMCA                   */ Theme::Music,
     /* 328 Yorick                 */ Theme::Cinema,
+    // Appended out of alphabetical order: the roster is index-aligned, not
+    // sorted at runtime, and the picker navigates by theme, so its position
+    // within the Maths & physics group is irrelevant.
+    /* 329 Rube Goldberg          */ Theme::Physics,
 };
 
 static_assert(sizeof(kThemes) / sizeof(kThemes[0]) == kEffectCount,
