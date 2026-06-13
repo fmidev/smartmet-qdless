@@ -38,6 +38,37 @@ make install         # Install to $PREFIX/bin (default /usr/bin)
 
 The Makefile builds a single binary; there is no shared library output.
 
+## Browsing the "masala" forecast archive (`--catalog`)
+
+`--catalog` browses a SmartMet/radon file store laid out as
+`<root>/<producer>/<reftime>/<geometry>/<leadtime>/<param-file>`, where each
+leaf file holds one `(parameter, level, timestep)` slice and all metadata is
+encoded in the path + filename (radon convention
+`PARAM_LEVELTYPE_LEVEL_PROJ_NX_NY_SCAN_FFF.ext`).
+
+```bash
+./qdless --catalog /masala/datasets                              # interactive picker
+./qdless --catalog /masala/datasets/131/202606130000/ECEUR0100   # open a cube directly
+./qdless --catalog <cube-dir> -p T-K -l 60 --dump                # headless one-frame
+```
+
+- Pointed **above a cube**, it opens a lazy Miller-column picker (producer →
+  reference time → geometry); pointed **at a cube** (a geometry dir with numeric
+  leadtime subdirs, or a leaf of param files) it opens that cube. `[D]` re-opens
+  the picker.
+- A cube becomes a `(parameter × level × leadtime)` source: lead times drive the
+  time animation, level types/values drive `L`/cross-section, valid time =
+  reference time + lead. Slices are read on demand (one file per slice,
+  LRU-cached) — navigation never walks or `stat`s the tree, only one `readdir`
+  per node expanded.
+- Implementation: `QdlessCatalog.{h,cpp}` (filename parser + `MasalaCube` index +
+  nav helpers) and `QdlessMasalaSource.{h,cpp}` (a `DataSource` over one cube that
+  delegates rendering to a per-file `GridFilesSource`). Full design and the
+  rotated-ll/Lambert rendering fix it required are in
+  `docs/masala-catalog-plan.md` (§7–8).
+- Renders best on `rll`/`regular_ll` (MEPS, ECMWF, GFS); `lcc` works but is slow,
+  and NetCDF (`.nc` wave/ocean) is not yet renderable — see the doc's known gaps.
+
 ## Key dependencies
 
 - SmartMet libraries: `newbase` (querydata), `macgyver`, `smarttools`,

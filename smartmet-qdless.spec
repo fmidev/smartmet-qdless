@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.6.9
-Release: 2%{?dist}.fmi
+Version: 26.6.13
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,10 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sat Jun 13 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.13-1.fmi
+- New "masala" catalog browser (--catalog): browse a SmartMet/radon file store laid out as <root>/<producer>/<reftime>/<geometry>/<leadtime>/<param-file>, where each leaf file holds one (parameter, level, timestep) slice and all metadata is encoded in the path + filename. Pointed above a cube it opens a lazy Miller-column picker (producer -> reference time -> geometry); pointed at a cube (a geometry dir with numeric leadtime subdirs, or a leaf of param files) it opens that cube. A cube becomes a (parameter x level x leadtime) source: lead times drive the time animation, level types/values drive the L popup and cross-section, valid time = reference time + lead. Navigation is lazy (one readdir per node expanded, no recursive walk or stat) and slices are read on demand (one file per slice, LRU-cached) by delegating to a per-file GridFilesSource. New QdlessCatalog (filename parser anchored on the leveltype keyword + MasalaCube index + nav helpers) and QdlessMasalaSource (a DataSource over one cube); design in docs/masala-catalog-plan.md. [D] re-opens the picker.
+- Fixed rotated-latlon and Lambert GRIB rendering, which was blank: GridFilesSource::readGridLatLon used grid-files' double-position getGridLatLonCoordinatesByGridPosition, which returns (0,0) for every position on rotated/Lambert grids in the linked grid-files build, collapsing uvToLatLon to the equator so every sample missed the grid. Switched to the integer getGridLatLonCoordinatesByGridPoint (rounded to the nearest grid point), which is correct for all projections with no regression to regular latlon. This fixes single-file rendering of MEPS/ECMWF/HARMONIE data too, not just the catalog browser.
+- The -p parameter override now also matches a source's display short names, so native GRIB/radon names (e.g. "T-K", "U-MS") work, not only newbase enum names ("Temperature").
 * Tue Jun 09 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.9-2.fmi
 - Globe view: new surface fill cycled with the [o] key — Outline (the bare limb/data look), Ocean (sea stippled with blue braille), Land (continents stippled with khaki braille), and Both. The fill comes from a self-contained GSHHS land/sea classifier (new QdlessLandSea): the binned shoreline segments are continuous across bin walls, so an even-odd scanline fill keyed on each segment's GSHHS level (odd = land) rasterises a correct mask with no GMT bin-polygon assembly. The scan is anchored at the north pole (always open sea) to sidestep Antarctica's special ANT open-arc storage, with an explicit "south of the polar coastline = land" rule for the Antarctic interior; bin origins are shifted into [-180,180) so a shoreline touching the antimeridian no longer fabricates a full-width edge. The mask is cached per zoom level and drawn beneath the coastline/border/graticule/limb overlays as a checker dither, so any weather field underneath still shows through. New --globe-surface outline|ocean|land|both selects the initial mode (handy with --dump --globe).
 - Fixed the RPM version/release numbering scheme to YY.MM.DD-N: the Version is now the date of the change with a per-date release counter N, instead of leaving Version frozen at 26.5.29 while the release counter climbed across later dates.

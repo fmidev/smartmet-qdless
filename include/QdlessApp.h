@@ -48,6 +48,14 @@ struct Options
   // directly (so the existing flat --dir behaviour is preserved when
   // the user points at a single animation directory).
   std::string browseRoot;
+  // Masala-catalog browser mode. When `catalogRoot` is non-empty the App
+  // navigates the SmartMet/radon file store at this path. If it points
+  // straight at a renderable cube (a geometry directory with numeric
+  // leadtime subdirs, or a leaf of param files), that cube opens directly;
+  // otherwise the App presents a lazy Miller-column picker
+  // (producer → reftime → geometry) and builds a MasalaSource on selection.
+  // Set by `--catalog <path>`.
+  std::string catalogRoot;
   std::string paletteDir = "/usr/share/smartmet/qdless/palettes";
   std::string configFile = "/usr/share/smartmet/qdless/qdless.conf";
   std::string coastlineDir = "/usr/share/gshhg-gmt-nc4";
@@ -538,6 +546,15 @@ class App
   // Replace itsSource with a MultiFileSource over the given leaf
   // directory's sorted *.png files, then run initFromSource.
   void openBrowseLeaf(const std::string& dir);
+
+  // Masala catalog browser. Lazy Miller-column navigation of the radon
+  // file store at itsOpts.catalogRoot (producer → reftime → geometry),
+  // each column populated by one readdir. Returns true if a cube was
+  // picked (a MasalaSource is now active). openCatalogCube builds the
+  // MasalaSource for a geometry/leaf directory; the caller runs
+  // initFromSource afterwards (as for openBrowseLeaf).
+  bool openCatalogPicker(UI& ui);
+  void openCatalogCube(const std::string& dir);
   // All post-itsSource init: parameter resolution, panel layout,
   // palette / coastline load, etc. Pulled out of the ctor so the
   // PostGIS deferred-pick path can run it after the user picks a

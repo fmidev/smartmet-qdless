@@ -11,6 +11,7 @@
 using namespace SmartMet;
 
 #include <algorithm>
+#include <cmath>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -505,7 +506,7 @@ bool GridFilesSource::ensureGridGeometry() const
     {
       double a = 0;
       double b = 0;
-      if (msg->getGridLatLonCoordinatesByGridPosition(0, 0, a, b))
+      if (msg->getGridLatLonCoordinatesByGridPoint(0, 0, a, b))
       {
         const double dDirect = std::abs(a - bl.y()) + std::abs(b - bl.x());
         const double dSwapped = std::abs(a - bl.x()) + std::abs(b - bl.y());
@@ -534,9 +535,27 @@ bool GridFilesSource::ensureGridGeometry() const
 bool GridFilesSource::readGridLatLon(SmartMet::GRID::Message* msg, double gi, double gj,
                                      double& lat, double& lon) const
 {
+  // Use the INTEGER coordinate accessor (getGridLatLonCoordinatesByGridPoint),
+  // not the double-position getGridLatLonCoordinatesByGridPosition: in the
+  // grid-files build we link against, the latter returns (0, 0) for every
+  // position on rotated-latlon and Lambert grids. That collapsed uvToLatLon to
+  // the equator/Greenwich and rendered those projections — the bulk of MEPS /
+  // ECMWF / HARMONIE data — entirely blank. The integer accessor reads
+  // straight from the grid's coordinate cache and is correct for all
+  // projections (regular_ll included); rounding gi/gj to the nearest grid
+  // point is sub-cell at terminal resolution.
+  auto clampRound = [](double v, unsigned n) -> unsigned
+  {
+    if (n == 0)
+      return 0;
+    long r = std::lround(v);
+    r = std::clamp(r, 0L, static_cast<long>(n) - 1);
+    return static_cast<unsigned>(r);
+  };
   double a = 0;
   double b = 0;
-  if (!msg->getGridLatLonCoordinatesByGridPosition(gi, gj, a, b))
+  if (!msg->getGridLatLonCoordinatesByGridPoint(clampRound(gi, itsNx), clampRound(gj, itsNy), a,
+                                                b))
     return false;
   if (itsCoordsSwapped)
   {

@@ -90,6 +90,10 @@ int main(int argc, char* argv[])
         ("dir",
          po::value<std::string>(&dirArg),
          "directory whose files (sorted by filename) form the time series") //
+        ("catalog",
+         po::value<std::string>(&opts.catalogRoot),
+         "root of a SmartMet/radon \"masala\" file store to browse "
+         "(producer/reftime/geometry); or a cube directory to open directly") //
         ("pg",
          po::value<std::string>(&opts.pgConn),
          "PostgreSQL/PostGIS connection string (libpq DSN), e.g. "
@@ -193,7 +197,7 @@ int main(int argc, char* argv[])
 
     if (vm.count("help") != 0U ||
         (opts.filename.empty() && opts.filenames.empty() && opts.pgConn.empty() &&
-         opts.browseRoot.empty()))
+         opts.browseRoot.empty() && opts.catalogRoot.empty()))
     {
       std::cout << "Usage: qdless [options] <file> [<file> ...]\n"
                 << "       qdless [options] --dir <directory>\n"

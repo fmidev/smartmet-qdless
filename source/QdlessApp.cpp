@@ -3,6 +3,8 @@
 #include "QdlessExitEffect.h"
 #include "QdlessPhenomena.h"
 #include "QdlessExtrema.h"
+#include "QdlessCatalog.h"
+#include "QdlessMasalaSource.h"
 #include "QdlessMultiFileSource.h"
 #include "QdlessOdimVolumeSource.h"
 #include "QdlessQueryDataSource.h"
@@ -572,6 +574,16 @@ App::App(Options opts) : itsOpts(std::move(opts))
     // so the picker can run (same shape as the deferred PG path).
     itsSource = nullptr;
   }
+  else if (!itsOpts.catalogRoot.empty())
+  {
+    // Masala catalog mode. If the path is already a renderable cube,
+    // open it straight away (works headless for --dump). Otherwise defer
+    // to the interactive Miller-column picker once the UI is up.
+    if (MasalaCatalog::isCubeDir(itsOpts.catalogRoot))
+      openCatalogCube(itsOpts.catalogRoot);
+    else
+      itsSource = nullptr;
+  }
   else if (!itsOpts.filenames.empty() && itsOpts.filenames.size() > 1)
     itsSource = std::make_unique<MultiFileSource>(itsOpts.filenames);
   else
@@ -631,11 +643,30 @@ void App::initFromSource()
     overrideIdx.reserve(itsOpts.parameterOverrides.size());
     for (const auto& name : itsOpts.parameterOverrides)
     {
+      int idx = -1;
+      // First try the newbase enum name (e.g. "Temperature").
       const int id = conv.ToEnum(name);
-      auto it = std::find(itsParamIds.begin(), itsParamIds.end(), id);
-      if (id == kFmiBadParameter || it == itsParamIds.end())
+      if (id != kFmiBadParameter)
+      {
+        auto it = std::find(itsParamIds.begin(), itsParamIds.end(), id);
+        if (it != itsParamIds.end())
+          idx = static_cast<int>(it - itsParamIds.begin());
+      }
+      // Fall back to the source's display short name. GRIB / NetCDF / masala
+      // sources expose native names ("T-K", "U-MS") that aren't newbase enum
+      // names, so the enum lookup above misses them — match those here.
+      if (idx < 0)
+      {
+        for (std::size_t i = 0; i < itsParamIds.size(); ++i)
+          if (itsSource->paramShortName(itsParamIds[i]) == name)
+          {
+            idx = static_cast<int>(i);
+            break;
+          }
+      }
+      if (idx < 0)
         throw std::runtime_error("qdless: parameter not found: " + name);
-      overrideIdx.push_back(static_cast<int>(it - itsParamIds.begin()));
+      overrideIdx.push_back(idx);
     }
     activePanel().paramIndex = overrideIdx.front();
     itsSource->selectParamId(itsParamIds[overrideIdx.front()]);
@@ -990,6 +1021,78 @@ void App::openBrowseLeaf(const std::string& dir)
   if (files.empty())
     throw std::runtime_error("No PNG files in " + dir);
   itsSource = std::make_unique<MultiFileSource>(files);
+}
+
+void App::openCatalogCube(const std::string& dir)
+{
+  MasalaCube cube = MasalaCube::build(dir);
+  if (cube.empty())
+    throw std::runtime_error("No renderable masala data in " + dir);
+  // Caller (constructor tail, or the picker) runs initFromSource afterwards,
+  // mirroring openBrowseLeaf.
+  itsSource = std::make_unique<MasalaSource>(std::move(cube));
+}
+
+bool App::openCatalogPicker(UI& ui)
+{
+  namespace fs = std::filesystem;
+  const std::string root = itsOpts.catalogRoot;
+  std::string here = root;
+
+  // Pretty-print a 12-digit reference time as "2026-06-13 00Z".
+  auto label = [](const std::string& name) -> std::string
+  {
+    if (MasalaCatalog::isReftimeName(name))
+      return name.substr(0, 4) + "-" + name.substr(4, 2) + "-" + name.substr(6, 2) + " " +
+             name.substr(8, 2) + "Z";
+    return name;
+  };
+
+  while (true)
+  {
+    // A renderable cube opens immediately — no further drilling needed.
+    if (MasalaCatalog::isCubeDir(here))
+    {
+      openCatalogCube(here);
+      return true;
+    }
+    auto subs = MasalaCatalog::listSubdirs(here);
+    // Numeric names (producer ids, leadtimes) sort numerically; reference
+    // times newest-first; everything else alphabetically.
+    const bool allDigits =
+        !subs.empty() && std::all_of(subs.begin(), subs.end(), MasalaCatalog::isAllDigitsName);
+    if (allDigits)
+      std::sort(subs.begin(), subs.end(), [](const std::string& a, const std::string& b)
+                { return std::stoll(a) < std::stoll(b); });
+    else if (!subs.empty() && MasalaCatalog::isReftimeName(subs.front()))
+      std::reverse(subs.begin(), subs.end());  // listSubdirs sorted ascending
+
+    const bool canUp = here.size() > root.size();
+    if (subs.empty() && !canUp)
+    {
+      itsLastMessage = "No forecast cubes under " + here;
+      return false;
+    }
+
+    std::vector<std::string> items;
+    items.reserve(subs.size() + 1);
+    if (canUp)
+      items.push_back(".. (up)");
+    for (const auto& s : subs)
+      items.push_back(label(s) + "/");
+
+    const std::string rel = here.size() > root.size() ? here.substr(root.size() + 1) : "";
+    const std::string title = "Masala catalog: " + (rel.empty() ? std::string(".") : rel);
+    const int sel = ui.popupMenu(title, items, 0, /*allowTab=*/false);
+    if (sel < 0)
+      return false;  // Esc — keep whatever source was active
+    if (canUp && sel == 0)
+    {
+      here = fs::path(here).parent_path().string();
+      continue;
+    }
+    here += "/" + subs[static_cast<std::size_t>(canUp ? sel - 1 : sel)];
+  }
 }
 
 bool App::openBrowsePicker(UI& ui)
@@ -4733,9 +4836,10 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       //           arrived directories appear).
       const bool inPgMode = (itsPgDataset != nullptr);
       const bool inBrowseMode = !itsOpts.browseRoot.empty();
-      if (!inPgMode && !inBrowseMode)
+      const bool inCatalogMode = !itsOpts.catalogRoot.empty();
+      if (!inPgMode && !inBrowseMode && !inCatalogMode)
       {
-        itsLastMessage = "Picker is only available with --pg or --dir tree";
+        itsLastMessage = "Picker is only available with --pg, --dir tree, or --catalog";
         return true;
       }
       // Reset state that's specific to the previous layer/leaf, then
@@ -4743,7 +4847,9 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       auto saved = std::move(itsSource);
       try
       {
-        const bool ok = inPgMode ? openPgPicker(ui) : openBrowsePicker(ui);
+        const bool ok = inPgMode        ? openPgPicker(ui)
+                        : inCatalogMode ? openCatalogPicker(ui)
+                                        : openBrowsePicker(ui);
         if (!ok)
         {
           itsSource = std::move(saved);
@@ -8171,8 +8277,9 @@ int App::runOnce()
   if (itsSource == nullptr)
   {
     std::cerr << "qdless: --dump cannot be used with deferred-source modes "
-                 "(--pg without --table, or --dir on a tree root). Pass a "
-                 "concrete file or leaf directory.\n";
+                 "(--pg without --table, --dir on a tree root, or --catalog above "
+                 "a cube). Pass a concrete file, leaf directory, or cube directory "
+                 "(producer/reftime/geometry).\n";
     return 1;
   }
   // --extrema (without --3d): persistence/merge-tree analysis of the active
@@ -8393,6 +8500,14 @@ int App::runInteractive()
   if (itsSource == nullptr && !itsOpts.browseRoot.empty())
   {
     if (!openBrowsePicker(ui))
+      return 0;
+    initFromSource();
+  }
+  // Deferred masala-catalog pick: --catalog pointed above a cube, so the
+  // ctor left itsSource null. Run the Miller-column picker now.
+  if (itsSource == nullptr && !itsOpts.catalogRoot.empty())
+  {
+    if (!openCatalogPicker(ui))
       return 0;
     initFromSource();
   }
