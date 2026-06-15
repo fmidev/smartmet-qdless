@@ -10,6 +10,10 @@
 #include "QdlessQueryDataSource.h"
 #include "QdlessShapeSource.h"
 
+#include <newbase/NFmiGlobals.h>
+
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <gdal_priv.h>
@@ -251,6 +255,81 @@ std::string DataSource::formatLevelByType(int typeId, float value)
     default:
       return fmt::format("{:g}", value);
   }
+}
+
+float DataSource::levelToHeightMeters(int typeId, float levelValue)
+{
+  if (!std::isfinite(levelValue))
+    return kFloatMissing;
+  switch (typeId)
+  {
+    case 100:  // Pressure (hPa) → ISA hypsometric height. Valid (to within a
+               // few hundred metres) from 1000 hPa to the low-stratosphere
+               // levels NWP files carry, which is plenty for a viewer.
+    {
+      if (levelValue <= 0.0F)
+        return kFloatMissing;
+      return 44330.0F * (1.0F - std::pow(levelValue / 1013.25F, 0.1902632F));
+    }
+    case 103:  // Altitude (m)
+    case 105:  // Height (m)
+      return levelValue;
+    default:
+      // Hybrid (109), depth (160), ground (1), unknown: no self-contained
+      // geometric height.
+      return kFloatMissing;
+  }
+}
+
+bool DataSource::sampleVolume(const std::function<void(const VolumeSample&)>& cb) const
+{
+  if (!isVolumetric())
+    return false;
+
+  // Coarse geographic lattice over the data extent. Each node samples one
+  // column (all levels of the active param at this lat/lon) — for backends
+  // whose columns read a file per level, the per-column cost is amortised by
+  // the slice cache, and the lattice keeps the total emission count bounded
+  // regardless of the native grid size.
+  const auto bb = boundingBox();
+  const double latSpan = bb.maxLat - bb.minLat;
+  const double lonSpan = bb.maxLon - bb.minLon;
+  if (latSpan <= 0.0 || lonSpan <= 0.0)
+    return false;
+
+  // Aim for ~120 columns across the wider axis; the shorter axis scales to
+  // keep cells roughly square. ~120×90 columns × tens of levels is a few
+  // hundred thousand emissions — comfortably interactive.
+  constexpr int kMaxAcross = 120;
+  const double aspect = lonSpan / latSpan;
+  int nx = kMaxAcross;
+  int ny = kMaxAcross;
+  if (aspect >= 1.0)
+    ny = std::max(2, static_cast<int>(std::lround(kMaxAcross / aspect)));
+  else
+    nx = std::max(2, static_cast<int>(std::lround(kMaxAcross * aspect)));
+
+  bool any = false;
+  for (int j = 0; j < ny; ++j)
+  {
+    const double lat = bb.minLat + (latSpan * j) / (ny - 1);
+    for (int i = 0; i < nx; ++i)
+    {
+      const double lon = bb.minLon + (lonSpan * i) / (nx - 1);
+      const ColumnProfile col = sampleColumnProfile(lat, lon);
+      const std::size_t n = std::min(col.heightsM.size(), col.values.size());
+      for (std::size_t k = 0; k < n; ++k)
+      {
+        const float h = col.heightsM[k];
+        const float v = col.values[k];
+        if (h == kFloatMissing || v == kFloatMissing || !std::isfinite(h) || !std::isfinite(v))
+          continue;
+        cb(VolumeSample{lat, lon, static_cast<double>(h), v});
+        any = true;
+      }
+    }
+  }
+  return any;
 }
 
 std::string DataSource::gridSignature() const

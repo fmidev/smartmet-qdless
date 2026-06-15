@@ -5649,6 +5649,13 @@ void App::drawMap(UI& ui)
         return;
       }
     }
+    // Any other backend that reports a volume (masala GRIB cube) goes through
+    // the same point-cloud renderer, fed by the generic DataSource::sampleVolume.
+    else if (itsSource->isVolumetric())
+    {
+      draw3DQueryData(ui.layout());
+      return;
+    }
     // Drop back to 2D if the active source can't be drawn in 3D — keeps
     // the toggle safe across paging through a multi-file batch.
     itsMode3D = false;
@@ -6254,12 +6261,17 @@ void App::draw3D(const Layout& layout)
 //     for keeping the inside of the cloud blob hidden by its near face
 void App::draw3DQueryData(const Layout& layout)
 {
-  const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
-  if (qd == nullptr || !qd->isVolumetric())
+  // Works for any source that reports a volume: QueryData (native height
+  // field) and the masala GRIB cube (level axis → height) both feed the same
+  // renderer through DataSource::sampleVolume. The persistent-extrema overlay
+  // ([x]) is QueryData-only (it needs the dense structured-grid read), so we
+  // probe for that backend separately below.
+  if (itsSource == nullptr || !itsSource->isVolumetric())
   {
     itsMode3D = false;
     return;
   }
+  const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
 
   const auto& l = layout;
   if (l.map.height < 4 || l.map.width < 4)
@@ -6393,15 +6405,17 @@ void App::draw3DQueryData(const Layout& layout)
 
   const double vexagger = itsVexagger3D;
 
-  if (!itsShowExtrema)
+  // The persistent-extrema overlay needs QueryDataSource::sampleVolumeGrid;
+  // for other backends (masala) always render the full point cloud.
+  if (!itsShowExtrema || qd == nullptr)
   {
-    // Volume points. The sampler walks every (level, grid-cell) of the
-    // active parameter; we threshold and splat in the camera frame. The
-    // sampler restores info state on return, so the cb is the only place
-    // we touch per-point work — keep it lean.
+    // Volume points. The sampler walks the active parameter's volume; we
+    // threshold and splat in the camera frame. The sampler restores any
+    // internal state on return, so the cb is the only place we touch
+    // per-point work — keep it lean.
     const float threshold = itsThreshold3D;
-    qd->sampleVolume(
-        [&](const QueryDataSource::VolumeSample& s)
+    itsSource->sampleVolume(
+        [&](const DataSource::VolumeSample& s)
         {
           if (!std::isfinite(s.value) || s.value < threshold)
             return;
@@ -7666,11 +7680,15 @@ void App::draw3DCrossSection(const Layout& layout)
 
 bool App::sourceSupports3D() const
 {
+  if (itsSource == nullptr)
+    return false;
   if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr)
     return true;
   if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get()); qd != nullptr)
     return qd->isVolumetric() || qd->isSurfaceStack();
-  return false;
+  // Any other gridded backend that reports a renderable volume — e.g. a masala
+  // GRIB cube whose pressure / height levels form a vertical axis.
+  return itsSource->isVolumetric();
 }
 
 bool App::sourceSupportsGlobe() const
@@ -8174,6 +8192,36 @@ void App::apply3DDefaultsForSource()
     itsThreshold3DUnit = "%";
     itsVexagger3D = 50.0;  // 2000 km wide × ~30 km tall → ~70:1
   }
+  else if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) == nullptr &&
+           itsSource != nullptr && itsSource->isVolumetric())
+  {
+    // Generic gridded volume (masala GRIB cube): the parameter's value range is
+    // unknown up front (could be wind direction 0..360, temperature ~200..320,
+    // ...). Probe the active slice on a coarse lattice to find its minimum and
+    // start the threshold there, so the default shows every cell and , / .
+    // steps gate meaningfully. Units come from the active parameter. The
+    // atmosphere is ~100× thinner than NWP domains are wide, so exaggerate hard
+    // (also the [+] cap).
+    const auto bb = itsSource->boundingBox();
+    float dmin = std::numeric_limits<float>::infinity();
+    if (bb.maxLat > bb.minLat && bb.maxLon > bb.minLon)
+    {
+      constexpr int kNx = 40, kNy = 30;
+      for (int j = 0; j < kNy; ++j)
+        for (int i = 0; i < kNx; ++i)
+        {
+          const double lat = bb.minLat + (bb.maxLat - bb.minLat) * j / (kNy - 1);
+          const double lon = bb.minLon + (bb.maxLon - bb.minLon) * i / (kNx - 1);
+          const float v = itsSource->interpolatedValue(lat, lon);
+          if (v != kFloatMissing && std::isfinite(v))
+            dmin = std::min(dmin, v);
+        }
+    }
+    itsThreshold3D = std::isfinite(dmin) ? dmin : 0.0F;
+    const std::string u = itsSource->paramUnits(itsSource->currentParamId());
+    itsThreshold3DUnit = u.empty() ? "" : u;
+    itsVexagger3D = 50.0;
+  }
   else
   {
     itsThreshold3D = -10.0F;  // dBZ; -10 captures most real echoes
@@ -8363,6 +8411,10 @@ int App::runOnce()
         draw3DQueryData(layout);
       else
         draw3DSurfaceStack(layout);
+    }
+    else if (itsSource->isVolumetric())
+    {
+      draw3DQueryData(layout);
     }
     std::cout << "\x1b[" << ts.rows << ";1H\n";
     return 0;

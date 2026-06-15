@@ -58,6 +58,19 @@ class MasalaSource : public DataSource
   std::string levelLabel(std::size_t i) const override;
   bool levelsAscendWithValue() const override;
 
+  // 3D / cross-section support. A masala cube's active level group is a real
+  // vertical axis (pressure or height levels, one file each), so we expose a
+  // height-aware column and per-height sampling. This lights up the 3D point
+  // cloud ([3]), the 3D curtain ([v]) and the height-mode 2D cross-section the
+  // same way QueryData's GeomHeight does — heights come from the level type
+  // (ISA for pressure, identity for height/altitude) since the slices carry no
+  // height field of their own. Hybrid / depth / ground groups report no height.
+  bool isVolumetric() const override;
+  bool hasNativeHeight() const override;
+  std::pair<double, double> heightRangeKm() const override;
+  ColumnProfile sampleColumnProfile(double lat, double lon) const override;
+  float interpolatedValueAtHeight(double lat, double lon, double heightKm) const override;
+
   float interpolatedValue(double lat, double lon) const override;
   float sampleValueAtUV(double u, double v) const override;
   LatLonBox boundingBox() const override;
@@ -85,6 +98,10 @@ class MasalaSource : public DataSource
   const MasalaCube::LevelAxis* activeAxis() const;
   // Resolve the file path for the current (param, group, level, time).
   std::string currentPath() const;
+  // Resolve the file path for level index `li` of the active (param, group)
+  // at the current time — used by the column / volume samplers to read every
+  // level without disturbing the user's selected level.
+  std::string pathForLevel(std::size_t li) const;
   // Open (or fetch from cache) the delegate for the current slice; nullptr if
   // the file is missing or fails to open.
   DataSource* currentDelegate() const;

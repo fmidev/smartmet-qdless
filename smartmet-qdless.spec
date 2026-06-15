@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.6.15
-Release: 1%{?dist}.fmi
+Release: 2%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,8 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Mon Jun 15 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.15-2.fmi
+- 3D views now work on masala GRIB cubes whose active level group is a real vertical axis (pressure or height/altitude levels): the [3] point cloud, the [v] curtain, and the height-mode 2D cross-section. Heights are derived from the level type (ISA hypsometric formula for pressure levels, identity for height/altitude levels) since the per-slice GRIB files carry no height field of their own; hybrid/depth/ground groups have no derivable geometric height and so offer no 3D. The point cloud is fed by a new generic DataSource::sampleVolume (default implementation walks a coarse lat/lon lattice calling sampleColumnProfile), so the existing point-cloud renderer is no longer QueryData-specific; MasalaSource implements hasNativeHeight/heightRangeKm/sampleColumnProfile/interpolatedValueAtHeight over its level axis, reading each level on demand (one file per level, LRU-cached). New static DataSource::levelToHeightMeters(typeId, value) maps a level value to geometric height by type.
 * Mon Jun 15 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.15-1.fmi
 - Much faster masala/GRIB rendering, especially on rotated-latlon and Lambert grids. Reading was never the bottleneck (grid-files already memory-maps the file); the cost was in per-pixel and per-vertex coordinate transforms during rendering. Three changes: (1) Data sampling now maps the viewport (u,v) straight to grid coordinates and bilinear-samples a once-decoded value grid (new DataSource::sampleValueAtUV, overridden in GridFilesSource), skipping the old grid->latlon->grid round-trip and per-pixel message access. (2) Coastline/border/shape overlays are projected to viewport (u,v) once per grid and cached (App::projectedPolylines); since the projection is viewport-independent, pan/zoom/time/palette changes reuse it instead of reprojecting every vertex each frame. (3) The one-off projection itself is batched (new DataSource::latLonToUVBatch, overridden in GridFilesSource to drive grid-files' getGridPointListByLatLonCoordinates) so one PROJ transform serves the whole coastline instead of one transform setup per vertex, and GridFilesSource::boundingBox() is memoised (it walks the grid perimeter and was being recomputed for every off-grid coastline vertex). On a regional rotated-latlon cube the first painted frame dropped from ~13.5 s to ~1.6 s with byte-identical output; subsequent frames are essentially free for the overlays.
 - MasalaSource per-file LRU cache enlarged from 16 to 64 slices so a full time animation stays warm without reopening/redecoding files each loop.

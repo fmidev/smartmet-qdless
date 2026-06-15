@@ -61,6 +61,14 @@ encoded in the path + filename (radon convention
   reference time + lead. Slices are read on demand (one file per slice,
   LRU-cached) — navigation never walks or `stat`s the tree, only one `readdir`
   per node expanded.
+- **3D views** (`[3]` point cloud, `[v]` curtain, height-mode 2D cross-section)
+  work when the active level group is a real vertical axis — `pressure` or
+  `height`/`altitude` levels. Heights come from the level *type* (ISA
+  hypsometric formula for pressure, identity for height/altitude) since the
+  per-slice files carry no height field; `hybrid`/`depth`/`ground` groups have
+  no derivable height and so offer no 3D. The point cloud samples each level
+  on a coarse lat/lon lattice via `DataSource::sampleVolume` →
+  `MasalaSource::sampleColumnProfile`. Headless check: add `--3d` to a `--dump`.
 - Implementation: `QdlessCatalog.{h,cpp}` (filename parser + `MasalaCube` index +
   nav helpers) and `QdlessMasalaSource.{h,cpp}` (a `DataSource` over one cube that
   delegates rendering to a per-file `GridFilesSource`). Full design and the

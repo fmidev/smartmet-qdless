@@ -4,6 +4,7 @@
 
 #include <newbase/NFmiMetTime.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -119,6 +120,17 @@ class DataSource
   // "FL150", "Surface"). Shared helper for backends that know the type.
   static std::string formatLevelByType(int typeId, float value);
 
+  // Geometric height (metres above sea level) for a level value of a known
+  // FmiLevelType, or kFloatMissing when the type carries no derivable height.
+  // Pressure (hPa) is mapped through the ISA hypsometric formula; height /
+  // altitude levels are already metres and pass through. Hybrid, depth,
+  // ground and unknown types return missing — they have no self-contained
+  // vertical coordinate (hybrid needs geopotential we don't co-locate).
+  // Lets backends that only know their level *type* (e.g. the masala GRIB
+  // cube, where each level is a separate file) still expose a height axis
+  // for the 3D / cross-section views without a height field in the data.
+  static float levelToHeightMeters(int typeId, float levelValue);
+
   virtual std::size_t levelCount() const = 0;
   virtual std::size_t currentLevelIndex() const = 0;
   virtual void selectLevelIndex(std::size_t i) = 0;
@@ -180,6 +192,33 @@ class DataSource
     p.values.push_back(interpolatedValue(lat, lon));
     return p;
   }
+
+  // One emission of the 3D point-cloud sampler: an active-param value at a
+  // geographic point and its geometric height (metres above the source's
+  // reference). Shared by every backend that feeds App::draw3DQueryData.
+  struct VolumeSample
+  {
+    double lat;
+    double lon;
+    double heightMeters;
+    float value;
+  };
+
+  // True when the source has a renderable 3D volume — multiple levels with a
+  // usable height axis — so the App offers the point-cloud / curtain views.
+  // Default false; QueryDataSource (height field) and MasalaSource (pressure /
+  // height level axis) override. Distinct from hasNativeHeight() only in that
+  // a backend could in principle support the curtain without a full volume;
+  // in practice the two coincide for the gridded backends.
+  virtual bool isVolumetric() const { return false; }
+
+  // Emit (lat, lon, heightMeters, value) for the active (param, time) over the
+  // whole volume, for the 3D point cloud. Returns false (no emissions) when the
+  // source has no volume. The default walks a coarse lat/lon lattice over
+  // boundingBox(), sampling sampleColumnProfile() at each node — correct for
+  // any source that implements a height-aware column (MasalaSource). Backends
+  // with a native grid (QueryDataSource) override to splat the real cells.
+  virtual bool sampleVolume(const std::function<void(const VolumeSample&)>& cb) const;
 
   // Sample the currently-selected (param, time, level) slice at a given
   // lat/lon. Returns kFloatMissing or non-finite for missing / out-of-grid.

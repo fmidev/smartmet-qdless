@@ -72,15 +72,8 @@ class QueryDataSource : public DataSource
   // there is no height field or only one level, leaving callbacks
   // un-invoked. State (param / level / location index) is restored on
   // return so the call is transparent to the rest of the App.
-  struct VolumeSample
-  {
-    double lat;
-    double lon;
-    double heightMeters;
-    float value;
-  };
-  bool isVolumetric() const;
-  bool sampleVolume(const std::function<void(const VolumeSample&)>& cb) const;
+  bool isVolumetric() const override;
+  bool sampleVolume(const std::function<void(const VolumeSample&)>& cb) const override;
 
   // Dense structured-grid variant for analyses that need the native (i,j,k)
   // lattice topology (e.g. the persistence / merge-tree extrema finder).
