@@ -340,6 +340,16 @@ float MasalaSource::interpolatedValue(double lat, double lon) const
   return std::numeric_limits<float>::quiet_NaN();
 }
 
+float MasalaSource::sampleValueAtUV(double u, double v) const
+{
+  // Forward to the active per-slice delegate (a GridFilesSource) so the
+  // renderer's hot path goes straight to grid-space sampling on its cached
+  // value grid, with no lat/lon round-trip.
+  if (DataSource* d = currentDelegate())
+    return d->sampleValueAtUV(u, v);
+  return std::numeric_limits<float>::quiet_NaN();
+}
+
 LatLonBox MasalaSource::boundingBox() const
 {
   if (DataSource* d = currentDelegate())
@@ -365,6 +375,21 @@ void MasalaSource::latLonToUV(double lat, double lon, double& u, double& v) cons
     return;
   }
   DataSource::latLonToUV(lat, lon, u, v);
+}
+
+void MasalaSource::latLonToUVBatch(const std::vector<float>& lats,
+                                   const std::vector<float>& lons,
+                                   std::vector<float>& us,
+                                   std::vector<float>& vs) const
+{
+  // Forward to the active delegate so the batch goes through GridFilesSource's
+  // one-transform-per-batch path (used by the coastline projection cache).
+  if (DataSource* d = currentDelegate())
+  {
+    d->latLonToUVBatch(lats, lons, us, vs);
+    return;
+  }
+  DataSource::latLonToUVBatch(lats, lons, us, vs);
 }
 
 std::string MasalaSource::gridSignature() const

@@ -58,6 +58,7 @@ class GridFilesSource : public DataSource
   int currentLevelGroupIndex(int paramId) const override;
 
   float interpolatedValue(double lat, double lon) const override;
+  float sampleValueAtUV(double u, double v) const override;
   LatLonBox boundingBox() const override;
 
   // Map viewport (u,v) to lat/lon through the file's grid geometry, like
@@ -68,6 +69,10 @@ class GridFilesSource : public DataSource
   // grid coordinates also gives correct rendering for projected grids.
   void uvToLatLon(double u, double v, double& lat, double& lon) const override;
   void latLonToUV(double lat, double lon, double& u, double& v) const override;
+  void latLonToUVBatch(const std::vector<float>& lats,
+                       const std::vector<float>& lons,
+                       std::vector<float>& us,
+                       std::vector<float>& vs) const override;
 
   std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
   std::string gridSignature() const override;
@@ -90,6 +95,18 @@ class GridFilesSource : public DataSource
   // file's scanning mode; sample one column to find out. Cached after first
   // call; returns false if the grid is missing or has < 2x2 dimensions.
   bool ensureGridGeometry() const;
+  // Decode the current message's full value grid into itsValues (row-major,
+  // index = grid_j*itsNx + grid_i, matching getGridValueByGridPoint). Cached
+  // and keyed on the message pointer so it survives re-renders of the same
+  // slice but auto-invalidates when the selected (param, time, level) — and
+  // hence the current message — changes. Returns false when there is no
+  // current message, the geometry is unavailable, or decoding fails.
+  bool ensureValueGrid() const;
+  // Walk the grid perimeter to find the lat/lon extent. Expensive (~240 grid
+  // coordinate lookups); boundingBox() memoises it in itsBBox because the
+  // extent is constant for the file and DataSource::latLonToUV calls it once
+  // per out-of-grid point (every off-grid coastline vertex).
+  LatLonBox computeBoundingBox() const;
 
   // Swap-aware wrappers around getGridLatLonCoordinatesByGridPosition /
   // getGridPointByLatLonCoordinates. See `itsCoordsSwapped`.
@@ -140,5 +157,15 @@ class GridFilesSource : public DataSource
   // unswap on every call so the rest of the code can treat the API
   // consistently.
   mutable bool itsCoordsSwapped = false;
+
+  // Cached decoded value grid for sampleValueAtUV(). Keyed on the message it
+  // was decoded from; cleared/repopulated by ensureValueGrid() when the
+  // current message changes. itsValues is row-major, length itsNx*itsNy.
+  mutable const SmartMet::GRID::Message* itsValueMsg = nullptr;
+  mutable std::vector<float> itsValues;
+
+  // Memoised lat/lon bounding box (see computeBoundingBox).
+  mutable bool itsBBoxValid = false;
+  mutable LatLonBox itsBBox;
 };
 }  // namespace Qdless

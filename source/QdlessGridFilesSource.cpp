@@ -470,6 +470,100 @@ float GridFilesSource::interpolatedValue(double lat, double lon) const
   return static_cast<float>(msg->getGridValueByLatLonCoordinate(lat, lon, 1));
 }
 
+bool GridFilesSource::ensureValueGrid() const
+{
+  auto* msg = currentMessage();
+  if (msg == nullptr)
+  {
+    itsValueMsg = nullptr;
+    itsValues.clear();
+    return false;
+  }
+  // Cache hit: same message as last decode. Re-renders of one slice (pan,
+  // zoom, palette change, overlay toggles) all reuse the decoded grid.
+  if (msg == itsValueMsg && !itsValues.empty())
+    return true;
+  if (!ensureGridGeometry())
+    return false;
+  try
+  {
+    // Pull the whole slice once. getGridValueVector fills the array in the
+    // grid's native scan order (index = grid_j*nx + grid_i), the same
+    // indexing getGridValueByGridPoint uses — so a value at (i, j) lines up
+    // with the lat/lon uvToLatLon reports for that grid point.
+    T::ParamValue_vec vals;
+    msg->getGridValueVector(vals);
+    if (vals.size() < static_cast<std::size_t>(itsNx) * itsNy)
+    {
+      itsValueMsg = nullptr;
+      itsValues.clear();
+      return false;
+    }
+    itsValues = std::move(vals);
+    itsValueMsg = msg;
+    return true;
+  }
+  catch (const std::exception&)
+  {
+    itsValueMsg = nullptr;
+    itsValues.clear();
+    return false;
+  }
+}
+
+float GridFilesSource::sampleValueAtUV(double u, double v) const
+{
+  if (!ensureValueGrid())
+  {
+    // Geometry or decode unavailable — fall back to the lat/lon round-trip
+    // so we still render something (e.g. exotic projections we can't map).
+    double lat = 0;
+    double lon = 0;
+    uvToLatLon(u, v, lat, lon);
+    return interpolatedValue(lat, lon);
+  }
+  // Same (u, v) → (grid_i, grid_j) mapping as uvToLatLon, so the sampled
+  // cell matches the coastline / graticule overlays. v=0 = north edge.
+  const double gi = u * (itsNx - 1);
+  const double gj = itsScanFromNorth ? v * (itsNy - 1) : (1.0 - v) * (itsNy - 1);
+
+  const auto floorIdx = [](double x, unsigned n) -> unsigned
+  {
+    const long r = static_cast<long>(std::floor(x));
+    return static_cast<unsigned>(std::clamp(r, 0L, static_cast<long>(n) - 1));
+  };
+  const unsigned i0 = floorIdx(gi, itsNx);
+  const unsigned j0 = floorIdx(gj, itsNy);
+  const unsigned i1 = std::min(i0 + 1, itsNx - 1);
+  const unsigned j1 = std::min(j0 + 1, itsNy - 1);
+  const double fi = gi - static_cast<double>(i0);
+  const double fj = gj - static_cast<double>(j0);
+
+  const auto at = [&](unsigned i, unsigned j) -> float
+  { return itsValues[static_cast<std::size_t>(j) * itsNx + i]; };
+
+  // Bilinear over the four surrounding grid points, renormalising over the
+  // non-missing corners so a single missing neighbour (bitmap edge) doesn't
+  // poison the cell. ParamValueMissing is grid-files' missing sentinel.
+  double sum = 0;
+  double sumW = 0;
+  const auto add = [&](float val, double w)
+  {
+    if (val == static_cast<float>(ParamValueMissing) || !std::isfinite(val) ||
+        std::abs(val) > 1e10F)
+      return;
+    sum += static_cast<double>(val) * w;
+    sumW += w;
+  };
+  add(at(i0, j0), (1.0 - fi) * (1.0 - fj));
+  add(at(i1, j0), fi * (1.0 - fj));
+  add(at(i0, j1), (1.0 - fi) * fj);
+  add(at(i1, j1), fi * fj);
+  if (sumW <= 0.0)
+    return std::numeric_limits<float>::quiet_NaN();
+  return static_cast<float>(sum / sumW);
+}
+
 bool GridFilesSource::ensureGridGeometry() const
 {
   if (itsGeometryCached)
@@ -629,6 +723,109 @@ void GridFilesSource::latLonToUV(double lat, double lon, double& u, double& v) c
   v = itsScanFromNorth ? gj / (itsNy - 1) : 1.0 - gj / (itsNy - 1);
 }
 
+void GridFilesSource::latLonToUVBatch(const std::vector<float>& lats,
+                                      const std::vector<float>& lons,
+                                      std::vector<float>& us,
+                                      std::vector<float>& vs) const
+{
+  const std::size_t n = lats.size();
+  us.resize(n);
+  vs.resize(n);
+  if (n == 0)
+    return;
+  if (!ensureGridGeometry())
+  {
+    DataSource::latLonToUVBatch(lats, lons, us, vs);
+    return;
+  }
+  auto* msg = itsFile->getMessageByIndex(0);
+
+  // Project the whole batch with ONE PROJ/GDAL transform via grid-files' list
+  // API, instead of the per-point latLonToUV (which rebuilds the lat/lon→grid
+  // transform on every call — the dominant coastline-projection cost). The
+  // list API feeds convert() with Coordinate (x=lon, y=lat), matching the
+  // per-point path. Backends whose per-point path swaps lat/lon (NetCDF, see
+  // itsCoordsSwapped) or don't implement the list API are caught by the
+  // validation + fallback below.
+  T::Coordinate_vec in;
+  in.reserve(n);
+  for (std::size_t i = 0; i < n; ++i)
+    in.emplace_back(static_cast<double>(lons[i]), static_cast<double>(lats[i]));
+
+  T::Coordinate_vec pts;
+  try
+  {
+    msg->getGridPointListByLatLonCoordinates(in, pts);
+  }
+  catch (const std::exception&)
+  {
+    DataSource::latLonToUVBatch(lats, lons, us, vs);
+    return;
+  }
+  if (pts.size() != n)
+  {
+    DataSource::latLonToUVBatch(lats, lons, us, vs);
+    return;
+  }
+
+  // Validate against the per-point path on up to 16 in-grid samples. If they
+  // disagree beyond a sub-cell tolerance, the list API's ordering doesn't
+  // match this projection — fall back to the (authoritative) per-point loop.
+  const std::size_t step = std::max<std::size_t>(1, n / 16);
+  for (std::size_t i = 0, checked = 0; i < n && checked < 16; i += step)
+  {
+    const double gi = pts[i].x();
+    const double gj = pts[i].y();
+    if (gi == ParamValueMissing || gj == ParamValueMissing)
+      continue;  // out of grid: per-point uses bbox fallback, not comparable
+    double rgi = 0;
+    double rgj = 0;
+    bool ok = false;
+    try
+    {
+      ok = lookupGridPoint(msg, lats[i], lons[i], rgi, rgj);
+    }
+    catch (const std::exception&)
+    {
+      ok = false;
+    }
+    if (!ok)
+      continue;
+    if (std::abs(gi - rgi) > 0.5 || std::abs(gj - rgj) > 0.5)
+    {
+      DataSource::latLonToUVBatch(lats, lons, us, vs);
+      return;
+    }
+    ++checked;
+  }
+
+  // Scatter to (u,v). Out-of-grid points fall back to the per-point bbox path
+  // so off-screen coastline vertices behave exactly as before (finite, then
+  // clipped by the viewport) rather than vanishing.
+  for (std::size_t i = 0; i < n; ++i)
+  {
+    const double gi = pts[i].x();
+    const double gj = pts[i].y();
+    if (gi == ParamValueMissing || gj == ParamValueMissing)
+    {
+      // Out of grid. The per-point path would retry the (expensive) PROJ
+      // lookup, fail, and fall through to the bbox interpolation — so go
+      // straight to the bbox path here. This is the common case for a global
+      // coastline on a regional grid (most vertices lie outside it), and
+      // retrying PROJ per vertex would reintroduce the very cost the batch
+      // eliminates. The result is identical to the per-point fallback.
+      double u = 0;
+      double v = 0;
+      DataSource::latLonToUV(lats[i], lons[i], u, v);
+      us[i] = static_cast<float>(u);
+      vs[i] = static_cast<float>(v);
+      continue;
+    }
+    us[i] = static_cast<float>(gi / (itsNx - 1));
+    vs[i] = static_cast<float>(itsScanFromNorth ? gj / (itsNy - 1) : 1.0 - gj / (itsNy - 1));
+  }
+}
+
 namespace
 {
 const char* gridProjectionName(T::GridProjection p)
@@ -722,6 +919,16 @@ std::string GridFilesSource::gridSignature() const
 }
 
 LatLonBox GridFilesSource::boundingBox() const
+{
+  if (!itsBBoxValid)
+  {
+    itsBBox = computeBoundingBox();
+    itsBBoxValid = true;
+  }
+  return itsBBox;
+}
+
+LatLonBox GridFilesSource::computeBoundingBox() const
 {
   LatLonBox b;
   if (!ensureGridGeometry())

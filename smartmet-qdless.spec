@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.6.13
+Version: 26.6.15
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -115,6 +115,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Mon Jun 15 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.15-1.fmi
+- Much faster masala/GRIB rendering, especially on rotated-latlon and Lambert grids. Reading was never the bottleneck (grid-files already memory-maps the file); the cost was in per-pixel and per-vertex coordinate transforms during rendering. Three changes: (1) Data sampling now maps the viewport (u,v) straight to grid coordinates and bilinear-samples a once-decoded value grid (new DataSource::sampleValueAtUV, overridden in GridFilesSource), skipping the old grid->latlon->grid round-trip and per-pixel message access. (2) Coastline/border/shape overlays are projected to viewport (u,v) once per grid and cached (App::projectedPolylines); since the projection is viewport-independent, pan/zoom/time/palette changes reuse it instead of reprojecting every vertex each frame. (3) The one-off projection itself is batched (new DataSource::latLonToUVBatch, overridden in GridFilesSource to drive grid-files' getGridPointListByLatLonCoordinates) so one PROJ transform serves the whole coastline instead of one transform setup per vertex, and GridFilesSource::boundingBox() is memoised (it walks the grid perimeter and was being recomputed for every off-grid coastline vertex). On a regional rotated-latlon cube the first painted frame dropped from ~13.5 s to ~1.6 s with byte-identical output; subsequent frames are essentially free for the overlays.
+- MasalaSource per-file LRU cache enlarged from 16 to 64 slices so a full time animation stays warm without reopening/redecoding files each loop.
 * Sat Jun 13 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.13-1.fmi
 - New "masala" catalog browser (--catalog): browse a SmartMet/radon file store laid out as <root>/<producer>/<reftime>/<geometry>/<leadtime>/<param-file>, where each leaf file holds one (parameter, level, timestep) slice and all metadata is encoded in the path + filename. Pointed above a cube it opens a lazy Miller-column picker (producer -> reference time -> geometry); pointed at a cube (a geometry dir with numeric leadtime subdirs, or a leaf of param files) it opens that cube. A cube becomes a (parameter x level x leadtime) source: lead times drive the time animation, level types/values drive the L popup and cross-section, valid time = reference time + lead. Navigation is lazy (one readdir per node expanded, no recursive walk or stat) and slices are read on demand (one file per slice, LRU-cached) by delegating to a per-file GridFilesSource. New QdlessCatalog (filename parser anchored on the leveltype keyword + MasalaCube index + nav helpers) and QdlessMasalaSource (a DataSource over one cube); design in docs/masala-catalog-plan.md. [D] re-opens the picker.
 - Fixed rotated-latlon and Lambert GRIB rendering, which was blank: GridFilesSource::readGridLatLon used grid-files' double-position getGridLatLonCoordinatesByGridPosition, which returns (0,0) for every position on rotated/Lambert grids in the linked grid-files build, collapsing uvToLatLon to the equator so every sample missed the grid. Switched to the integer getGridLatLonCoordinatesByGridPoint (rounded to the nearest grid point), which is correct for all projections with no regression to regular latlon. This fixes single-file rendering of MEPS/ECMWF/HARMONIE data too, not just the catalog browser.

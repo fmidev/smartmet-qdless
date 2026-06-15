@@ -170,6 +170,24 @@ void DataSource::latLonToUV(double lat, double lon, double& u, double& v) const
   v = latSpan > 0 ? (bbox.maxLat - lat) / latSpan : 0.0;
 }
 
+void DataSource::latLonToUVBatch(const std::vector<float>& lats,
+                                 const std::vector<float>& lons,
+                                 std::vector<float>& us,
+                                 std::vector<float>& vs) const
+{
+  const std::size_t n = lats.size();
+  us.resize(n);
+  vs.resize(n);
+  for (std::size_t i = 0; i < n; ++i)
+  {
+    double u = 0;
+    double v = 0;
+    latLonToUV(lats[i], lons[i], u, v);
+    us[i] = static_cast<float>(u);
+    vs[i] = static_cast<float>(v);
+  }
+}
+
 std::string DataSource::levelLabel(std::size_t i) const
 {
   return fmt::format("{:g}", levelValueAt(i));

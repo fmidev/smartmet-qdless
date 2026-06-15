@@ -59,9 +59,14 @@ class MasalaSource : public DataSource
   bool levelsAscendWithValue() const override;
 
   float interpolatedValue(double lat, double lon) const override;
+  float sampleValueAtUV(double u, double v) const override;
   LatLonBox boundingBox() const override;
   void uvToLatLon(double u, double v, double& lat, double& lon) const override;
   void latLonToUV(double lat, double lon, double& u, double& v) const override;
+  void latLonToUVBatch(const std::vector<float>& lats,
+                       const std::vector<float>& lons,
+                       std::vector<float>& us,
+                       std::vector<float>& vs) const override;
   std::string gridSignature() const override;
   std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
   SourceCategory category() const override { return SourceCategory::Gridded; }
@@ -95,8 +100,13 @@ class MasalaSource : public DataSource
   mutable std::map<std::size_t, int> itsActiveGroup;
   mutable std::map<std::pair<std::size_t, int>, std::size_t> itsActiveLevel;
 
-  // Small LRU cache of opened per-file delegates.
-  static constexpr std::size_t kCacheMax = 16;
+  // LRU cache of opened per-file delegates. Each masala slice is its own
+  // file, so a single time animation steps through one file per lead time;
+  // sizing the cache to cover a typical forecast length (≈24–66 steps) keeps
+  // a full animation loop entirely in cache — no re-open / re-decode per
+  // frame once warm. Each cached GridFilesSource also holds its decoded
+  // value grid (≈nx*ny floats), so this trades memory for animation speed.
+  static constexpr std::size_t kCacheMax = 64;
   mutable std::map<std::string, std::unique_ptr<DataSource>> itsCache;
   mutable std::deque<std::string> itsCacheOrder;
 

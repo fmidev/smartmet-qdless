@@ -185,6 +185,23 @@ class DataSource
   // lat/lon. Returns kFloatMissing or non-finite for missing / out-of-grid.
   virtual float interpolatedValue(double lat, double lon) const = 0;
 
+  // Sample the active slice directly at viewport position (u, v) ∈ [0, 1]²
+  // (v=0 = top). The renderer calls this once per terminal sub-cell every
+  // frame — it is the hot path. The default routes through uvToLatLon +
+  // interpolatedValue, which for a projected grid does a forward grid→lat/lon
+  // projection here and then an inverse lat/lon→grid projection inside
+  // interpolatedValue: a wasteful round-trip that is expensive on rotated-
+  // latlon / Lambert grids. Projection-backed sources override this to map
+  // (u, v) straight to grid coordinates and bilinear-sample a cached value
+  // grid, skipping both projections and the per-pixel decode.
+  virtual float sampleValueAtUV(double u, double v) const
+  {
+    double lat = 0;
+    double lon = 0;
+    uvToLatLon(u, v, lat, lon);
+    return interpolatedValue(lat, lon);
+  }
+
   // Lat/lon bounding box of the data extent (rectangle covering all grid
   // points; exact for lat/lon grids, approximate for projected grids).
   virtual LatLonBox boundingBox() const = 0;
@@ -204,6 +221,18 @@ class DataSource
   // over `boundingBox()` so unprojected backends work without overrides.
   virtual void uvToLatLon(double u, double v, double& lat, double& lon) const;
   virtual void latLonToUV(double lat, double lon, double& u, double& v) const;
+
+  // Batched latLonToUV: project many points at once. `lats`/`lons` are
+  // parallel inputs; `us`/`vs` are resized and filled in parallel. The
+  // default just loops latLonToUV, but projected backends override it —
+  // GridFilesSource builds ONE PROJ/GDAL coordinate transform for the whole
+  // batch instead of paying the (dominant) per-point transform setup, which
+  // is what made projecting a full coastline take seconds on rotated-latlon
+  // / Lambert grids. Used by the coastline projection cache.
+  virtual void latLonToUVBatch(const std::vector<float>& lats,
+                               const std::vector<float>& lons,
+                               std::vector<float>& us,
+                               std::vector<float>& vs) const;
 
   // Stable string identifying the grid (projection + dimensions + extent).
   // Used by MultiFileSource to verify all members of a multi-file batch

@@ -1416,10 +1416,7 @@ void App::loadPalette()
   {
     for (int i = 0; i < N; ++i)
     {
-      double lat = 0;
-      double lon = 0;
-      itsSource->uvToLatLon((i + 0.5) / N, (j + 0.5) / N, lat, lon);
-      const float v = transform(itsSource->interpolatedValue(lat, lon));
+      const float v = transform(itsSource->sampleValueAtUV((i + 0.5) / N, (j + 0.5) / N));
       if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F)
         continue;
       lo = std::min(lo, v);
@@ -1597,10 +1594,7 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin, f
     for (int sx = 0; sx < subWidth; ++sx)
     {
       const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / subWidth * spanU;
-      double lat = 0;
-      double lon = 0;
-      itsSource->uvToLatLon(up, vp, lat, lon);
-      const float val = transform(itsSource->interpolatedValue(lat, lon));
+      const float val = transform(itsSource->sampleValueAtUV(up, vp));
       if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e6F)
       {
         dataMin = std::min(dataMin, val);
@@ -1666,10 +1660,7 @@ std::vector<App::ViewportStats> App::ensureViewportStats() const
       for (int sx = 0; sx < kSampleW; ++sx)
       {
         const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / kSampleW * spanU;
-        double lat = 0;
-        double lon = 0;
-        itsSource->uvToLatLon(up, vp, lat, lon);
-        const float val = transform(itsSource->interpolatedValue(lat, lon));
+        const float val = transform(itsSource->sampleValueAtUV(up, vp));
         if (val == kFloatMissing || !std::isfinite(val) || std::fabs(val) > 1e6F)
           continue;
         sum += val;
@@ -2211,10 +2202,7 @@ std::string App::exportPng(std::string& err) const
     for (int px = 0; px < width; ++px)
     {
       const float u = itsViewport.uMin + (static_cast<float>(px) + 0.5F) / width * spanU;
-      double lat = 0;
-      double lon = 0;
-      itsSource->uvToLatLon(u, v, lat, lon);
-      const float val = transform(itsSource->interpolatedValue(lat, lon));
+      const float val = transform(itsSource->sampleValueAtUV(u, v));
       Rgb c = activePanel().palette.lookup(val);
       if (c.transparent)
         continue;  // leave white for "no data"
@@ -2228,11 +2216,8 @@ std::string App::exportPng(std::string& err) const
   {
     if (polys.empty())
       return;
-    auto toPixel = [&](float lon, float lat) -> std::pair<int, int>
+    auto toPixel = [&](float u, float v) -> std::pair<int, int>
     {
-      double u = 0;
-      double v = 0;
-      itsSource->latLonToUV(lat, lon, u, v);
       const double u01 = (u - itsViewport.uMin) / spanU;
       const double v01 = (v - itsViewport.vMin) / spanV;
       return {static_cast<int>(u01 * width), static_cast<int>(v01 * height)};
@@ -2262,14 +2247,15 @@ std::string App::exportPng(std::string& err) const
         }
       }
     };
-    for (const auto& pl : polys)
+    const auto& proj = projectedPolylines(polys);
+    for (const auto& pp : proj)
     {
-      if (pl.lons.size() < 2)
+      if (pp.us.size() < 2)
         continue;
-      auto prev = toPixel(pl.lons[0], pl.lats[0]);
-      for (std::size_t i = 1; i < pl.lons.size(); ++i)
+      auto prev = toPixel(pp.us[0], pp.vs[0]);
+      for (std::size_t i = 1; i < pp.us.size(); ++i)
       {
-        auto cur = toPixel(pl.lons[i], pl.lats[i]);
+        auto cur = toPixel(pp.us[i], pp.vs[i]);
         if (std::abs(cur.first - prev.first) < width && std::abs(cur.second - prev.second) < height)
           line(prev.first, prev.second, cur.first, cur.second);
         prev = cur;
@@ -2668,10 +2654,7 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
     for (int cx = stepX / 2; cx < cellW; cx += stepX)
     {
       const float up = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
-      double lat = 0;
-      double lon = 0;
-      itsSource->uvToLatLon(up, vp, lat, lon);
-      const float val = transform(itsSource->interpolatedValue(lat, lon));
+      const float val = transform(itsSource->sampleValueAtUV(up, vp));
       samples.push_back({cx, cy, val, 0.0F});
     }
   }
@@ -2683,10 +2666,7 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
     for (int cx = stepX / 2; cx < cellW; cx += stepX)
     {
       const float up = itsViewport.uMin + (static_cast<float>(cx) + 0.5F) / cellW * spanU;
-      double lat = 0;
-      double lon = 0;
-      itsSource->uvToLatLon(up, vp, lat, lon);
-      samples[i++].v = itsSource->interpolatedValue(lat, lon);
+      samples[i++].v = itsSource->sampleValueAtUV(up, vp);
       // Wind components are not unit-shifted (m/s expected); skip transform.
     }
   }
@@ -2729,6 +2709,55 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
        << itsRenderer.fgEscape(color) << "\x1b[1m" << kArrows[idx] << "\x1b[0m";
   }
   return os.str();
+}
+
+const std::vector<App::ProjectedPolyline>& App::projectedPolylines(
+    const std::vector<Polyline>& polys) const
+{
+  ProjCacheEntry& e = itsProjCache[&polys];
+  const std::string sig = itsSource ? itsSource->gridSignature() : std::string();
+  // Cache hit: same vector contents (data ptr + size) under the same grid.
+  if (e.dataPtr == polys.data() && e.size == polys.size() && e.signature == sig &&
+      e.proj.size() == polys.size())
+    return e.proj;
+
+  // Reproject every vertex for this (polyline set, grid) exactly once, here
+  // instead of per frame. Gather all vertices into one flat batch and project
+  // them in a single latLonToUVBatch call: GridFilesSource builds one PROJ
+  // transform for the whole batch, turning what was a per-vertex transform
+  // setup (seconds on rotated-latlon / Lambert) into one setup + N cheap
+  // transforms. Then scatter the results back per polyline.
+  std::size_t total = 0;
+  for (const auto& pl : polys)
+    total += pl.lons.size();
+  std::vector<float> flatLats;
+  std::vector<float> flatLons;
+  flatLats.reserve(total);
+  flatLons.reserve(total);
+  for (const auto& pl : polys)
+    for (std::size_t i = 0; i < pl.lons.size(); ++i)
+    {
+      flatLats.push_back(pl.lats[i]);
+      flatLons.push_back(pl.lons[i]);
+    }
+  std::vector<float> flatUs;
+  std::vector<float> flatVs;
+  itsSource->latLonToUVBatch(flatLats, flatLons, flatUs, flatVs);
+
+  e.proj.assign(polys.size(), ProjectedPolyline{});
+  std::size_t k = 0;
+  for (std::size_t j = 0; j < polys.size(); ++j)
+  {
+    const std::size_t n = polys[j].lons.size();
+    ProjectedPolyline& pp = e.proj[j];
+    pp.us.assign(flatUs.begin() + k, flatUs.begin() + k + n);
+    pp.vs.assign(flatVs.begin() + k, flatVs.begin() + k + n);
+    k += n;
+  }
+  e.dataPtr = polys.data();
+  e.size = polys.size();
+  e.signature = sig;
+  return e.proj;
 }
 
 void App::overlayPolylines(std::vector<Rgb>& pixels,
@@ -2776,24 +2805,24 @@ void App::overlayPolylines(std::vector<Rgb>& pixels,
     }
   };
 
-  auto toSub = [&](float lon, float lat) -> std::pair<int, int>
+  // Vertices are pre-projected to (u, v) once per grid (see
+  // projectedPolylines); here we only apply the cheap viewport crop + scale.
+  auto toSub = [&](float u, float v) -> std::pair<int, int>
   {
-    double u = 0;
-    double v = 0;
-    itsSource->latLonToUV(lat, lon, u, v);
     const double u01 = (u - itsViewport.uMin) / spanU;
     const double v01 = (v - itsViewport.vMin) / spanV;
     return {static_cast<int>(u01 * subWidth), static_cast<int>(v01 * subHeight)};
   };
 
-  for (const auto& pl : polylines)
+  const auto& proj = projectedPolylines(polylines);
+  for (const auto& pp : proj)
   {
-    if (pl.lons.size() < 2)
+    if (pp.us.size() < 2)
       continue;
-    auto prev = toSub(pl.lons[0], pl.lats[0]);
-    for (std::size_t i = 1; i < pl.lons.size(); ++i)
+    auto prev = toSub(pp.us[0], pp.vs[0]);
+    for (std::size_t i = 1; i < pp.us.size(); ++i)
     {
-      auto cur = toSub(pl.lons[i], pl.lats[i]);
+      auto cur = toSub(pp.us[i], pp.vs[i]);
       if (std::abs(cur.first - prev.first) < subWidth &&
           std::abs(cur.second - prev.second) < subHeight)
         drawLine(prev.first, prev.second, cur.first, cur.second);
@@ -2924,24 +2953,24 @@ void App::appendPolylineBraille(std::ostringstream& os,
     }
   };
 
-  auto toSub = [&](float lon, float lat) -> std::pair<int, int>
+  // Vertices are pre-projected to (u, v) once per grid (see
+  // projectedPolylines); here we only apply the cheap viewport crop + scale.
+  auto toSub = [&](float u, float v) -> std::pair<int, int>
   {
-    double u = 0;
-    double v = 0;
-    itsSource->latLonToUV(lat, lon, u, v);
     const double u01 = (u - itsViewport.uMin) / spanU;
     const double v01 = (v - itsViewport.vMin) / spanV;
     return {static_cast<int>(u01 * bW), static_cast<int>(v01 * bH)};
   };
 
-  for (const auto& pl : polylines)
+  const auto& proj = projectedPolylines(polylines);
+  for (const auto& pp : proj)
   {
-    if (pl.lons.size() < 2)
+    if (pp.us.size() < 2)
       continue;
-    auto prev = toSub(pl.lons[0], pl.lats[0]);
-    for (std::size_t i = 1; i < pl.lons.size(); ++i)
+    auto prev = toSub(pp.us[0], pp.vs[0]);
+    for (std::size_t i = 1; i < pp.us.size(); ++i)
     {
-      auto cur = toSub(pl.lons[i], pl.lats[i]);
+      auto cur = toSub(pp.us[i], pp.vs[i]);
       if (std::abs(cur.first - prev.first) < bW && std::abs(cur.second - prev.second) < bH)
         drawLine(prev.first, prev.second, cur.first, cur.second);
       prev = cur;

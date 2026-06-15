@@ -11,6 +11,7 @@
 
 #include <array>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -211,6 +212,28 @@ class App
   void loadCoastlines(int subPixelsW = 0, int subPixelsH = 0);
 
   std::vector<Rgb> sampleSlice(int subWidth, int subHeight, float& dataMin, float& dataMax) const;
+
+  // A polyline pre-projected into the source's viewport (u, v) space (the
+  // full-grid [0, 1] coordinates latLonToUV returns, before the viewport
+  // crop). Parallel to Polyline::lons/lats.
+  struct ProjectedPolyline
+  {
+    std::vector<float> us;
+    std::vector<float> vs;
+  };
+  // Return `polys` projected to (u, v), cached. latLonToUV is viewport-
+  // independent (it maps to the full grid, not the cropped viewport), so the
+  // projection only changes when the polyline data or the grid geometry
+  // changes — never on pan / zoom / time / palette. Reprojecting every
+  // coastline vertex each frame was the dominant cost on rotated-latlon /
+  // Lambert grids (latLonToUV does a grid-files inverse projection per call);
+  // this collapses it to a one-off per (polyline set, grid). The cache is
+  // keyed on the vector's identity plus its data pointer + size + grid
+  // signature, so a reload (new shoreline file on zoom) or a geometry change
+  // (new cube) transparently recomputes.
+  const std::vector<ProjectedPolyline>& projectedPolylines(
+      const std::vector<Polyline>& polys) const;
+
   void overlayPolylines(std::vector<Rgb>& pixels,
                         int subWidth,
                         int subHeight,
@@ -259,6 +282,19 @@ class App
   std::vector<Polyline> itsBorders;
   std::string itsCoastlinePath;  // currently loaded shoreline file
   std::string itsBorderPath;     // currently loaded border file
+
+  // Projection cache for projectedPolylines(): one entry per polyline-set
+  // member address (itsCoastlines / itsBorders / itsShapeOutlines). The
+  // stored key (data pointer + size + grid signature) is revalidated on every
+  // lookup so a reassigned vector or changed grid recomputes automatically.
+  struct ProjCacheEntry
+  {
+    const Polyline* dataPtr = nullptr;  // polys.data() when projected
+    std::size_t size = 0;               // polys.size() when projected
+    std::string signature;              // itsSource->gridSignature() then
+    std::vector<ProjectedPolyline> proj;
+  };
+  mutable std::map<const std::vector<Polyline>*, ProjCacheEntry> itsProjCache;
 
   // Available parameters (newbase numeric IDs), in file order.
   std::vector<int> itsParamIds;
