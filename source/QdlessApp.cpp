@@ -37,6 +37,7 @@
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <unistd.h>
@@ -1026,11 +1027,124 @@ void App::openBrowseLeaf(const std::string& dir)
 void App::openCatalogCube(const std::string& dir)
 {
   MasalaCube cube = MasalaCube::build(dir);
-  if (cube.empty())
-    throw std::runtime_error("No renderable masala data in " + dir);
-  // Caller (constructor tail, or the picker) runs initFromSource afterwards,
-  // mirroring openBrowseLeaf.
-  itsSource = std::make_unique<MasalaSource>(std::move(cube));
+  if (!cube.empty())
+  {
+    // Caller (constructor tail, or the picker) runs initFromSource
+    // afterwards, mirroring openBrowseLeaf.
+    itsSource = std::make_unique<MasalaSource>(std::move(cube));
+    return;
+  }
+  // No radon-grammar slices — try a raster animation cube (radar nowcasts
+  // etc.). Headless / direct-open path has no UI for product selection.
+  if (openCatalogRasterCube(dir, /*ui=*/nullptr))
+    return;
+  throw std::runtime_error("No renderable masala data in " + dir);
+}
+
+namespace
+{
+// Product key for a nowcast raster basename: drop the leading timestamp(s)
+// and the extension, leaving e.g. "radar.fmippn.rate_conf=finradfast-det".
+// Files sharing a key are the same product across time / origin runs.
+std::string rasterProductKey(const std::string& basename)
+{
+  std::string stem = basename;
+  const std::size_t dot = stem.rfind('.');
+  if (dot != std::string::npos)
+    stem = stem.substr(0, dot);
+  static const std::regex re(R"(^(?:\d{12,14}_){1,2}(.*)$)");
+  std::smatch m;
+  if (std::regex_search(stem, m, re))
+    return m[1];
+  return stem;
+}
+
+// Leading origin timestamp of a nowcast raster (the FIRST of the two
+// stamps), or "" if the name doesn't lead with two timestamps.
+std::string rasterOriginStamp(const std::string& basename)
+{
+  static const std::regex re(R"(^(\d{12,14})_(\d{12,14})_)");
+  std::smatch m;
+  if (std::regex_search(basename, m, re))
+    return m[1];
+  return {};
+}
+}  // namespace
+
+bool App::openCatalogRasterCube(const std::string& dir, UI* ui)
+{
+  namespace fs = std::filesystem;
+  // Collect rasters directly in `dir` and one level down (the radar layout
+  // is <geometry>/<YYYYMMDD>/*.tif). Store absolute paths.
+  std::vector<std::string> all;
+  for (const auto& f : MasalaCatalog::listRasterFiles(dir))
+    all.push_back(dir + "/" + f);
+  for (const auto& s : MasalaCatalog::listSubdirs(dir))
+  {
+    const std::string sub = dir + "/" + s;
+    for (const auto& f : MasalaCatalog::listRasterFiles(sub))
+      all.push_back(sub + "/" + f);
+  }
+  if (all.empty())
+    return false;
+
+  // Group by product, preserving first-seen order for a stable menu.
+  std::map<std::string, std::vector<std::string>> byProduct;
+  std::vector<std::string> productOrder;
+  for (const auto& path : all)
+  {
+    const std::string key = rasterProductKey(fs::path(path).filename().string());
+    if (byProduct.find(key) == byProduct.end())
+      productOrder.push_back(key);
+    byProduct[key].push_back(path);
+  }
+
+  // Choose the product: prompt when there's more than one and a UI exists;
+  // otherwise take the group with the most frames.
+  std::string chosen;
+  if (productOrder.size() == 1)
+    chosen = productOrder.front();
+  else if (ui != nullptr)
+  {
+    std::vector<std::string> items;
+    items.reserve(productOrder.size());
+    for (const auto& p : productOrder)
+      items.push_back(p + "  (" + std::to_string(byProduct[p].size()) + ")");
+    const int sel = ui->popupMenu("Raster product in " + fs::path(dir).filename().string(),
+                                   items, 0, /*allowTab=*/false);
+    if (sel < 0)
+      return false;  // Esc
+    chosen = productOrder[static_cast<std::size_t>(sel)];
+  }
+  else
+  {
+    chosen = productOrder.front();
+    for (const auto& p : productOrder)
+      if (byProduct[p].size() > byProduct[chosen].size())
+        chosen = p;
+  }
+
+  std::vector<std::string> files = std::move(byProduct[chosen]);
+
+  // Keep only the latest origin run so the animation isn't a tangle of
+  // overlapping forecasts at duplicate valid times.
+  std::string latestOrigin;
+  for (const auto& f : files)
+    latestOrigin = std::max(latestOrigin, rasterOriginStamp(fs::path(f).filename().string()));
+  if (!latestOrigin.empty())
+  {
+    std::vector<std::string> filtered;
+    for (const auto& f : files)
+      if (rasterOriginStamp(fs::path(f).filename().string()) == latestOrigin)
+        filtered.push_back(f);
+    files = std::move(filtered);
+  }
+  if (files.empty())
+    return false;
+
+  // MultiFileSource sorts the frames by each file's valid time.
+  itsSource = std::make_unique<MultiFileSource>(files);
+  return true;
 }
 
 bool App::openCatalogPicker(UI& ui)
@@ -1053,8 +1167,18 @@ bool App::openCatalogPicker(UI& ui)
     // A renderable cube opens immediately — no further drilling needed.
     if (MasalaCatalog::isCubeDir(here))
     {
-      openCatalogCube(here);
-      return true;
+      MasalaCube cube = MasalaCube::build(here);
+      if (!cube.empty())
+      {
+        itsSource = std::make_unique<MasalaSource>(std::move(cube));
+        return true;
+      }
+      // Raster animation cube (radar nowcasts) — pass the UI so a
+      // multi-product directory can prompt which product to open.
+      if (openCatalogRasterCube(here, &ui))
+        return true;
+      itsLastMessage = "No renderable data under " + here;
+      return false;
     }
     auto subs = MasalaCatalog::listSubdirs(here);
     // Numeric names (producer ids, leadtimes) sort numerically; reference

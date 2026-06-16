@@ -68,10 +68,13 @@ class GdalRasterSource : public DataSource
   std::string itsParamName;  // derived from filename if no enum match
   std::string itsParamUnits;
   std::string itsLabel;      // suffix after the YYYYMMDDHHMM_ prefix, sans ".tif"
+  std::string itsFormat = "raster";  // GDAL driver name (GTiff, netCDF, ...)
   std::string itsWkt;        // for the metadata popup
   std::string itsTemporalType;     // "Past" / "Future" / "Instant" if metadata present
   std::string itsAccumulation;     // e.g. "1 h" if metadata present
   NFmiMetTime itsValidTime;
+  NFmiMetTime itsOriginTime;     // forecast reference time; == valid time unless known
+  bool itsHasOriginTime = false;
   double itsGain = 1.0;
   double itsOffset = 0.0;
   double itsNodata = 0.0;

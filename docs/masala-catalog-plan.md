@@ -314,13 +314,35 @@ single-file rendering of those grids too.
 * **Lambert is slow** (~150 s for a 949×1069 grid): grid-files' geo→value
   lookup for Lambert appears O(grid) per call, uncached. `rll`/`regular_ll`
   are fast. Needs a cached value/coordinate vector in `GridFilesSource`.
-* **NetCDF** (wave `.nc`) still renders blank: `getGridDimensions()` returns
-  0×0, so the grid geometry path is never taken — a separate NetCDF issue.
 * **True 3D point cloud** (`[3]`/`v`) is gated to PVOL / QueryData-with-height;
   `MasalaSource` exposes hybrid *level numbers*, not metre heights, so it uses
   the level-based cross-section path instead. A vertical-profile / iso-surface
   mode would need geopotential height (a `Z-M2S2` param or hypsometric
   estimate).
 * **Monolithic files** (MEPS `fc-…_mbr000`, ECMWF `F6D…`, GFS `gfs.t…fNNN`),
-  the **ensemble** member axis, **GeoTIFF radar** series, and a
-  `producers.json` id→name table remain as outlined in §6.
+  the **ensemble** member axis, and a `producers.json` id→name table remain as
+  outlined in §6.
+
+### Resolved (2026-06-16)
+
+* **NetCDF** (wave `.nc` — WAM, NEMO) now renders. grid-files stays the primary
+  NetCDF reader; when its grid isn't registered (`getGridDimensions()` → 0×0,
+  the "Geometry not found" banner), `GridFilesSource::geometryResolvable()`
+  reports false and `DataSource::open` falls back to `GdalRasterSource`. GDAL's
+  CF reader supplies the lon/lat geotransform; `GdalRasterSource` assumes WGS84
+  when the file carries no embedded CRS. The grid-files banner is printed to
+  stdout from inside the library, so the probe is wrapped in an fd-1 silencer.
+* **GeoTIFF radar** nowcast series animate. A directory of `.tif` (e.g. producer
+  110 `PPNFIN3`, laid out `<geometry>/<YYYYMMDD>/*.tif`) is recognised as a
+  *raster cube* (`MasalaCatalog::isRasterCubeDir`, folded into `isCubeDir`) and
+  opened by `App::openCatalogRasterCube` as a time-animated `MultiFileSource`:
+  files are grouped by product (name after the 1–2 leading timestamps), only the
+  latest origin run is retained (so overlapping forecasts don't collide at
+  duplicate valid times), and a multi-product directory prompts which product to
+  open (auto-picks the largest group headless). `GdalRasterSource` learned the
+  flat ODIM-style metadata these FMI-PPN tiles carry —
+  `dataset1_data1_what_{gain,offset,nodata,undetect,quantity}` for physical-unit
+  scaling, and `ForecastTimestamp` (valid) / `Timestamp` (origin) for times. A
+  latent bug was fixed in passing: the valid-time fallback chain keyed on
+  `NFmiMetTime::GetYear() == 0`, but a default `NFmiMetTime` is the *current*
+  time, so the chain was dead code; `parseUtcStamp` now returns `std::optional`.

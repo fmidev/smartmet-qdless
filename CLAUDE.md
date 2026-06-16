@@ -74,8 +74,19 @@ encoded in the path + filename (radon convention
   delegates rendering to a per-file `GridFilesSource`). Full design and the
   rotated-ll/Lambert rendering fix it required are in
   `docs/masala-catalog-plan.md` (§7–8).
-- Renders best on `rll`/`regular_ll` (MEPS, ECMWF, GFS); `lcc` works but is slow,
-  and NetCDF (`.nc` wave/ocean) is not yet renderable — see the doc's known gaps.
+- **GRIB** renders best on `rll`/`regular_ll` (MEPS, ECMWF, GFS); `lcc` works but
+  is slow. **NetCDF** (`.nc` wave/ocean — WAM, NEMO) renders via a GDAL fallback:
+  grid-files is tried first, and when it can't georeference the grid
+  (`geometryResolvable()` false, the "Geometry not found" case) `DataSource::open`
+  hands the file to `GdalRasterSource` (which assumes WGS84 for a bare lon/lat
+  geotransform). **Radar GeoTIFF nowcasts** (`.tif`, e.g. producer 110 `PPNFIN3`,
+  laid out `<geometry>/<YYYYMMDD>/*.tif`) are recognised as a *raster cube*
+  (`MasalaCatalog::isRasterCubeDir`) and opened as a time-animated
+  `MultiFileSource` by `App::openCatalogRasterCube` — files are grouped by product
+  (name after the leading timestamps), only the latest origin run is kept, and a
+  multi-product dir prompts which product to open. `GdalRasterSource` reads the
+  ODIM-style metadata these carry (`dataset1_data1_what_gain/offset/nodata`,
+  `ForecastTimestamp`/`Timestamp`) so values come out scaled and times are correct.
 
 ## Key dependencies
 

@@ -77,6 +77,13 @@ class GridFilesSource : public DataSource
   std::vector<std::pair<std::string, std::string>> extraMetadata() const override;
   std::string gridSignature() const override;
 
+  // True when grid-files can resolve a usable 2-D grid geometry for this
+  // file. NetCDF files whose grid is not registered in grid-files'
+  // geometry-definition table report 0 dimensions ("Geometry not found"),
+  // in which case the file renders blank — DataSource::open uses this to
+  // fall back to GDAL's CF reader for such files.
+  bool geometryResolvable() const { return ensureGridGeometry(); }
+
   // One-time initialisation of grid-files' parameter mapping. Safe to
   // call multiple times; only the first call has effect. Searches several
   // standard locations for grid-files.conf.

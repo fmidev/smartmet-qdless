@@ -394,6 +394,57 @@ bool isCubeDir(const std::string& dir)
   for (const auto& s : listSubdirs(dir))
     if (isAllDigitsName(s) && hasCubeFiles(dir + "/" + s))
       return true;
+  // A directory of georeferenced rasters (radar nowcasts etc.) is also a
+  // (raster) cube — recognise it so the picker opens it instead of drilling
+  // down to an empty file-level listing.
+  return isRasterCubeDir(dir);
+}
+
+namespace
+{
+bool isRasterName(const std::string& name)
+{
+  const std::size_t dot = name.rfind('.');
+  if (dot == std::string::npos)
+    return false;
+  std::string ext = name.substr(dot + 1);
+  for (auto& c : ext)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return ext == "tif" || ext == "tiff";
+}
+}  // namespace
+
+std::vector<std::string> listRasterFiles(const std::string& dir)
+{
+  std::vector<std::string> out;
+  for (const auto& f : listFiles(dir))
+    if (isRasterName(f))
+      out.push_back(f);
+  return out;  // listFiles already sorts
+}
+
+bool hasRasterFiles(const std::string& dir)
+{
+  std::error_code ec;
+  for (auto it = fs::directory_iterator(dir, ec); !ec && it != fs::directory_iterator();
+       it.increment(ec))
+  {
+    if (it->is_regular_file(ec) && isRasterName(it->path().filename().string()))
+      return true;
+  }
+  return false;
+}
+
+bool isRasterCubeDir(const std::string& dir)
+{
+  if (hasRasterFiles(dir))
+    return true;
+  // Radar nowcasts live one level down, under a numeric date dir
+  // (<geometry>/<YYYYMMDD>/*.tif). Restricting to all-digit subdirs keeps
+  // this to a single readdir of date dirs, never a tree walk.
+  for (const auto& s : listSubdirs(dir))
+    if (isAllDigitsName(s) && hasRasterFiles(dir + "/" + s))
+      return true;
   return false;
 }
 }  // namespace MasalaCatalog

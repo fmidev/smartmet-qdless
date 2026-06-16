@@ -124,5 +124,15 @@ bool hasCubeFiles(const std::string& dir);
 // True if `dir` is (or contains) a renderable cube: it has numeric leadtime
 // subdirs holding parseable files, or parseable files directly inside.
 bool isCubeDir(const std::string& dir);
+
+// Georeferenced raster basenames (`.tif` / `.tiff`) directly in `dir`,
+// sorted. These don't follow the radon grammar — they are nowcast / product
+// rasters (e.g. FMI-PPN radar) handled as a time-animated MultiFileSource
+// rather than a MasalaCube. Empty on error.
+std::vector<std::string> listRasterFiles(const std::string& dir);
+// True if `dir` directly contains at least one renderable raster file.
+bool hasRasterFiles(const std::string& dir);
+// True if `dir` is (or one subdir level down holds) a raster animation cube.
+bool isRasterCubeDir(const std::string& dir);
 }  // namespace MasalaCatalog
 }  // namespace Qdless

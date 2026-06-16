@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <limits>
 #include <map>
+#include <optional>
 #include <regex>
 #include <stdexcept>
 
@@ -21,11 +22,13 @@ namespace Qdless
 {
 namespace
 {
-// Parse "YYYYMMDDhhmm" or "YYYYMMDDhhmmss" → NFmiMetTime (UTC). Returns an
-// invalid (year=0) time on failure so callers can chain fallbacks.
-NFmiMetTime parseUtcStamp(const std::string& s)
+// Parse "YYYYMMDDhhmm" or "YYYYMMDDhhmmss" → NFmiMetTime (UTC). Returns
+// std::nullopt on failure so callers can chain fallbacks — a default
+// NFmiMetTime is the *current* time, not a year-0 sentinel, so it can't
+// itself signal "no value".
+std::optional<NFmiMetTime> parseUtcStamp(const std::string& s)
 {
-  if (s.size() < 12) return NFmiMetTime();
+  if (s.size() < 12) return std::nullopt;
   try
   {
     short yy = static_cast<short>(std::stoi(s.substr(0, 4)));
@@ -43,20 +46,27 @@ NFmiMetTime parseUtcStamp(const std::string& s)
   }
   catch (...)
   {
-    return NFmiMetTime();
+    return std::nullopt;
   }
 }
 
 NFmiMetTime parseTimeFromName(const std::string& filename)
 {
   const std::string base = std::filesystem::path(filename).filename().string();
-  // Match a 12- or 14-digit timestamp anywhere in the basename so files
-  // named `<prefix>_<timestamp>_<suffix>.tif` work the same as those
-  // with the timestamp at the start.
+  // Nowcast / forecast rasters often lead with TWO timestamps,
+  // `<origin>_<validtime>_<product>.tif` (e.g. FMI-PPN radar). When both are
+  // present the second is the valid time we want to animate on; prefer it.
+  static const std::regex re2(R"(^(\d{12,14})_(\d{12,14})_)");
+  std::smatch m2;
+  if (std::regex_search(base, m2, re2))
+    if (auto t = parseUtcStamp(m2[2])) return *t;
+  // Otherwise match a single 12- or 14-digit timestamp anywhere in the
+  // basename so files named `<prefix>_<timestamp>_<suffix>.tif` work the
+  // same as those with the timestamp at the start.
   static const std::regex re(R"((\d{12,14}))");
   std::smatch m;
   if (std::regex_search(base, m, re))
-    return parseUtcStamp(m[1]);
+    if (auto t = parseUtcStamp(m[1])) return *t;
   std::error_code ec;
   auto ftime = std::filesystem::last_write_time(filename, ec);
   if (ec) return NFmiMetTime();
@@ -76,7 +86,8 @@ NFmiMetTime parseTimeFromName(const std::string& filename)
 std::string extractLabel(const std::string& filename)
 {
   std::string base = std::filesystem::path(filename).stem().string();
-  static const std::regex re(R"(^\d{12,14}_(.*)$)");
+  // Strip one or two leading timestamps (`<origin>_<valid>_<label>`).
+  static const std::regex re(R"(^(?:\d{12,14}_){1,2}(.*)$)");
   std::smatch m;
   if (std::regex_search(base, m, re)) return m[1];
   return base;
@@ -181,6 +192,10 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
     ~Guard() { if (p) GDALClose(p); }
   } guard{ds};
 
+  if (GDALDriver* drv = ds->GetDriver())
+    if (const char* name = GDALGetDriverShortName(drv))
+      itsFormat = name;
+
   itsNx = static_cast<std::size_t>(ds->GetRasterXSize());
   itsNy = static_cast<std::size_t>(ds->GetRasterYSize());
   if (itsNx == 0 || itsNy == 0) throw std::runtime_error("empty raster: " + filename);
@@ -195,13 +210,6 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   itsOriginY = gt[3];
   itsPixelH = gt[5];
 
-  const OGRSpatialReference* osr = ds->GetSpatialRef();
-  if (!osr) throw std::runtime_error("no projection in GeoTIFF: " + filename);
-  char* wkt = nullptr;
-  osr->exportToWkt(&wkt);
-  if (wkt) { itsWkt = wkt; CPLFree(wkt); }
-  Fmi::SpatialReference sr(*osr);
-
   const double x0 = itsOriginX;
   const double y0 = itsOriginY;
   const double x1 = itsOriginX + static_cast<double>(itsNx) * itsPixelW;
@@ -210,6 +218,27 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   const double maxX = std::max(x0, x1);
   const double minY = std::min(y0, y1);
   const double maxY = std::max(y0, y1);
+
+  const OGRSpatialReference* osr = ds->GetSpatialRef();
+  OGRSpatialReference assumedWgs84;
+  if (!osr)
+  {
+    // CF NetCDF (and some bare GeoTIFFs) carry only a lon/lat geotransform
+    // with no embedded CRS. If the extent is plainly geographic (degrees),
+    // assume WGS84 so the regular lat/lon grid still renders; otherwise we
+    // have no way to georeference it.
+    const bool geographic =
+        minX >= -360.0 && maxX <= 360.0 && minY >= -90.001 && maxY <= 90.001;
+    if (!geographic)
+      throw std::runtime_error("no projection and non-geographic extent: " + filename);
+    assumedWgs84.SetWellKnownGeogCS("WGS84");
+    assumedWgs84.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    osr = &assumedWgs84;
+  }
+  char* wkt = nullptr;
+  osr->exportToWkt(&wkt);
+  if (wkt) { itsWkt = wkt; CPLFree(wkt); }
+  Fmi::SpatialReference sr(*osr);
   // CreateFromBBox computes corner lat/lons internally; for projections
   // whose valid latitude range falls inside the raster bbox (TM35FIN over
   // a 7700×7700 km canvas reaches latitudes PROJ rejects) PROJ logs to
@@ -228,24 +257,66 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   if (const char* blob = ds->GetMetadataItem("GDAL_METADATA"))
     meta = parseGdalMetadata(blob);
 
+  // Some producers (FMI-PPN radar nowcasts via Rack) don't use the
+  // GDAL_METADATA XML blob; they expose flat ODIM-style metadata items
+  // (`dataset1_data1_what_gain`, `ForecastTimestamp`, ...). Helper to read
+  // the first non-empty value among a list of candidate keys.
+  auto metaItem = [&](std::initializer_list<const char*> keys) -> std::string
+  {
+    for (const char* k : keys)
+      if (const char* v = ds->GetMetadataItem(k); v != nullptr && *v != '\0')
+        return v;
+    return {};
+  };
+
   // Reading order for valid time:
   //   1. <Item name="Observation time"> — preferred, authoritative
-  //   2. Leading YYYYMMDDhhmm in basename
-  //   3. mtime
+  //   2. ODIM `ForecastTimestamp` (nowcast valid time)
+  //   3. valid timestamp in basename (`<origin>_<valid>_...`), else mtime
+  std::optional<NFmiMetTime> vt;
   if (auto it = meta.find("Observation time"); it != meta.end())
-    itsValidTime = parseUtcStamp(it->second.value);
-  if (itsValidTime.GetYear() == 0)
-    itsValidTime = parseTimeFromName(filename);
+    vt = parseUtcStamp(it->second.value);
+  if (!vt)
+    vt = parseUtcStamp(metaItem({"ForecastTimestamp"}));
+  itsValidTime = vt ? *vt : parseTimeFromName(filename);
+
+  // Forecast reference (origin) time, when the producer records it
+  // separately from the valid time (ODIM `Timestamp`, or the first of two
+  // leading filename stamps). Otherwise originTime() reports the valid time.
+  if (auto ot = parseUtcStamp(metaItem({"Timestamp"})))
+  {
+    itsOriginTime = *ot;
+    itsHasOriginTime = true;
+  }
+  else
+  {
+    const std::string base = std::filesystem::path(filename).filename().string();
+    static const std::regex re2(R"(^(\d{12,14})_(\d{12,14})_)");
+    std::smatch m2;
+    if (std::regex_search(base, m2, re2))
+      if (auto o = parseUtcStamp(m2[1]))
+      {
+        itsOriginTime = *o;
+        itsHasOriginTime = true;
+      }
+  }
 
   itsLabel = extractLabel(filename);
 
   // Param naming: prefer the "Quantity" attribute (human-readable, with
-  // an explicit unit), fall back to filename label, fall back to "Value".
+  // an explicit unit), then the ODIM quantity, fall back to filename label,
+  // fall back to "Value".
+  std::string odimQuantity = metaItem({"dataset1_data1_what_quantity", "what_quantity"});
   if (auto it = meta.find("Quantity"); it != meta.end())
   {
     itsParamName = it->second.value;
     itsParamUnits = it->second.unit;
     itsParamId = quantityToParamId(itsParamName);
+  }
+  else if (!odimQuantity.empty())
+  {
+    itsParamName = odimQuantity;
+    itsParamId = quantityToParamId(odimQuantity);
   }
   else
   {
@@ -286,6 +357,21 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   fetchDouble("Offset", itsOffset, hasOffset);
   fetchDouble("Nodata", itsNodata, itsHasNodata);
   fetchDouble("Undetect", itsUndetect, itsHasUndetect);
+  // ODIM flat-metadata fallback (FMI-PPN radar): apply gain/offset linear
+  // scaling and nodata/undetect sentinels so values come out in physical
+  // units (e.g. rain rate mm/h) rather than raw packed integers.
+  auto fetchMetaDouble = [&](std::initializer_list<const char*> keys, double& out, bool& has)
+  {
+    if (has) return;
+    const std::string v = metaItem(keys);
+    if (v.empty()) return;
+    try { out = std::stod(v); has = true; } catch (...) {}
+  };
+  fetchMetaDouble({"dataset1_data1_what_gain", "what_gain"}, itsGain, hasGain);
+  fetchMetaDouble({"dataset1_data1_what_offset", "what_offset"}, itsOffset, hasOffset);
+  fetchMetaDouble({"dataset1_data1_what_nodata", "what_nodata"}, itsNodata, itsHasNodata);
+  fetchMetaDouble({"dataset1_data1_what_undetect", "what_undetect"}, itsUndetect,
+                  itsHasUndetect);
   if (!hasGain) itsGain = 1.0;
   if (!hasOffset) itsOffset = 0.0;
 
@@ -344,7 +430,10 @@ std::size_t GdalRasterSource::timeCount() const { return 1; }
 std::size_t GdalRasterSource::currentTimeIndex() const { return 0; }
 void GdalRasterSource::selectTimeIndex(std::size_t /*i*/) {}
 NFmiMetTime GdalRasterSource::currentValidTime() const { return itsValidTime; }
-NFmiMetTime GdalRasterSource::originTime() const { return itsValidTime; }
+NFmiMetTime GdalRasterSource::originTime() const
+{
+  return itsHasOriginTime ? itsOriginTime : itsValidTime;
+}
 
 std::size_t GdalRasterSource::levelCount() const { return 1; }
 std::size_t GdalRasterSource::currentLevelIndex() const { return 0; }
@@ -443,7 +532,7 @@ LatLonBox GdalRasterSource::boundingBox() const
 std::vector<std::pair<std::string, std::string>> GdalRasterSource::extraMetadata() const
 {
   std::vector<std::pair<std::string, std::string>> rows;
-  rows.emplace_back("Format", "GeoTIFF");
+  rows.emplace_back("Format", itsFormat);
   rows.emplace_back("Grid size", std::to_string(itsNx) + "x" + std::to_string(itsNy));
   if (!itsLabel.empty()) rows.emplace_back("Label", itsLabel);
   if (!itsParamUnits.empty()) rows.emplace_back("Unit", itsParamUnits);

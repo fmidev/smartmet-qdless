@@ -15,14 +15,51 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fcntl.h>
 #include <fstream>
 #include <gdal_priv.h>
 #include <stdexcept>
+#include <unistd.h>
 
 namespace Qdless
 {
 namespace
 {
+// grid-files writes "#### Geometry not found ####" (plus a suggested
+// geometry-definition line) directly to stdout when a NetCDF grid is not
+// registered in its geometry table. We probe exactly that condition to
+// decide whether to fall back to GDAL, so silence fd 1 for the probe's
+// duration — otherwise the message corrupts the rendered terminal frame
+// (once per unregistered NetCDF parameter).
+class StdoutSilencer
+{
+ public:
+  StdoutSilencer()
+  {
+    std::fflush(stdout);
+    itsSaved = ::dup(1);
+    const int devnull = ::open("/dev/null", O_WRONLY);
+    if (devnull >= 0)
+    {
+      ::dup2(devnull, 1);
+      ::close(devnull);
+    }
+  }
+  ~StdoutSilencer()
+  {
+    std::fflush(stdout);
+    if (itsSaved >= 0)
+    {
+      ::dup2(itsSaved, 1);
+      ::close(itsSaved);
+    }
+  }
+  StdoutSilencer(const StdoutSilencer&) = delete;
+  StdoutSilencer& operator=(const StdoutSilencer&) = delete;
+
+ private:
+  int itsSaved = -1;
+};
 enum class FileKind
 {
   kQueryData,
@@ -130,8 +167,44 @@ std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
         return src;
       return std::make_unique<QueryDataSource>(filename);
     case FileKind::kGrib:
-    case FileKind::kNetCDF:
       return std::make_unique<GridFilesSource>(filename);
+    case FileKind::kNetCDF:
+    {
+      // grid-files is the primary NetCDF reader (handles levels / times /
+      // multiple params for grids registered in its geometry table). But CF
+      // NetCDF with a bare lon/lat axis grid that isn't registered yields no
+      // geometry ("Geometry not found") and renders blank — wave / ocean
+      // model output (WAM, NEMO) is exactly this. For those, fall back to
+      // GDAL's CF reader, which georeferences the regular lat/lon grid
+      // directly.
+      std::unique_ptr<GridFilesSource> src;
+      bool resolvable = false;
+      {
+        // Silence over construction + probe: grid-files emits the
+        // "Geometry not found" banner from inside indexMessages too, not
+        // only the explicit geometry probe.
+        StdoutSilencer silence;
+        src = std::make_unique<GridFilesSource>(filename);
+        resolvable = src->geometryResolvable();
+      }
+      if (!resolvable)
+      {
+        // Go straight to the raster reader rather than tryGdalOpen(): GDAL's
+        // netCDF driver also advertises an OGR *vector* layer for these
+        // files, which tryGdalOpen would prefer and then fail to extent.
+        try
+        {
+          return std::make_unique<GdalRasterSource>(filename);
+        }
+        catch (const std::exception&)
+        {
+          // GDAL couldn't georeference it either — keep the grid-files
+          // source so the caller still gets a (blank) source with metadata
+          // rather than a hard failure.
+        }
+      }
+      return src;
+    }
     case FileKind::kHdf5:
       // ODIM-H5 polar volume: separate backend that handles per-sweep
       // geometry and exposes elevations as levels. Probe before the 2D

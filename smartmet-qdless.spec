@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.6.15
-Release: 2%{?dist}.fmi
+Version: 26.6.16
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Tue Jun 16 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.16-1.fmi
+- The masala catalog browser now renders NetCDF wave/ocean cubes (WAM, NEMO) and radar GeoTIFF nowcast series. NetCDF: grid-files stays the primary reader, but when it cannot georeference a grid (unregistered geometry, the "Geometry not found" 0x0-dimensions case) GridFilesSource::geometryResolvable() reports false and DataSource::open falls back to GdalRasterSource, whose CF reader supplies the lon/lat geotransform (assuming WGS84 when the file carries no embedded CRS); the grid-files geometry probe is wrapped in an fd-1 silencer so the library's stdout banner cannot corrupt the rendered terminal frame. Radar GeoTIFF: a directory of .tif laid out <geometry>/<YYYYMMDD>/*.tif is recognised as a raster cube (MasalaCatalog::isRasterCubeDir, folded into isCubeDir) and opened by App::openCatalogRasterCube as a time-animated MultiFileSource - files are grouped by product (the name after the leading timestamps), only the latest origin run is kept so overlapping forecasts do not collide at duplicate valid times, and a multi-product directory prompts which product to open (auto-picks the largest group when headless). GdalRasterSource learned the flat ODIM-style metadata these FMI-PPN tiles carry: dataset1_data1_what_{gain,offset,nodata,undetect,quantity} for physical-unit scaling, and ForecastTimestamp (valid) / Timestamp (origin) for times, and now reports the actual GDAL driver name instead of always "GeoTIFF".
+- Fixed a latent bug in GdalRasterSource time resolution: the valid-time fallback chain keyed on NFmiMetTime::GetYear() == 0, but a default-constructed NFmiMetTime is the current time, so the chain after the first source was dead code and rasters fell back to mtime. parseUtcStamp now returns std::optional.
 * Mon Jun 15 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.15-2.fmi
 - 3D views now work on masala GRIB cubes whose active level group is a real vertical axis (pressure or height/altitude levels): the [3] point cloud, the [v] curtain, and the height-mode 2D cross-section. Heights are derived from the level type (ISA hypsometric formula for pressure levels, identity for height/altitude levels) since the per-slice GRIB files carry no height field of their own; hybrid/depth/ground groups have no derivable geometric height and so offer no 3D. The point cloud is fed by a new generic DataSource::sampleVolume (default implementation walks a coarse lat/lon lattice calling sampleColumnProfile), so the existing point-cloud renderer is no longer QueryData-specific; MasalaSource implements hasNativeHeight/heightRangeKm/sampleColumnProfile/interpolatedValueAtHeight over its level axis, reading each level on demand (one file per level, LRU-cached). New static DataSource::levelToHeightMeters(typeId, value) maps a level value to geometric height by type.
 * Mon Jun 15 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.15-1.fmi

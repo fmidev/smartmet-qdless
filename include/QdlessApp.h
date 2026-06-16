@@ -591,6 +591,13 @@ class App
   // initFromSource afterwards (as for openBrowseLeaf).
   bool openCatalogPicker(UI& ui);
   void openCatalogCube(const std::string& dir);
+  // Open a directory of georeferenced rasters (radar nowcasts etc.) as a
+  // time-animated MultiFileSource. Files are grouped by product (the part of
+  // the name after the leading timestamps); within a product only the latest
+  // origin run is kept, sorted by valid time. With multiple products and a
+  // UI, prompts to pick one; otherwise opens the largest product group.
+  // Returns false if the directory holds no renderable rasters.
+  bool openCatalogRasterCube(const std::string& dir, UI* ui);
   // All post-itsSource init: parameter resolution, panel layout,
   // palette / coastline load, etc. Pulled out of the ctor so the
   // PostGIS deferred-pick path can run it after the user picks a
