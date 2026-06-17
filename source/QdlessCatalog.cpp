@@ -4,7 +4,9 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <set>
+#include <sstream>
 #include <system_error>
 
 namespace fs = std::filesystem;
@@ -446,6 +448,223 @@ bool isRasterCubeDir(const std::string& dir)
     if (isAllDigitsName(s) && hasRasterFiles(dir + "/" + s))
       return true;
   return false;
+}
+
+namespace
+{
+// Well-known model paths -> model name. Keyed by the canonical absolute path
+// (an s3fs mount root, or a producer-id / dataset dir under /masala/datasets).
+// Matched exactly or as a trailing suffix so a relocated catalog root still
+// resolves (see modelNameForPath). Sourced from the FMI radon producer table.
+const std::vector<std::pair<std::string, std::string>>& modelTable()
+{
+  static const std::vector<std::pair<std::string, std::string>> k = {
+      {"/gem_data", "GEM"},
+      {"/hrnwc-data/preop", "HRNWC_PREOP"},
+      {"/hrnwc-data/prod", "HRNWC"},
+      {"/meps-ml-correction/preop", "MEPS_ML_PREOP"},
+      {"/masala/datasets/aila", "AILA"},
+      {"/masala/datasets/bris", "BRIS"},
+      {"/masala/datasets/meps-biascorrection", "MEPSMTADEV"},
+      {"/masala/datasets/mnwc-biascorrection", "MNWCMTADEV"},
+      {"/masala/datasets/simo", "SIMO"},
+      {"/masala/datasets/vire", "VIRE"},
+      {"/masala/datasets/virenwc", "VIRENWC"},
+      {"/masala/datasets/virenwc_history", "VIRENWC_HISTORY"},
+      {"/masala/datasets/4", "MEPS"},
+      {"/masala/datasets/5", "MNWC"},
+      {"/masala/datasets/7", "METCOOP_HYBRID1"},
+      {"/masala/datasets/8", "METCOOP_HYBRID2"},
+      {"/masala/datasets/10", "MEPS_PREOP"},
+      {"/masala/datasets/16", "MEPS1500D_HYBRID"},
+      {"/masala/datasets/52", "ENFUSER"},
+      {"/masala/datasets/53", "KWBG"},
+      {"/masala/datasets/100", "WILDFIRES_HISTORYA"},
+      {"/masala/datasets/101", "MESAN"},
+      {"/masala/datasets/103", "WILDFIRES"},
+      {"/masala/datasets/105", "MTLICE"},
+      {"/masala/datasets/107", "LAPSFIN"},
+      {"/masala/datasets/109", "LAPSSCAN"},
+      {"/masala/datasets/110", "PPNFIN"},
+      {"/masala/datasets/112", "WAM_EC"},
+      {"/masala/datasets/113", "WAM_BALMFC"},
+      {"/masala/datasets/115", "DIW"},
+      {"/masala/datasets/119", "FMI_PEPS"},
+      {"/masala/datasets/120", "ECMOSKRIGING"},
+      {"/masala/datasets/122", "HIMAN"},
+      {"/masala/datasets/126", "FROST"},
+      {"/masala/datasets/130", "GFS0250"},
+      {"/masala/datasets/131", "ECG"},
+      {"/masala/datasets/133", "ECGSEA"},
+      {"/masala/datasets/134", "ECGEPS"},
+      {"/masala/datasets/147", "NEMO"},
+      {"/masala/datasets/148", "COPERNICUSNEMO"},
+      {"/masala/datasets/153", "WAM_HKI"},
+      {"/masala/datasets/154", "WAM_BALMFC_ARCH"},
+      {"/masala/datasets/170", "ICON_GLO"},
+      {"/masala/datasets/183", "LAPSLAMBERT2500"},
+      {"/masala/datasets/189", "METAN"},
+      {"/masala/datasets/190", "FMIICING"},
+      {"/masala/datasets/220", "ICONMTA"},
+      {"/masala/datasets/240", "ECGMTA"},
+      {"/masala/datasets/242", "ECM_PROB"},
+      {"/masala/datasets/243", "ECGEPSMTA"},
+      {"/masala/datasets/244", "ECGEPSCALIB"},
+      {"/masala/datasets/250", "GFSMTA"},
+      {"/masala/datasets/260", "MEPSMTA"},
+      {"/masala/datasets/261", "MEPS_PREOPMTA"},
+      {"/masala/datasets/270", "MNWCMTA"},
+      {"/masala/datasets/272", "MEPS1500D_SURF"},
+      {"/masala/datasets/301", "SILAM_AQ"},
+      {"/masala/datasets/601", "MEPS_STATISTICAL"},
+  };
+  return k;
+}
+
+// Normalise a path for model matching: strip trailing slashes and treat '_'
+// and '-' as the same character (so the table's "/gem_data" matches an fstab
+// "/gem-data" mount, and producer dirs spelled either way still resolve).
+std::string normForModel(const std::string& path)
+{
+  std::string p = path;
+  while (p.size() > 1 && p.back() == '/')
+    p.pop_back();
+  for (char& c : p)
+    if (c == '_')
+      c = '-';
+  return p;
+}
+}  // namespace
+
+std::optional<std::string> modelNameForPath(const std::string& absPath)
+{
+  const std::string p = normForModel(absPath);
+  const std::string* best = nullptr;
+  std::size_t bestLen = 0;
+  for (const auto& [key, name] : modelTable())
+  {
+    const std::string k = normForModel(key);
+    // Exact match, or `k` is a suffix of `p`. Every key begins with '/', so a
+    // suffix match implicitly lands on a path-component boundary (the matched
+    // region starts at a '/'), e.g. ".../masala/masala/datasets/131" matches
+    // "/masala/datasets/131".
+    const bool exact = (p == k);
+    const bool suffix = p.size() > k.size() && p.compare(p.size() - k.size(), k.size(), k) == 0;
+    if ((exact || suffix) && k.size() >= bestLen)
+    {
+      best = &name;
+      bestLen = k.size();
+    }
+  }
+  if (best != nullptr)
+    return *best;
+  return std::nullopt;
+}
+
+std::string fstabPath()
+{
+  if (const char* env = std::getenv("QDLESS_FSTAB"); env != nullptr && env[0] != '\0')
+    return env;
+  return "/etc/fstab";
+}
+
+namespace
+{
+// Local / pseudo filesystems that never hold a browseable weather archive —
+// used to abort fstab lines with zero I/O.
+bool isLocalFsType(const std::string& fstype)
+{
+  static const std::set<std::string> k = {
+      "ext2",       "ext3",   "ext4",     "xfs",        "btrfs",   "vfat",
+      "swap",       "tmpfs",  "proc",     "sysfs",      "devpts",  "devtmpfs",
+      "cgroup",     "cgroup2", "mqueue",  "hugetlbfs",  "debugfs", "configfs",
+      "securityfs", "overlay", "squashfs", "autofs",    "none"};
+  return k.count(fstype) != 0;
+}
+
+// True if `mp` equals `prefix` or sits directly beneath it.
+bool underPath(const std::string& mp, const std::string& prefix)
+{
+  if (mp == prefix)
+    return true;
+  return mp.size() > prefix.size() && mp.compare(0, prefix.size(), prefix) == 0 &&
+         mp[prefix.size()] == '/';
+}
+
+// True if `name` is one of the known model names (used by the content probe to
+// recognise a directory of model-named producer dirs).
+bool isKnownModelName(const std::string& name)
+{
+  for (const auto& [key, model] : modelTable())
+    if (model == name)
+      return true;
+  return false;
+}
+
+// Single shallow readdir: does `dir` look like a weather archive? True if any
+// immediate child is a producer id, reference time, a known model name, or
+// "datasets", or the dir itself directly holds cube / raster files.
+bool looksLikeWeatherDir(const std::string& dir)
+{
+  for (const auto& s : MasalaCatalog::listSubdirs(dir))
+    if (MasalaCatalog::isAllDigitsName(s) || MasalaCatalog::isReftimeName(s) || s == "datasets" ||
+        isKnownModelName(s))
+      return true;
+  return MasalaCatalog::hasCubeFiles(dir) || MasalaCatalog::hasRasterFiles(dir);
+}
+}  // namespace
+
+std::vector<WeatherRoot> discoverWeatherRoots()
+{
+  std::vector<WeatherRoot> out;
+  std::ifstream in(fstabPath());
+  std::string line;
+  while (std::getline(in, line))
+  {
+    // Skip blank / comment lines (s3fs devices contain '#', so only a leading
+    // '#' is a comment).
+    const std::size_t first = line.find_first_not_of(" \t");
+    if (first == std::string::npos || line[first] == '#')
+      continue;
+    std::istringstream ls(line);
+    std::string device, mp, fstype, options;
+    if (!(ls >> device >> mp >> fstype >> options))
+      continue;
+
+    // Cheap aborts (no I/O).
+    if (isLocalFsType(fstype))
+      continue;
+    if (mp == "/" || underPath(mp, "/home") || underPath(mp, "/boot") || underPath(mp, "/proc") ||
+        underPath(mp, "/sys") || underPath(mp, "/dev") || underPath(mp, "/var") ||
+        underPath(mp, "/usr") || underPath(mp, "/run") || underPath(mp, "/tmp") ||
+        underPath(mp, "/opt"))
+      continue;
+
+    const bool isS3fs = device.rfind("s3fs", 0) == 0;
+    const bool networked = isS3fs || fstype == "nfs" || fstype == "nfs4" || fstype == "fuse";
+    if (!networked)
+      continue;
+
+    // Cheap accepts (no I/O), then a content probe (one readdir) for the rest.
+    bool weather = isS3fs || underPath(mp, "/masala") || modelNameForPath(mp).has_value();
+    if (!weather)
+      weather = looksLikeWeatherDir(mp);
+    if (!weather)
+      continue;
+
+    WeatherRoot r;
+    r.path = mp;
+    if (auto m = modelNameForPath(mp))
+      r.model = *m;
+    out.push_back(std::move(r));
+  }
+
+  std::sort(out.begin(), out.end(), [](const WeatherRoot& a, const WeatherRoot& b)
+            { return a.path < b.path; });
+  out.erase(std::unique(out.begin(), out.end(), [](const WeatherRoot& a, const WeatherRoot& b)
+                        { return a.path == b.path; }),
+            out.end());
+  return out;
 }
 }  // namespace MasalaCatalog
 }  // namespace Qdless

@@ -57,6 +57,9 @@ struct Options
   // (producer → reftime → geometry) and builds a MasalaSource on selection.
   // Set by `--catalog <path>`.
   std::string catalogRoot;
+  // Set by a bare `--catalog` (no path): discover weather-data mounts from
+  // fstab and present them as the top-level picker. See openCatalogRootPicker.
+  bool catalogDiscover = false;
   std::string paletteDir = "/usr/share/smartmet/qdless/palettes";
   std::string configFile = "/usr/share/smartmet/qdless/qdless.conf";
   std::string coastlineDir = "/usr/share/gshhg-gmt-nc4";
@@ -589,7 +592,15 @@ class App
   // picked (a MasalaSource is now active). openCatalogCube builds the
   // MasalaSource for a geometry/leaf directory; the caller runs
   // initFromSource afterwards (as for openBrowseLeaf).
-  bool openCatalogPicker(UI& ui);
+  // `rootArg` overrides itsOpts.catalogRoot (used by the root picker to open a
+  // mount the user chose); empty means use itsOpts.catalogRoot.
+  bool openCatalogPicker(UI& ui, const std::string& rootArg = {});
+  // Top-level picker over the weather-data mounts discovered in fstab
+  // (MasalaCatalog::discoverWeatherRoots), annotated with model names. On pick
+  // it drops into openCatalogPicker rooted at that mount; Esc out of a mount
+  // returns here. Returns true if a cube was opened. Used by `[D]` without
+  // --catalog and by bare `--catalog`.
+  bool openCatalogRootPicker(UI& ui);
   void openCatalogCube(const std::string& dir);
   // Open a directory of georeferenced rasters (radar nowcasts etc.) as a
   // time-animated MultiFileSource. Files are grouped by product (the part of

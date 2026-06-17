@@ -6,6 +6,7 @@
 // coastline overlay and mouse-driven probe/timeseries.
 
 #include "QdlessApp.h"
+#include "QdlessCatalog.h"
 #include "QdlessExitEffect.h"
 
 #include <boost/program_options.hpp>
@@ -91,9 +92,11 @@ int main(int argc, char* argv[])
          po::value<std::string>(&dirArg),
          "directory whose files (sorted by filename) form the time series") //
         ("catalog",
-         po::value<std::string>(&opts.catalogRoot),
+         po::value<std::string>(&opts.catalogRoot)->implicit_value(""),
          "root of a SmartMet/radon \"masala\" file store to browse "
-         "(producer/reftime/geometry); or a cube directory to open directly") //
+         "(producer/reftime/geometry); or a cube directory to open directly. "
+         "Given with no path, discovers weather-data mounts from fstab and lets "
+         "you pick one") //
         ("pg",
          po::value<std::string>(&opts.pgConn),
          "PostgreSQL/PostGIS connection string (libpq DSN), e.g. "
@@ -114,6 +117,11 @@ int main(int argc, char* argv[])
     po::variables_map vm;
     po::store(po::command_line_parser(argc, argv).options(desc).positional(pos).run(), vm);
     po::notify(vm);
+
+    // A bare `--catalog` (no path) means "discover weather-data mounts from
+    // fstab and present a picker" — distinct from --catalog not being given.
+    if (vm.count("catalog") != 0U && opts.catalogRoot.empty())
+      opts.catalogDiscover = true;
 
     if (vm.count("list-exit-effects") != 0U)
     {
@@ -197,7 +205,7 @@ int main(int argc, char* argv[])
 
     if (vm.count("help") != 0U ||
         (opts.filename.empty() && opts.filenames.empty() && opts.pgConn.empty() &&
-         opts.browseRoot.empty() && opts.catalogRoot.empty()))
+         opts.browseRoot.empty() && opts.catalogRoot.empty() && !opts.catalogDiscover))
     {
       std::cout << "Usage: qdless [options] <file> [<file> ...]\n"
                 << "       qdless [options] --dir <directory>\n"
@@ -226,6 +234,16 @@ int main(int argc, char* argv[])
         if (comma == std::string::npos) break;
         start = comma + 1;
       }
+    }
+
+    // Bare `--catalog`: fail early (before ncurses) with a clear message if no
+    // weather-data mounts are discoverable, rather than flashing the curses UI.
+    if (opts.catalogDiscover && Qdless::MasalaCatalog::discoverWeatherRoots().empty())
+    {
+      std::cerr << "qdless: no weather-data mounts found in "
+                << Qdless::MasalaCatalog::fstabPath()
+                << " (looked for s3fs / NFS mounts under /masala or matching known models)\n";
+      return 1;
     }
 
     // --extrema is a one-shot text report; treat it like --dump (no curses).

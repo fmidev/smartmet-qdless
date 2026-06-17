@@ -27,6 +27,7 @@
 // the extra trailing fields some producers append.
 
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -134,5 +135,33 @@ std::vector<std::string> listRasterFiles(const std::string& dir);
 bool hasRasterFiles(const std::string& dir);
 // True if `dir` is (or one subdir level down holds) a raster animation cube.
 bool isRasterCubeDir(const std::string& dir);
+
+// Human-readable model name for a catalog directory, looked up from a built-in
+// table keyed by the well-known mount/producer paths (e.g. "/masala/datasets/4"
+// -> "MEPS", "/gem_data" -> "GEM"). Matches `absPath` exactly or as a trailing
+// path suffix on a '/' boundary, so it also resolves under a relocated catalog
+// root (test fixtures, bind mounts); '_' and '-' are treated as equivalent so
+// the table's "/gem_data" matches an fstab "/gem-data" mount. Returns nullopt
+// when the path is not a known model. The longest matching key wins.
+std::optional<std::string> modelNameForPath(const std::string& absPath);
+
+// Path of the fstab to inspect: $QDLESS_FSTAB if set (for tests), else
+// "/etc/fstab".
+std::string fstabPath();
+
+// A mount discovered in fstab that looks like a browseable weather-data root.
+struct WeatherRoot
+{
+  std::string path;   // mount point, e.g. "/masala/datasets", "/gem-data"
+  std::string model;  // known model name when the path maps to one, else ""
+};
+
+// Inspect fstab and return the network / s3fs mounts that hold weather data,
+// sorted by path. Cheap classification first (fstype / device / known-model
+// paths / under /masala), then a single shallow readdir ("content probe") for
+// the remaining network mounts; obvious system mounts (/, /home, /boot, local
+// filesystems, …) are aborted without any I/O. Empty if fstab is absent or no
+// weather mount is found. Used by the [D] / bare-`--catalog` root picker.
+std::vector<WeatherRoot> discoverWeatherRoots();
 }  // namespace MasalaCatalog
 }  // namespace Qdless

@@ -56,6 +56,14 @@ class DataSource
   // Auto-detects the format and returns a DataSource. Throws on error.
   static std::unique_ptr<DataSource> open(const std::string& filename);
 
+  // Translate a path under an s3fs fuse mount (per fstab) to its local on-disk
+  // cache copy when one exists, so the file can be memory-mapped from local
+  // disk instead of round-tripping the S3 bucket. Returns `path` unchanged
+  // when there is no matching s3fs mount, no use_cache directory, or no cached
+  // copy yet (the fuse read then populates the cache for next time). Cheap and
+  // safe to call on every open; open() applies it automatically.
+  static std::string localCachePath(const std::string& path);
+
   // Return a fresh, independently-iterable view of the same underlying
   // data, safe to use concurrently with the original for READ-ONLY
   // queries. Used by background threads (e.g. the phenomenon detector)

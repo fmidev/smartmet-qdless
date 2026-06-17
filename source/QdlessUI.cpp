@@ -167,6 +167,14 @@ void UI::touch()
   wnoutrefresh(itsStatusWin);
 }
 
+void UI::clearBackground()
+{
+  // Raw ANSI clear: ncurses' curscr stays blank (we never paint the map area
+  // through it), so this won't be undone by the next implicit refresh.
+  std::fputs("\x1b[0m\x1b[2J\x1b[H", stdout);
+  std::fflush(stdout);
+}
+
 void UI::writeLabel(WINDOW* w, int y, int x, const std::string& label, int hotPos)
 {
   int n = static_cast<int>(label.size());
@@ -206,7 +214,7 @@ void UI::drawTimeline(const std::string& label, int idx, int total)
 }
 
 void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseMode,
-                       bool hasWind)
+                       bool hasWind, bool catalogMode)
 {
   werase(itsStatusWin);
   // Layout: [Q]uit  [P]aram  [L]evel  Time ←→  Zoom +/-  Pan hjkl  [0]Reset  [?]Help
@@ -247,6 +255,7 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseM
     if (!shapeMode) put("[X]Section", 1);
   }
   if (browseMode) put("[D]Browse", 1);
+  if (catalogMode) put("[D]Catalog", 1);
   put("[?]Help", 1);
   // [Space]Play makes no sense for a single-frame source. Shape mode
   // and image mode have a static time axis; gate the entry there.
@@ -257,7 +266,8 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseM
 }
 
 int UI::popupMenu(const std::string& title, const std::vector<std::string>& items,
-                  int currentIndex, bool allowTab, std::function<void(int)> onSelect)
+                  int currentIndex, bool allowTab, std::function<void(int)> onSelect,
+                  bool arrowNav)
 {
   if (items.empty()) return -1;
   wtimeout(itsStatusWin, -1);  // see comment in popupSearch
@@ -378,6 +388,18 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
     if (ch == '\n' || ch == KEY_ENTER)
     {
       result = sel;
+      break;
+    }
+    // Horizontal navigation for hierarchical pickers: Right picks the
+    // highlighted row (like Enter), Left asks the caller to go up a level.
+    if (arrowNav && ch == KEY_RIGHT)
+    {
+      result = sel;
+      break;
+    }
+    if (arrowNav && ch == KEY_LEFT)
+    {
+      result = kPopupNavLeft;
       break;
     }
     auto applyMove = [&](int key) -> bool
@@ -1078,6 +1100,7 @@ void UI::popupHelp(HelpContext ctx)
       }
     }
     add("e", "Export PNG");
+    if (ctx.isCatalog) add("d", "Re-open masala catalog picker");
     add("", "");
     add("M", "File metadata");
     if (multiPanel)

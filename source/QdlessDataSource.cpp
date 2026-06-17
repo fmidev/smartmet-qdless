@@ -2,6 +2,7 @@
 
 #include <fmt/format.h>
 
+#include "QdlessCatalog.h"
 #include "QdlessGdalRasterSource.h"
 #include "QdlessGridFilesSource.h"
 #include "QdlessImageSource.h"
@@ -16,10 +17,13 @@
 #include <cmath>
 #include <cstdio>
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 #include <gdal_priv.h>
+#include <sstream>
 #include <stdexcept>
 #include <unistd.h>
+#include <vector>
 
 namespace Qdless
 {
@@ -121,6 +125,59 @@ FileKind detectKind(const std::string& filename)
   // Fall through: assume newbase QueryData.
   return FileKind::kQueryData;
 }
+
+// One s3fs fuse mount as described by fstab. Files under `mountpoint` are
+// objects in an S3 bucket; s3fs keeps a local on-disk copy of every object it
+// has fetched under `cacheDir` (the use_cache= option), and those copies are
+// ordinary files that can be memory-mapped directly — far cheaper than
+// round-tripping the bucket through the fuse layer.
+struct S3fsMount
+{
+  std::string mountpoint;  // e.g. "/gem-data"
+  std::string bucket;      // device tail after '#', e.g. "gem-data"
+  std::string cacheDir;    // use_cache= value
+};
+
+// Parse fstab once, returning the s3fs mounts that declare a use_cache dir,
+// sorted most-specific-mountpoint-first so nested mounts resolve correctly.
+// Empty (a no-op) on a machine with no s3fs mounts or no fstab.
+const std::vector<S3fsMount>& s3fsMounts()
+{
+  static const std::vector<S3fsMount> mounts = []
+  {
+    std::vector<S3fsMount> out;
+    std::ifstream in(MasalaCatalog::fstabPath());
+    std::string line;
+    while (std::getline(in, line))
+    {
+      // The device field legitimately contains '#' ("s3fs#bucket"), so only a
+      // leading '#' marks a comment.
+      const std::size_t first = line.find_first_not_of(" \t");
+      if (first == std::string::npos || line[first] == '#') continue;
+      std::istringstream ls(line);
+      std::string device, mountpoint, fstype, options;
+      if (!(ls >> device >> mountpoint >> fstype >> options)) continue;
+      if (device.rfind("s3fs", 0) != 0) continue;  // not an s3fs entry
+      S3fsMount m;
+      m.mountpoint = mountpoint;
+      if (const std::size_t hash = device.find('#'); hash != std::string::npos)
+        m.bucket = device.substr(hash + 1);
+      // Pull use_cache=<dir> out of the comma-separated options.
+      std::stringstream os(options);
+      std::string opt;
+      while (std::getline(os, opt, ','))
+      {
+        constexpr std::string_view key = "use_cache=";
+        if (opt.rfind(key, 0) == 0) m.cacheDir = opt.substr(key.size());
+      }
+      if (!m.mountpoint.empty() && !m.cacheDir.empty()) out.push_back(std::move(m));
+    }
+    std::sort(out.begin(), out.end(), [](const S3fsMount& a, const S3fsMount& b)
+              { return a.mountpoint.size() > b.mountpoint.size(); });
+    return out;
+  }();
+  return mounts;
+}
 }  // namespace
 
 // GDAL/OGR last-resort probe. The fast magic-byte checks above route
@@ -154,8 +211,35 @@ std::unique_ptr<DataSource> tryGdalOpen(const std::string& filename)
   return nullptr;
 }
 
-std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
+std::string DataSource::localCachePath(const std::string& path)
 {
+  const auto& mounts = s3fsMounts();
+  if (mounts.empty()) return path;
+  for (const auto& m : mounts)
+  {
+    // path must equal the mountpoint or sit strictly beneath it.
+    if (path.size() <= m.mountpoint.size() ||
+        path.compare(0, m.mountpoint.size(), m.mountpoint) != 0 ||
+        path[m.mountpoint.size()] != '/')
+      continue;
+    const std::string rel = path.substr(m.mountpoint.size());  // includes leading '/'
+    // s3fs stores cached objects as <use_cache>/<bucket>/<key>; some setups
+    // fold the bucket name into use_cache already, so accept either layout and
+    // use whichever local copy actually exists.
+    std::error_code ec;
+    for (const std::string& cand : {m.cacheDir + "/" + m.bucket + rel, m.cacheDir + rel})
+      if (std::filesystem::is_regular_file(cand, ec)) return cand;
+    return path;  // under an s3fs mount but not cached yet — read via fuse
+  }
+  return path;
+}
+
+std::unique_ptr<DataSource> DataSource::open(const std::string& requestedPath)
+{
+  // Redirect s3fs-backed paths to their local on-disk cache copy when one
+  // exists, so detection + decoding mmap a local file instead of the fuse
+  // mount. A no-op off s3fs or for a not-yet-cached object.
+  const std::string filename = localCachePath(requestedPath);
   switch (detectKind(filename))
   {
     case FileKind::kQueryData:
@@ -226,7 +310,7 @@ std::unique_ptr<DataSource> DataSource::open(const std::string& filename)
   }
   if (auto src = tryGdalOpen(filename))
     return src;
-  throw std::runtime_error("unknown file format: " + filename);
+  throw std::runtime_error("unknown file format: " + requestedPath);
 }
 
 void DataSource::uvToLatLon(double u, double v, double& lat, double& lon) const

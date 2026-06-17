@@ -575,6 +575,12 @@ App::App(Options opts) : itsOpts(std::move(opts))
     // so the picker can run (same shape as the deferred PG path).
     itsSource = nullptr;
   }
+  else if (itsOpts.catalogDiscover)
+  {
+    // Bare `--catalog`: defer to the fstab weather-mount picker once the UI is
+    // up (same shape as the deferred PG / browse paths).
+    itsSource = nullptr;
+  }
   else if (!itsOpts.catalogRoot.empty())
   {
     // Masala catalog mode. If the path is already a renderable cube,
@@ -1147,10 +1153,10 @@ bool App::openCatalogRasterCube(const std::string& dir, UI* ui)
   return true;
 }
 
-bool App::openCatalogPicker(UI& ui)
+bool App::openCatalogPicker(UI& ui, const std::string& rootArg)
 {
   namespace fs = std::filesystem;
-  const std::string root = itsOpts.catalogRoot;
+  const std::string root = rootArg.empty() ? itsOpts.catalogRoot : rootArg;
   std::string here = root;
 
   // Pretty-print a 12-digit reference time as "2026-06-13 00Z".
@@ -1198,16 +1204,51 @@ bool App::openCatalogPicker(UI& ui)
       return false;
     }
 
+    // Build the dir-name column, then annotate any entry whose full path maps
+    // to a known model with the model name in a second, aligned column
+    // (e.g. "131/   ECG").
+    std::vector<std::string> dirCol, modelCol;
+    dirCol.reserve(subs.size());
+    modelCol.reserve(subs.size());
+    std::size_t dirW = 0;
+    for (const auto& s : subs)
+    {
+      std::string d = label(s) + "/";
+      dirW = std::max(dirW, d.size());
+      dirCol.push_back(std::move(d));
+      auto name = MasalaCatalog::modelNameForPath(here + "/" + s);
+      modelCol.push_back(name ? *name : std::string{});
+    }
+
     std::vector<std::string> items;
     items.reserve(subs.size() + 1);
     if (canUp)
       items.push_back(".. (up)");
-    for (const auto& s : subs)
-      items.push_back(label(s) + "/");
+    for (std::size_t i = 0; i < dirCol.size(); ++i)
+    {
+      if (modelCol[i].empty())
+        items.push_back(dirCol[i]);
+      else
+        items.push_back(dirCol[i] + std::string(dirW - dirCol[i].size() + 3, ' ') + modelCol[i]);
+    }
 
     const std::string rel = here.size() > root.size() ? here.substr(root.size() + 1) : "";
-    const std::string title = "Masala catalog: " + (rel.empty() ? std::string(".") : rel);
-    const int sel = ui.popupMenu(title, items, 0, /*allowTab=*/false);
+    std::string title = "Masala catalog: " + (rel.empty() ? std::string(".") : rel);
+    if (auto m = MasalaCatalog::modelNameForPath(here))
+      title += "  [" + *m + "]";
+    // Wipe the screen so a smaller menu drawn after a larger one (e.g. when
+    // stepping back up) doesn't leave the previous box ghosting around it.
+    ui.clearBackground();
+    const int sel =
+        ui.popupMenu(title, items, 0, /*allowTab=*/false, /*onSelect=*/{}, /*arrowNav=*/true);
+    // Left arrow (or selecting ".."): step up one level without leaving the
+    // picker. At the root there is nowhere to go up to, so just redraw.
+    if (sel == UI::kPopupNavLeft)
+    {
+      if (canUp)
+        here = fs::path(here).parent_path().string();
+      continue;
+    }
     if (sel < 0)
       return false;  // Esc — keep whatever source was active
     if (canUp && sel == 0)
@@ -1216,6 +1257,52 @@ bool App::openCatalogPicker(UI& ui)
       continue;
     }
     here += "/" + subs[static_cast<std::size_t>(canUp ? sel - 1 : sel)];
+  }
+}
+
+bool App::openCatalogRootPicker(UI& ui)
+{
+  const auto roots = MasalaCatalog::discoverWeatherRoots();
+  if (roots.empty())
+  {
+    itsLastMessage = "No weather-data mounts found in " + MasalaCatalog::fstabPath();
+    return false;
+  }
+
+  // Align the mount-path column so the model-name annotations line up.
+  std::size_t pathW = 0;
+  for (const auto& r : roots)
+    pathW = std::max(pathW, r.path.size());
+  std::vector<std::string> items;
+  items.reserve(roots.size());
+  for (const auto& r : roots)
+  {
+    if (r.model.empty())
+      items.push_back(r.path);
+    else
+      items.push_back(r.path + std::string(pathW - r.path.size() + 3, ' ') + r.model);
+  }
+
+  while (true)
+  {
+    ui.clearBackground();
+    const int sel = ui.popupMenu("Weather data mounts (" + MasalaCatalog::fstabPath() + ")", items,
+                                 0, /*allowTab=*/false, /*onSelect=*/{}, /*arrowNav=*/true);
+    // Left at the top level has nowhere to go; Esc/q cancels the whole thing.
+    if (sel == UI::kPopupNavLeft)
+      continue;
+    if (sel < 0)
+      return false;
+    // Drill into the chosen mount. If the user backs out (Esc / no data), fall
+    // back here so they can pick a different mount; only a real open ends it.
+    if (openCatalogPicker(ui, roots[static_cast<std::size_t>(sel)].path))
+    {
+      // Remember that discovery is active so [D] keeps returning to the mount
+      // list and the status bar / help advertise it (catalogRoot stays empty
+      // so we don't pin [D] to a single mount).
+      itsOpts.catalogDiscover = true;
+      return true;
+    }
   }
 }
 
@@ -3508,8 +3595,8 @@ void App::renderTimeline(UI& ui)
   ui.drawTimeline(label,
                   static_cast<int>(itsSource->currentTimeIndex()),
                   static_cast<int>(itsSource->timeCount()));
-  ui.drawStatusBar(
-      itsSource->isImage(), isShape, pgMode, !itsOpts.browseRoot.empty(), hasWindComponents());
+  ui.drawStatusBar(itsSource->isImage(), isShape, pgMode, !itsOpts.browseRoot.empty(),
+                   hasWindComponents(), !itsOpts.catalogRoot.empty() || itsOpts.catalogDiscover);
   doupdate();
 }
 
@@ -4945,6 +5032,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       ctx.isImage = itsSource->isImage();
       ctx.isShape = itsSource->isVector();
       ctx.isPg = (itsPgDataset != nullptr);
+      ctx.isCatalog = !itsOpts.catalogRoot.empty() || itsOpts.catalogDiscover;
       ctx.hasTimeAxis = itsSource->timeCount() > 1;
       ctx.hasMultipleParams = itsSource->paramIds().size() > 1;
       ctx.hasMultipleLevels = itsSource->levelCount() > 1;
@@ -4990,19 +5078,17 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       const bool inPgMode = (itsPgDataset != nullptr);
       const bool inBrowseMode = !itsOpts.browseRoot.empty();
       const bool inCatalogMode = !itsOpts.catalogRoot.empty();
-      if (!inPgMode && !inBrowseMode && !inCatalogMode)
-      {
-        itsLastMessage = "Picker is only available with --pg, --dir tree, or --catalog";
-        return true;
-      }
-      // Reset state that's specific to the previous layer/leaf, then
-      // re-pick. If the user cancels, we keep the current source.
+      // Reset state that's specific to the previous layer/leaf, then re-pick.
+      // If the user cancels, we keep the current source. With no browser mode
+      // active, fall back to the fstab-discovered weather-mount picker so [D]
+      // is useful even on a plain `qdless <file>` launch.
       auto saved = std::move(itsSource);
       try
       {
         const bool ok = inPgMode        ? openPgPicker(ui)
                         : inCatalogMode ? openCatalogPicker(ui)
-                                        : openBrowsePicker(ui);
+                        : inBrowseMode  ? openBrowsePicker(ui)
+                                        : openCatalogRootPicker(ui);
         if (!ok)
         {
           itsSource = std::move(saved);
@@ -8713,6 +8799,14 @@ int App::runInteractive()
   if (itsSource == nullptr && !itsOpts.catalogRoot.empty())
   {
     if (!openCatalogPicker(ui))
+      return 0;
+    initFromSource();
+  }
+  // Deferred bare-`--catalog` pick: discover weather mounts from fstab and let
+  // the user choose one, then enter the column picker rooted there.
+  if (itsSource == nullptr && itsOpts.catalogDiscover)
+  {
+    if (!openCatalogRootPicker(ui))
       return 0;
     initFromSource();
   }

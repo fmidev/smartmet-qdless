@@ -54,8 +54,40 @@ encoded in the path + filename (radon convention
 
 - Pointed **above a cube**, it opens a lazy Miller-column picker (producer →
   reference time → geometry); pointed **at a cube** (a geometry dir with numeric
-  leadtime subdirs, or a leaf of param files) it opens that cube. `[D]` re-opens
-  the picker.
+  leadtime subdirs, or a leaf of param files) it opens that cube. The picker
+  uses the standard `popupMenu` (auto `[1]..[9]/[a]..[z]` hotkeys); each entry
+  whose full path maps to a known model is annotated with the model name
+  (`131/   ECG`) via `MasalaCatalog::modelNameForPath` — a built-in table keyed
+  by the radon producer-id / mount paths, matched exactly or as a trailing path
+  suffix (so a relocated root still resolves) and treating `-`/`_` as
+  equivalent. The picker clears the screen (`UI::clearBackground`) before each
+  menu so stepping back to a smaller menu doesn't leave the previous box
+  ghosting. Navigation: ↑/↓ move, **→ or Enter** opens the highlighted entry,
+  **← steps back up** a level (no scrolling to ".."), Esc/q cancels — the ←/→
+  behaviour comes from `popupMenu`'s `arrowNav` flag (Left returns
+  `UI::kPopupNavLeft`, Right acts like Enter). Once a cube is open, **`[D]`**
+  re-opens the picker (shown as `[D]Catalog` in the status bar / help).
+- **fstab mount discovery** (`MasalaCatalog::discoverWeatherRoots`): pressing
+  **`[D]` with no browser mode active** (a plain `qdless <file>` launch), or a
+  **bare `--catalog`** (no path), opens a top-level picker of the weather-data
+  mounts found in fstab (`$QDLESS_FSTAB` overrides the path for tests), each
+  annotated with its model name. Classification is cheap-first: abort
+  local/pseudo filesystems and system mountpoints (`/`, `/home`, `/boot`,
+  `/var`, …) with no I/O; accept `s3fs#…` devices, anything under `/masala`, and
+  paths matching a known model; then a single shallow `readdir` ("content
+  probe") accepts remaining NFS mounts only if they show weather structure
+  (producer-id / reftime / known-model / `datasets` child dirs, or cube/raster
+  files). Picking a mount drops into the column picker rooted there; Esc returns
+  to the mount list. Bare `--catalog` with no discoverable mounts exits with a
+  stderr message (before ncurses).
+- **s3fs-backed paths** are transparently redirected to their local on-disk
+  cache copy: `DataSource::open` runs every path through
+  `DataSource::localCachePath`, which parses fstab for `s3fs#…` mounts + their
+  `use_cache=` dir and, when the requested file lives under such a mount and a
+  cached copy exists, opens `<use_cache>[/<bucket>]/<rel>` instead so the file
+  is mmap'd from local disk rather than round-tripped through the fuse layer.
+  No-op off s3fs or for a not-yet-cached object; directory *listing* still goes
+  through the mount.
 - A cube becomes a `(parameter × level × leadtime)` source: lead times drive the
   time animation, level types/values drive `L`/cross-section, valid time =
   reference time + lead. Slices are read on demand (one file per slice,

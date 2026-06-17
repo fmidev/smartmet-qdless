@@ -62,11 +62,23 @@ class UI
   // imageMode wins when both image and shape flags are set.
   void drawStatusBar(bool imageMode = false, bool shapeMode = false,
                      bool pgMode = false, bool browseMode = false,
-                     bool hasWind = true);
+                     bool hasWind = true, bool catalogMode = false);
 
 
   // Re-blank ncurses windows (after popup close). Caller redraws map.
   void touch();
+
+  // Wipe the whole terminal to blank via raw ANSI. Used between successive
+  // popups in a loop (e.g. the catalog Miller-column picker) so a smaller menu
+  // drawn after a larger one doesn't leave the larger one's cells ghosting
+  // around its edge — popups only paint their own box and rely on the map
+  // being repainted underneath, which doesn't happen mid-picker.
+  void clearBackground();
+
+  // Returned by popupMenu when `arrowNav` is set and the user pressed Left —
+  // the caller interprets it as "go back / up one level" (e.g. the catalog
+  // Miller-column picker steps to the parent directory).
+  static constexpr int kPopupNavLeft = -3;
 
   // Centred popup menu. Returns 0-based index, or -1 if Esc cancelled.
   // Items beyond hotkey-able count are reachable via arrow keys + Enter.
@@ -74,9 +86,12 @@ class UI
   // caller can switch to a sibling view (matches popupSearch).
   // If `onSelect` is set it is called with the new index every time the
   // highlight moves (live preview); the popup re-renders on top after.
+  // When `arrowNav` is true the picker gains horizontal navigation: Right
+  // selects the highlighted row (same as Enter) and Left returns
+  // kPopupNavLeft so a hierarchical caller can pop up a level.
   int popupMenu(const std::string& title, const std::vector<std::string>& items,
                 int currentIndex, bool allowTab = false,
-                std::function<void(int)> onSelect = {});
+                std::function<void(int)> onSelect = {}, bool arrowNav = false);
 
   // Section-header variant. Same shape as popupMenu, but each row can be
   // marked as a section header: rendered bold with ── decoration, no
@@ -123,6 +138,7 @@ class UI
     bool isImage = false;        // raw image: no projection / no time
     bool isShape = false;        // shapefile / PostGIS: no time / no probe
     bool isPg = false;           // PostGIS connection: show [D]Tables
+    bool isCatalog = false;      // masala catalog: show [D]Catalog re-pick
     bool hasTimeAxis = true;     // false when timeCount() <= 1
     bool hasMultipleParams = true;
     bool hasMultipleLevels = true;
