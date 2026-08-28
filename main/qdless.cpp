@@ -86,6 +86,9 @@ int main(int argc, char* argv[])
          "start in globe view (orthographic 3D sphere; any gridded geographic source)") //
         ("globe-surface", po::value<std::string>(&opts.globeSurface),
          "initial globe surface fill: outline|ocean|land|both (cycle live with 'o')") //
+        ("sun", po::bool_switch(&opts.showSunlight),
+         "shadow the unlit side of the Earth: civil / nautical / astronomical "
+         "twilight and night (toggle live with 'u')") //
         ("extrema", po::bool_switch(&opts.dumpExtrema),
          "print persistent 3D local maxima/minima (per-level-median anomaly) and exit") //
         ("dir",

@@ -59,10 +59,13 @@ class UI
   //   hasWind     — source carries WindUMS + WindVMS. Hides the [W]ind
   //                 toggle when false (the overlay would render nothing
   //                 anyway, e.g. for radar PVOL files).
+  //   sunOn       — twilight shadow active; marks [U]Sun with a '*' so the
+  //                 state is visible, not just the key.
   // imageMode wins when both image and shape flags are set.
   void drawStatusBar(bool imageMode = false, bool shapeMode = false,
                      bool pgMode = false, bool browseMode = false,
-                     bool hasWind = true, bool catalogMode = false);
+                     bool hasWind = true, bool catalogMode = false,
+                     bool sunOn = false);
 
 
   // Re-blank ncurses windows (after popup close). Caller redraws map.

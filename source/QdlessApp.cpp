@@ -136,6 +136,78 @@ unsigned brailleBit(int subCol, int subRow)
   return static_cast<unsigned>(subCol * 3 + subRow);
 }
 
+// Screen-space lattice of solar elevation angles for the pixel-domain style.
+// The angle is a very smooth function of position — a few hundredths of a
+// degree of curvature over a node spacing — so evaluating the model on a
+// coarse lattice and interpolating between nodes is visually identical to a
+// per-pixel solve at a fraction of the cost. Interpolating the *angle* (not
+// lat/lon) is also what makes this safe across a projection's dateline seam.
+class SunLattice
+{
+ public:
+  template <typename F>
+  SunLattice(int subW, int subH, int maxNodes, const Solar::Sky& sky, const F& positionAt)
+  {
+    itsStepX = std::max(1, (subW + maxNodes - 1) / maxNodes);
+    itsStepY = std::max(1, (subH + maxNodes - 1) / maxNodes);
+    for (int x = 0; x < subW; x += itsStepX)
+      itsXs.push_back(x);
+    if (itsXs.empty() || itsXs.back() != subW - 1)
+      itsXs.push_back(subW - 1);
+    for (int y = 0; y < subH; y += itsStepY)
+      itsYs.push_back(y);
+    if (itsYs.empty() || itsYs.back() != subH - 1)
+      itsYs.push_back(subH - 1);
+
+    const std::size_t nx = itsXs.size();
+    itsElev.assign(nx * itsYs.size(), std::numeric_limits<float>::quiet_NaN());
+    for (std::size_t j = 0; j < itsYs.size(); ++j)
+      for (std::size_t i = 0; i < nx; ++i)
+      {
+        double lat = 0;
+        double lon = 0;
+        if (positionAt(itsXs[i], itsYs[j], lat, lon))
+          itsElev[j * nx + i] = static_cast<float>(sky.elevationDeg(lat, lon));
+      }
+  }
+
+  // NaN when any of the four surrounding nodes had no geographic position —
+  // the caller then solves that pixel exactly (it is a grid / disc edge).
+  float at(int x, int y) const
+  {
+    const int nx = static_cast<int>(itsXs.size());
+    const int ny = static_cast<int>(itsYs.size());
+    if (nx < 2 || ny < 2)
+      return std::numeric_limits<float>::quiet_NaN();
+    const int i0 = std::clamp(x / itsStepX, 0, nx - 2);
+    const int j0 = std::clamp(y / itsStepY, 0, ny - 2);
+    const int x0 = itsXs[i0];
+    const int x1 = itsXs[i0 + 1];
+    const int y0 = itsYs[j0];
+    const int y1 = itsYs[j0 + 1];
+    const float tx = (x1 > x0) ? static_cast<float>(x - x0) / (x1 - x0) : 0.0F;
+    const float ty = (y1 > y0) ? static_cast<float>(y - y0) / (y1 - y0) : 0.0F;
+    const float e00 = itsElev[static_cast<std::size_t>(j0) * nx + i0];
+    const float e10 = itsElev[static_cast<std::size_t>(j0) * nx + i0 + 1];
+    const float e01 = itsElev[static_cast<std::size_t>(j0 + 1) * nx + i0];
+    const float e11 = itsElev[static_cast<std::size_t>(j0 + 1) * nx + i0 + 1];
+    if (!std::isfinite(e00) || !std::isfinite(e10) || !std::isfinite(e01) || !std::isfinite(e11))
+      return std::numeric_limits<float>::quiet_NaN();
+    return (e00 * (1.0F - tx) + e10 * tx) * (1.0F - ty) + (e01 * (1.0F - tx) + e11 * tx) * ty;
+  }
+
+ private:
+  std::vector<int> itsXs;
+  std::vector<int> itsYs;
+  std::vector<float> itsElev;
+  int itsStepX = 1;
+  int itsStepY = 1;
+};
+
+// Lattice node budget per axis. 128 keeps a full-screen block-mode frame
+// under ~7 ms of astronomy and a Kitty-mode frame at the same cost.
+constexpr int kSunLatticeNodes = 128;
+
 // Append a raw-ANSI cursor positioning + glyph for each cell of a vertical
 // or horizontal separator. `glyph` is a UTF-8 box-drawing character.
 void appendSeparator(
@@ -543,6 +615,8 @@ App::App(Options opts) : itsOpts(std::move(opts))
     itsGlobeSurface = GlobeSurface::Land;
   else if (itsOpts.globeSurface == "both")
     itsGlobeSurface = GlobeSurface::Both;
+
+  itsShowSunlight = itsOpts.showSunlight;
 
   if (!itsOpts.pgConn.empty())
   {
@@ -2407,6 +2481,17 @@ std::string App::exportPng(std::string& err) const
     rgb[idx + 2] = b;
   };
 
+  // Twilight shadow, sampled per output pixel through the same lattice the
+  // screen pass uses.
+  const bool sun = sunlightActive();
+  SunPosition sunPos;
+  std::optional<SunLattice> sunLattice;
+  if (sun)
+  {
+    sunPos = viewportSunPosition(width, height);
+    sunLattice.emplace(width, height, kSunLatticeNodes, currentSky(), sunPos);
+  }
+
   for (int py = 0; py < height; ++py)
   {
     const float v = itsViewport.vMin + (static_cast<float>(py) + 0.5F) / height * spanV;
@@ -2415,6 +2500,22 @@ std::string App::exportPng(std::string& err) const
       const float u = itsViewport.uMin + (static_cast<float>(px) + 0.5F) / width * spanU;
       const float val = transform(itsSource->sampleValueAtUV(u, v));
       Rgb c = activePanel().palette.lookup(val);
+      if (sun)
+      {
+        float elev = sunLattice->at(px, py);
+        if (!std::isfinite(elev))
+        {
+          double lat = 0;
+          double lon = 0;
+          if (sunPos(px, py, lat, lon))
+            elev = static_cast<float>(currentSky().elevationDeg(lat, lon));
+        }
+        if (std::isfinite(elev))
+          c = Solar::shade(c, Solar::zoneFor(elev));  // shades the no-data
+                                                      // canvas too, so the
+                                                      // unlit side reads as
+                                                      // an area, as on screen
+      }
       if (c.transparent)
         continue;  // leave white for "no data"
       setPixel(px, py, c.r, c.g, c.b);
@@ -3228,6 +3329,129 @@ void App::appendPolylineBraille(std::ostringstream& os,
   }
 }
 
+// ---------------------------------------------------------------------------
+// Sunlight / twilight overlay ([u]).
+// ---------------------------------------------------------------------------
+//
+// The whole overlay hangs off one number per point — the sun's elevation
+// angle, straight out of macgyver's solar model (see QdlessSolar.h). Each
+// view supplies a SunPosition mapping sub-pixel → (lat, lon); everything
+// else (zone classification, the three shadow styles) is shared.
+
+const Solar::Sky& App::currentSky() const
+{
+  const NFmiMetTime t = itsSource->currentValidTime();
+  const std::string key = fmt::format("{:04}{:02}{:02}{:02}{:02}{:02}",
+                                      static_cast<int>(t.GetYear()),
+                                      static_cast<int>(t.GetMonth()),
+                                      static_cast<int>(t.GetDay()),
+                                      static_cast<int>(t.GetHour()),
+                                      static_cast<int>(t.GetMin()),
+                                      static_cast<int>(t.GetSec()));
+  if (key != itsSkyKey)
+  {
+    itsSky = Solar::Sky(t);
+    itsSkyKey = key;
+  }
+  return itsSky;
+}
+
+bool App::sunlightActive() const
+{
+  if (!itsShowSunlight || itsSource == nullptr)
+    return false;
+  if (itsSource->isImage())
+    return false;  // no projection to put the sun over
+  return currentSky().valid();
+}
+
+App::SunPosition App::viewportSunPosition(int subWidth, int subHeight) const
+{
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  const float uMin = itsViewport.uMin;
+  const float vMin = itsViewport.vMin;
+  const DataSource* src = itsSource.get();
+  return [=](int sx, int sy, double& lat, double& lon)
+  {
+    if (subWidth <= 0 || subHeight <= 0 || spanU <= 0 || spanV <= 0)
+      return false;
+    const double u = uMin + (sx + 0.5) / subWidth * spanU;
+    const double v = vMin + (sy + 0.5) / subHeight * spanV;
+    src->uvToLatLon(u, v, lat, lon);
+    return std::isfinite(lat) && std::isfinite(lon);
+  };
+}
+
+App::SunPosition App::groundSunPosition(int subWidth,
+                                        int subHeight,
+                                        const GroundFrame& frame,
+                                        const std::vector<float>& zbuf) const
+{
+  constexpr double R_e = 6371000.0;
+  constexpr double kDeg2Rad = M_PI / 180.0;
+  const GroundFrame f = frame;
+  const std::vector<float>* zb = &zbuf;
+  return [=](int sx, int sy, double& lat, double& lon)
+  {
+    if (std::abs(f.fwdZ) < 1e-9 || f.xscale <= 0 || f.yscale <= 0 || f.extent <= 0)
+      return false;
+    // Screen → camera-plane coordinates, matching the projection every 3D
+    // renderer here uses (no half-pixel offset, so the depth we derive is the
+    // same number their own ground paint produced).
+    const double scx = (sx - subWidth / 2.0) / f.xscale;
+    const double scy = (subHeight / 2.0 - sy) / f.yscale;
+    // Ray P = scx·right + scy·up + t·fwd, solved for P.z = zPlane.
+    const double t = (f.zPlane - scy * f.upZ) / f.fwdZ;
+    const auto depth = static_cast<float>(t * f.depthScale);
+    const std::size_t idx = static_cast<std::size_t>(sy) * subWidth + sx;
+    if (idx < zb->size() && (*zb)[idx] < depth)
+      return false;  // something is painted in front of the plane
+    const double gx = scx * f.rightX + scy * f.upX + t * f.fwdX;
+    const double gy = scx * f.rightY + scy * f.upY + t * f.fwdY;
+    const double lim = f.extent * 1.1;
+    if (gx < -lim || gx > lim || gy < -lim || gy > lim)
+      return false;  // off the data frame's table-top
+    lat = f.lat0 + gy / (kDeg2Rad * R_e);
+    lon = f.lon0 + gx / (kDeg2Rad * R_e * f.cosLat0);
+    return true;
+  };
+}
+
+void App::applySunlight(std::vector<Rgb>& pixels,
+                        int subWidth,
+                        int subHeight,
+                        const SunPosition& positionAt) const
+{
+  if (subWidth < 2 || subHeight < 2)
+    return;
+  const Solar::Sky& sky = currentSky();
+  if (!sky.valid())
+    return;
+
+  const SunLattice lattice(subWidth, subHeight, kSunLatticeNodes, sky, positionAt);
+  for (int sy = 0; sy < subHeight; ++sy)
+    for (int sx = 0; sx < subWidth; ++sx)
+    {
+      float elev = lattice.at(sx, sy);
+      if (!std::isfinite(elev))
+      {
+        // Grid / disc edge: one of the surrounding nodes had no position.
+        // Solve this pixel exactly rather than leaving a ragged margin.
+        double lat = 0;
+        double lon = 0;
+        if (!positionAt(sx, sy, lat, lon))
+          continue;
+        elev = static_cast<float>(sky.elevationDeg(lat, lon));
+      }
+      const Solar::Zone zone = Solar::zoneFor(elev);
+      if (zone == Solar::Zone::Day)
+        continue;
+      Rgb& px = pixels[static_cast<std::size_t>(sy) * subWidth + sx];
+      px = Solar::shade(px, zone);
+    }
+}
+
 void App::overlayMarker(std::vector<Rgb>& pixels, int subWidth, int subHeight) const
 {
   if (!itsMarker.has_value() || subWidth <= 0 || subHeight <= 0)
@@ -3596,7 +3820,8 @@ void App::renderTimeline(UI& ui)
                   static_cast<int>(itsSource->currentTimeIndex()),
                   static_cast<int>(itsSource->timeCount()));
   ui.drawStatusBar(itsSource->isImage(), isShape, pgMode, !itsOpts.browseRoot.empty(),
-                   hasWindComponents(), !itsOpts.catalogRoot.empty() || itsOpts.catalogDiscover);
+                   hasWindComponents(), !itsOpts.catalogRoot.empty() || itsOpts.catalogDiscover,
+                   itsShowSunlight);
   doupdate();
 }
 
@@ -4361,6 +4586,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       case '/':
       case 'x':
       case 'X':
+      case 'u':
+      case 'U':
         itsLastMessage = "Not available in image mode";
         return true;
     }
@@ -5292,6 +5519,21 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       return true;
     }
 
+    case 'u':
+    case 'U':
+    {
+      itsShowSunlight = !itsShowSunlight;
+      if (!itsShowSunlight)
+        itsLastMessage = "Twilight shadow: off";
+      else if (!currentSky().valid())
+        itsLastMessage = "Twilight shadow on — but this file has no valid time, nothing to shade";
+      else
+        itsLastMessage =
+            fmt::format("Twilight shadow on (civil/nautical/astronomical/night), sun over {}",
+                        Solar::subsolarLabel(currentSky().subsolar()));
+      return true;
+    }
+
     case 't':
     case 'T':
       itsCornerStyle = nextCornerStyle(itsCornerStyle);
@@ -5928,6 +6170,10 @@ void App::drawMap(UI& ui)
         gfx && itsBorderStyle == LineStyle::Braille ? LineStyle::Thick : itsBorderStyle;
     const LineStyle effShape =
         gfx && itsShapeOutlineStyle == LineStyle::Braille ? LineStyle::Thick : itsShapeOutlineStyle;
+    // Twilight shadow, blended into the pixel buffer before the line overlays
+    // so coastlines / graticule stay crisp on top of it.
+    if (sunlightActive())
+      applySunlight(pixels, subW, subH, viewportSunPosition(subW, subH));
     if (effGrat == LineStyle::Thick)
       overlayGraticule(pixels, subW, subH);
     if (effCoast == LineStyle::Thick)
@@ -6290,6 +6536,35 @@ void App::draw3D(const Layout& layout)
       }
     }
   }
+
+  // --- Sunlight / twilight shadow on the ground plane. Each sub-pixel is
+  // inverse-projected onto z = 0 and shaded by its twilight zone;
+  // groundSunPosition's z-test keeps the volume / curtain / coastlines in
+  // front of the shadow instead of under it.
+  SunPosition sunPos;
+  if (sunlightActive())
+  {
+    GroundFrame gf;
+    gf.rightX = rightX;
+    gf.rightY = rightY;
+    gf.upX = upX;
+    gf.upY = upY;
+    gf.upZ = upZ;
+    gf.fwdX = fwdX;
+    gf.fwdY = fwdY;
+    gf.fwdZ = fwdZ;
+    gf.xscale = xscale;
+    gf.yscale = yscale;
+    gf.depthScale = depthScale;
+    gf.zPlane = 0.0;
+    gf.extent = extent;
+    gf.lat0 = radarLat;
+    gf.lon0 = radarLon;
+    gf.cosLat0 = cosLat0;
+    sunPos = groundSunPosition(subW, subH, gf, zbuf);
+  }
+  if (sunPos)
+    applySunlight(pixels, subW, subH, sunPos);
 
   // Render to stdout.
   std::ostringstream os;
@@ -6700,6 +6975,35 @@ void App::draw3DQueryData(const Layout& layout)
     }
   }
 
+  // --- Sunlight / twilight shadow on the ground plane. Each sub-pixel is
+  // inverse-projected onto z = 0 and shaded by its twilight zone;
+  // groundSunPosition's z-test keeps the volume / curtain / coastlines in
+  // front of the shadow instead of under it.
+  SunPosition sunPos;
+  if (sunlightActive())
+  {
+    GroundFrame gf;
+    gf.rightX = rightX;
+    gf.rightY = rightY;
+    gf.upX = upX;
+    gf.upY = upY;
+    gf.upZ = upZ;
+    gf.fwdX = fwdX;
+    gf.fwdY = fwdY;
+    gf.fwdZ = fwdZ;
+    gf.xscale = xscale;
+    gf.yscale = yscale;
+    gf.depthScale = depthScale;
+    gf.zPlane = 0.0;
+    gf.extent = extent;
+    gf.lat0 = lat0;
+    gf.lon0 = lon0;
+    gf.cosLat0 = cosLat0;
+    sunPos = groundSunPosition(subW, subH, gf, zbuf);
+  }
+  if (sunPos)
+    applySunlight(pixels, subW, subH, sunPos);
+
   std::ostringstream os;
   cache3DRaster(pixels, subW, subH);
   itsRenderer.render(os, pixels, subW, subH, l.map.row, l.map.col);
@@ -7062,6 +7366,35 @@ void App::draw3DSurfaceStack(const Layout& layout)
                      plot(c + 1, r + 1, depth, color);
                    });
   }
+
+  // --- Sunlight / twilight shadow on the ground plane. Each sub-pixel is
+  // inverse-projected onto z = 0 and shaded by its twilight zone;
+  // groundSunPosition's z-test keeps the volume / curtain / coastlines in
+  // front of the shadow instead of under it.
+  SunPosition sunPos;
+  if (sunlightActive())
+  {
+    GroundFrame gf;
+    gf.rightX = rightX;
+    gf.rightY = rightY;
+    gf.upX = upX;
+    gf.upY = upY;
+    gf.upZ = upZ;
+    gf.fwdX = fwdX;
+    gf.fwdY = fwdY;
+    gf.fwdZ = fwdZ;
+    gf.xscale = xscale;
+    gf.yscale = yscale;
+    gf.depthScale = depthScale;
+    gf.zPlane = 0.0;
+    gf.extent = extent;
+    gf.lat0 = lat0;
+    gf.lon0 = lon0;
+    gf.cosLat0 = cosLat0;
+    sunPos = groundSunPosition(subW, subH, gf, zbuf);
+  }
+  if (sunPos)
+    applySunlight(pixels, subW, subH, sunPos);
 
   std::ostringstream os;
   cache3DRaster(pixels, subW, subH);
@@ -7758,6 +8091,35 @@ void App::draw3DCrossSection(const Layout& layout)
       subModeLbl, plane1.lat1, plane1.lon1, plane1.lat2, plane1.lon2,
       itsCurtainHeightKm, itsCamZoom, flags, itsCurtainAnimSpeed);
 
+  // --- Sunlight / twilight shadow on the ground plane. Each sub-pixel is
+  // inverse-projected onto z = 0 and shaded by its twilight zone;
+  // groundSunPosition's z-test keeps the volume / curtain / coastlines in
+  // front of the shadow instead of under it.
+  SunPosition sunPos;
+  if (sunlightActive())
+  {
+    GroundFrame gf;
+    gf.rightX = rightX;
+    gf.rightY = rightY;
+    gf.upX = upX;
+    gf.upY = upY;
+    gf.upZ = upZ;
+    gf.fwdX = fwdX;
+    gf.fwdY = fwdY;
+    gf.fwdZ = fwdZ;
+    gf.xscale = xscale;
+    gf.yscale = yscale;
+    gf.depthScale = depthScale;
+    gf.zPlane = 0.0;
+    gf.extent = extent;
+    gf.lat0 = lat0;
+    gf.lon0 = lon0;
+    gf.cosLat0 = cosLat0;
+    sunPos = groundSunPosition(subW, subH, gf, zbuf);
+  }
+  if (sunPos)
+    applySunlight(pixels, subW, subH, sunPos);
+
   std::ostringstream os;
   cache3DRaster(pixels, subW, subH);
   itsRenderer.render(os, pixels, subW, subH, layout.map.row, layout.map.col);
@@ -8135,6 +8497,29 @@ void App::drawGlobe(const Layout& layout)
     drawPolys(itsBorders, bordCol);
   if (itsCoastlineStyle == LineStyle::Thick)
     drawPolys(itsCoastlines, coastCol);
+
+  // --- Sunlight / twilight shadow. Inverse-orthographic per sub-pixel: the
+  // same ray-cast the data fill uses, so the terminator lands exactly on the
+  // sphere. Pixels off the disc (space) are left alone.
+  SunPosition sunPos;
+  if (sunlightActive())
+    sunPos = [=](int sx, int sy, double& lat, double& lon)
+    {
+      const double py0 = (cy0 - (sy + 0.5)) / yscale;
+      const double px0 = ((sx + 0.5) - cx0) / xscale;
+      const double rr = px0 * px0 + py0 * py0;
+      if (rr > radius * radius)
+        return false;
+      const double d = std::sqrt(radius * radius - rr);
+      const double X = px0 * ex + py0 * ux + d * nx;
+      const double Y = px0 * ey + py0 * uy + d * ny;
+      const double Z = px0 * ez + py0 * uz + d * nz;
+      lat = std::asin(std::clamp(Z, -1.0, 1.0)) * 180.0 / M_PI;
+      lon = std::atan2(Y, X) * 180.0 / M_PI;
+      return true;
+    };
+  if (sunPos)
+    applySunlight(pixels, subW, subH, sunPos);
 
   // Braille style: project onto a 2×4-dot sub-cell grid and composite as
   // braille glyphs over the final raster — the same mechanism the 3D views
@@ -8633,6 +9018,9 @@ int App::runOnce()
   float dataMin = 0;
   float dataMax = 0;
   auto pixels = sampleSlice(subWidth, subHeight, dataMin, dataMax);
+  const bool sun = sunlightActive();
+  if (sun)
+    applySunlight(pixels, subWidth, subHeight, viewportSunPosition(subWidth, subHeight));
   if (itsCoastlineStyle == LineStyle::Thick)
     overlayPolylines(pixels, subWidth, subHeight, itsCoastlines, Rgb{0, 0, 0});
   if (itsBorderStyle == LineStyle::Thick)
@@ -8656,6 +9044,9 @@ int App::runOnce()
             << ") | range: [" << dataMin << ", " << dataMax
             << "] | palette: " << activePanel().palette.name()
             << " | coast: " << itsCoastlines.size() << "+" << itsBorders.size() << " polylines";
+  if (sun)
+    std::cout << " | sun: twilight shadow, subsolar "
+              << Solar::subsolarLabel(currentSky().subsolar());
   if (!itsPhenomenonHint.empty())
     std::cout << " | hint: " << itsPhenomenonHint;
   std::cout << '\n';

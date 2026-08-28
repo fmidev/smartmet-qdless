@@ -122,6 +122,49 @@ encoded in the path + filename (radon convention
   ODIM-style metadata these carry (`dataset1_data1_what_gain/offset/nodata`,
   `ForecastTimestamp`/`Timestamp`) so values come out scaled and times are correct.
 
+## Sunlight / twilight shadow (`[u]`, `--sun`)
+
+`[u]` toggles a day-night shadow over any geographic view, and all four zones
+are drawn: civil (0°..−6°), nautical (−6°..−12°), astronomical (−12°..−18°)
+twilight and night (< −18°). The sunlit side is left completely untouched so
+the data keeps reading normally.
+
+- **Astronomy comes from macgyver only** (`Fmi::Astronomy::solar_position` in
+  `macgyver/Astronomy.h`), wrapped by `Solar::Sky` in
+  `Qdless{Solar.h,Solar.cpp}`: one `Sky` per valid time (cached in `App::itsSky`,
+  keyed by the timestamp), `Sky::elevationDeg(lat, lon)` per sample,
+  `Sky::subsolar()` for the status message (solved as the longitude that
+  maximises macgyver's own elevation — refraction is monotone in the geometric
+  angle, so it cannot move the maximum). Do not hand-roll solar geometry here.
+- **Shadowing is a per-sub-pixel blend toward neutral dark grey** (weights
+  0.25 / 0.42 / 0.56 / 0.68 by zone). Grey, never blue: measured hue drift is
+  < 1°, so a shaded cell still matches the palette legend — a colour cast would
+  break that. Glyph-texture alternatives (shade blocks, braille stipple) were
+  built and tried on real fields and read worse than the blend, so they were
+  dropped; the blend also needs no glyph layer, which is what makes it work
+  unchanged in Kitty/Sixel graphics modes and in PNG export.
+- Every visual constant lives in one table (`styleFor` in `QdlessSolar.cpp`):
+  blend weight, grey, and the no-data fill. Where the field has no value the
+  zone paints an opaque grey (58→22) so the bands read as *areas*, not just as
+  a wash over the data.
+- Views are fed by one `App::SunPosition` callback (sub-pixel → lat/lon, false
+  where the pixel must be left alone), so `applySunlight` is projection-blind.
+  2D map: `viewportSunPosition` (through `uvToLatLon`). Globe: the
+  inverse-orthographic ray-cast, so the terminator lands on the sphere. The
+  four 3D renderers: `groundSunPosition` + `GroundFrame`, which
+  inverse-projects onto the ground plane, rejects anything outside the data
+  frame and **z-tests against the view's own z-buffer** so the point cloud /
+  curtain / coastlines stay in front of the shadow (with a dense cloud the
+  ground is legitimately invisible — that is not a bug; raise the threshold
+  with `.`).
+- Elevation is evaluated on a ≤128×128 screen lattice and bilinearly
+  interpolated (`SunLattice`). The *angle* is interpolated, not lat/lon, so it
+  stays correct across a projection seam; a NaN corner (off-grid / off-disc)
+  falls back to an exact per-pixel solve.
+- Headless check: `--sun` works with `--dump`, `--dump --globe` and
+  `--dump --3d`; the 2D dump header gains
+  `| sun: twilight shadow, subsolar 23.2°N 180.0°E`.
+
 ## Key dependencies
 
 - SmartMet libraries: `newbase` (querydata), `macgyver`, `smarttools`,

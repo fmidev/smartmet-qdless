@@ -8,12 +8,15 @@
 #include "QdlessPalette.h"
 #include "QdlessGraphics.h"
 #include "QdlessRenderer.h"
+#include "QdlessSolar.h"
 
 #include <array>
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,6 +86,7 @@ struct Options
   bool start3D = false;            // start in 3D point-cloud mode (e.g. --dump --3d)
   bool startGlobe = false;         // start in globe view (e.g. --dump --globe)
   std::string globeSurface;        // initial globe fill: outline|ocean|land|both
+  bool showSunlight = false;  // start with the twilight shadow on (--sun)
   bool dumpExtrema = false;        // --extrema: print persistent 3D extrema and exit
   bool noExitEffect = false;       // skip the random quit animation
   // Text spelled out by the word-reveal exit effect. Empty (the default) means
@@ -508,6 +512,14 @@ class App
   // Overlay toggles.
   bool itsShowWindArrows = false;
   bool itsShowCities = false;
+  // Twilight shadow, toggled by [u]. Every geographic view can shadow the
+  // unlit side of the frame's valid time with the four standard twilight zones
+  // (civil / nautical / astronomical / night); the sunlit side is always left
+  // untouched so the data keeps reading normally. Each sub-pixel is blended
+  // toward a neutral grey — never a colour cast, so a shaded cell still
+  // matches the palette legend. Elevation angles come from macgyver's solar
+  // model via Qdless::Solar.
+  bool itsShowSunlight = false;
   // Graticule + coastline + political-border render styles. Cycled with
   // `n` / `c` / `b` (Braille → Thick → None → Braille). Coastline / border
   // are also initialised from Options::noCoastline / noBorders (None when
@@ -657,6 +669,61 @@ class App
   void zoomAt(float factor, float anchorU, float anchorV);
   void openProbe(int cellX, int cellY, UI& ui);
   void openProbeAt(double lat, double lon, UI& ui);
+
+  // The sun at the frame's valid time, cached: converting the timestamp and
+  // solving the subsolar point is per-time work, while the overlay re-shades
+  // on every frame (pan / zoom / camera / animation). Rebuilt when the valid
+  // time changes.
+  const Solar::Sky& currentSky() const;
+  mutable Solar::Sky itsSky;
+  mutable std::string itsSkyKey;
+
+  // Where a sub-pixel of the current view sits on Earth. Returns false when
+  // the pixel must be left alone: off the grid, outside the 3D view's data
+  // frame, off the globe's disc, or occluded by something in front of the
+  // ground plane. Each view supplies its own — that is the only thing the
+  // twilight passes need to know about a projection.
+  using SunPosition = std::function<bool(int subX, int subY, double& lat, double& lon)>;
+
+  // True when the overlay would draw anything at all: it is on, and the
+  // source has a usable valid time and a geographic projection.
+  bool sunlightActive() const;
+
+  // Blend each sub-pixel toward its zone's grey. Elevation is evaluated on a
+  // lattice — one `positionAt` + one macgyver solar_position per node — and
+  // bilinearly interpolated between nodes. The angle is a very smooth function
+  // of position, so that is visually exact while bounding the per-frame cost
+  // (a Kitty-mode frame is millions of sub-pixels, and uvToLatLon is expensive
+  // on a projected grid).
+  void applySunlight(std::vector<Rgb>& pixels,
+                     int subWidth,
+                     int subHeight,
+                     const SunPosition& positionAt) const;
+
+  // The 2D map's sub-pixel → (lat, lon) mapping, for the pass above.
+  SunPosition viewportSunPosition(int subWidth, int subHeight) const;
+
+  // Camera + flat-Earth frame of one of the 3D views, as needed to
+  // inverse-project a sub-pixel onto the ground plane. Filled from the
+  // caller's own locals — all four 3D renderers build the same basis.
+  struct GroundFrame
+  {
+    double rightX = 0, rightY = 0;        // camera right (rightZ is 0)
+    double upX = 0, upY = 0, upZ = 0;     // camera up
+    double fwdX = 0, fwdY = 0, fwdZ = 0;  // camera forward
+    double xscale = 0, yscale = 0, depthScale = 0;
+    double zPlane = 0;                       // world z of the plane, metres
+    double extent = 0;                       // half-extent of the data frame
+    double lat0 = 0, lon0 = 0, cosLat0 = 1;  // flat-Earth anchor
+  };
+  // The ground plane of a 3D view as a SunPosition: inverse-projects the
+  // sub-pixel onto z = zPlane, rejects anything outside the data frame, and
+  // rejects pixels whose z-buffer entry is in front of the plane so the point
+  // cloud / curtain / coastlines keep occluding the shadow.
+  SunPosition groundSunPosition(int subWidth,
+                                int subHeight,
+                                const GroundFrame& frame,
+                                const std::vector<float>& zbuf) const;
 
   // Overlays.
   void overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight) const;

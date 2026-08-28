@@ -214,7 +214,7 @@ void UI::drawTimeline(const std::string& label, int idx, int total)
 }
 
 void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseMode,
-                       bool hasWind, bool catalogMode)
+                       bool hasWind, bool catalogMode, bool sunOn)
 {
   werase(itsStatusWin);
   // Layout: [Q]uit  [P]aram  [L]evel  Time ←→  Zoom +/-  Pan hjkl  [0]Reset  [?]Help
@@ -240,6 +240,7 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseM
     put("[I]Cities", 1);
     put("[C]oast", 1);
     put("[B]orders", 1);
+    if (!shapeMode) put(sunOn ? "[U]Sun*" : "[U]Sun", 1);
     if (shapeMode)
     {
       put("[A]ttrs", 1);
@@ -967,6 +968,7 @@ void UI::popupHelp(HelpContext ctx)
     if (ctx.hasMultipleLevels) add("L (Shift)", "Level menu");
     add("e", "Export PNG");
     add("M", "File metadata");
+    add("u", "Twilight shadow on / off");
     add("?", "This help");
   };
 
@@ -1077,6 +1079,7 @@ void UI::popupHelp(HelpContext ctx)
     if (!noProj)
     {
       add("n", "Graticule: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
+      add("u", "Sunlight: shadow the unlit side (twilight zones + night)");
       if (!ctx.isShape) add("w", "Toggle wind arrows");
       add("i", "Toggle city overlay");
       add("PgUp PgDn", "Cities: sparser / denser");

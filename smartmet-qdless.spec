@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.8.28
-Release: 1%{?dist}.fmi
+Release: 2%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,8 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Fri Aug 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.8.28-2.fmi
+- New key [u] shadows the unlit side of the Earth with all four twilight zones (civil 0..-6, nautical -6..-12, astronomical -12..-18 degrees and night below -18 degrees), in the 2D map, on the globe and in every 3D view, where the shadow falls on the ground plane and z-tests against the view's own z-buffer so the point cloud / curtain / coastlines still occlude it. Solar elevation comes from macgyver's Fmi::Astronomy::solar_position, wrapped by Qdless::Solar::Sky (one instance per valid time; the subsolar point shown in the status message is solved as the longitude maximising macgyver's own elevation). The shadow is a per-sub-pixel blend toward neutral dark grey - grey rather than night-blue so the data's hue is preserved (drift under 1 degree) and a shaded cell still matches the palette legend - evaluated on a screen lattice and bilinearly interpolated in the elevation angle. Where the field has no value the zone paints an opaque grey so the bands read as areas. Works unchanged in the Kitty/Sixel graphics modes and in PNG export. Also available headlessly as --sun with --dump, --dump --globe and --dump --3d, which adds the subsolar point to the dump header.
 * Fri Aug 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.8.28-1.fmi
 - The weather-mount discovery picker ([D] without a browser mode, or a bare "--catalog") now also includes the well-known local directory /srv/data/grib automatically whenever it exists, in addition to the fstab-derived mounts.
 * Wed Jun 17 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.17-1.fmi
