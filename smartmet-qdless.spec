@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.6.17
+Version: 26.8.28
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -115,6 +115,8 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Fri Aug 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.8.28-1.fmi
+- The weather-mount discovery picker ([D] without a browser mode, or a bare "--catalog") now also includes the well-known local directory /srv/data/grib automatically whenever it exists, in addition to the fstab-derived mounts.
 * Wed Jun 17 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.17-1.fmi
 - The masala catalog picker now annotates each entry with its model name (e.g. "131/   ECG") via a built-in MasalaCatalog::modelNameForPath table keyed by the radon producer-id / mount paths, matched exactly or as a trailing path suffix (so a relocated catalog root still resolves) and treating '-' and '_' as equivalent. Navigation gained horizontal keys: -> (or Enter) opens the highlighted entry and <- steps back up a level without scrolling to "..", via a new popupMenu arrowNav flag (Left returns UI::kPopupNavLeft, Right acts like Enter). The picker clears the screen (UI::clearBackground) before each menu so stepping back to a smaller menu no longer leaves the previous box ghosting around its edge.
 - [D] now opens a catalog picker even without --catalog: it discovers weather-data mounts from fstab (MasalaCatalog::discoverWeatherRoots; $QDLESS_FSTAB overrides the path) and presents them as a top-level menu annotated with model names; a bare "--catalog" (no path) does the same at startup. Mount classification is cheap-first - abort local/pseudo filesystems and system mountpoints (/, /home, /boot, /var, ...) with no I/O, accept s3fs devices / paths under /masala / known-model paths, then a single shallow readdir ("content probe") accepts remaining NFS mounts only when they show weather structure (producer-id / reference-time / known-model / "datasets" child dirs, or cube/raster files). [D]/status/help advertise the picker as [D]Catalog once it is active.

@@ -77,7 +77,9 @@ encoded in the path + filename (radon convention
   paths matching a known model; then a single shallow `readdir` ("content
   probe") accepts remaining NFS mounts only if they show weather structure
   (producer-id / reftime / known-model / `datasets` child dirs, or cube/raster
-  files). Picking a mount drops into the column picker rooted there; Esc returns
+  files). Well-known local GRIB directories that aren't separate fstab mounts
+  (currently `/srv/data/grib`) are also included automatically when they exist.
+  Picking a mount drops into the column picker rooted there; Esc returns
   to the mount list. Bare `--catalog` with no discoverable mounts exits with a
   stderr message (before ncurses).
 - **s3fs-backed paths** are transparently redirected to their local on-disk

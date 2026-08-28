@@ -659,6 +659,21 @@ std::vector<WeatherRoot> discoverWeatherRoots()
     out.push_back(std::move(r));
   }
 
+  // Well-known local GRIB directories that aren't separate fstab mounts (so the
+  // scan above won't surface them). Included automatically when they exist; the
+  // dedup below drops them if they also appeared as a mount.
+  for (const char* p : {"/srv/data/grib"})
+  {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(p, ec))
+      continue;
+    WeatherRoot r;
+    r.path = p;
+    if (auto m = modelNameForPath(p))
+      r.model = *m;
+    out.push_back(std::move(r));
+  }
+
   std::sort(out.begin(), out.end(), [](const WeatherRoot& a, const WeatherRoot& b)
             { return a.path < b.path; });
   out.erase(std::unique(out.begin(), out.end(), [](const WeatherRoot& a, const WeatherRoot& b)
