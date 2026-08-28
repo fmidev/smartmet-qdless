@@ -11,3 +11,8 @@ core
 *.swp
 *~
 fmi_*.png
+
+# Local sample data (masala catalog test material, hundreds of MB)
+/masala
+/masala-sample.tgz
+/test/data/
