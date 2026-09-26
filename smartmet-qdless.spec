@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.8.28
-Release: 2%{?dist}.fmi
+Version: 26.9.26
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -40,9 +40,9 @@ BuildRequires: netcdf-cxx4-devel
 BuildRequires: netcdf-devel >= 4.3.3.1
 BuildRequires: rpm-build
 BuildRequires: smartmet-library-calculator-devel >= 26.4.13
-BuildRequires: smartmet-library-gis-devel >= 26.6.8
-BuildRequires: smartmet-library-grid-files-devel >= 26.5.26
-BuildRequires: smartmet-library-macgyver-devel >= 26.6.2
+BuildRequires: smartmet-library-gis-devel >= 26.9.26
+BuildRequires: smartmet-library-grid-files-devel >= 26.9.26
+BuildRequires: smartmet-library-macgyver-devel >= 26.9.26-2
 BuildRequires: smartmet-library-newbase-devel >= 26.2.4
 BuildRequires: smartmet-library-smarttools-devel >= 26.4.13
 BuildRequires: smartmet-timezones
@@ -70,12 +70,12 @@ Requires: ncurses-libs
 Requires: netcdf >= 4.3.3.1
 Requires: netcdf-cxx4
 Requires: smartmet-library-calculator >= 26.4.13
-Requires: smartmet-library-gis >= 26.6.8
-Requires: smartmet-library-grid-files >= 26.5.26
-Requires: smartmet-library-macgyver >= 26.6.2
+Requires: smartmet-library-gis >= 26.9.26
+Requires: smartmet-library-grid-files >= 26.9.26
+Requires: smartmet-library-macgyver >= 26.9.26-2
 Requires: smartmet-library-newbase >= 26.2.4
 Requires: smartmet-library-smarttools >= 26.4.13
-Requires: smartmet-timezones >= 24.5.27
+Requires: smartmet-timezones >= 26.9.26
 Requires: zlib
 
 Provides: qdless = %{version}
@@ -115,6 +115,10 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sat Sep 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.9.26-1.fmi
+- Repackaged due to grid-files ABI changes
+- Require the 26.9.26 releases of the SmartMet dependencies
+
 * Fri Aug 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.8.28-2.fmi
 - New key [u] shadows the unlit side of the Earth with all four twilight zones (civil 0..-6, nautical -6..-12, astronomical -12..-18 degrees and night below -18 degrees), in the 2D map, on the globe and in every 3D view, where the shadow falls on the ground plane and z-tests against the view's own z-buffer so the point cloud / curtain / coastlines still occlude it. Solar elevation comes from macgyver's Fmi::Astronomy::solar_position, wrapped by Qdless::Solar::Sky (one instance per valid time; the subsolar point shown in the status message is solved as the longitude maximising macgyver's own elevation). The shadow is a per-sub-pixel blend toward neutral dark grey - grey rather than night-blue so the data's hue is preserved (drift under 1 degree) and a shaded cell still matches the palette legend - evaluated on a screen lattice and bilinearly interpolated in the elevation angle. Where the field has no value the zone paints an opaque grey so the bands read as areas. Works unchanged in the Kitty/Sixel graphics modes and in PNG export. Also available headlessly as --sun with --dump, --dump --globe and --dump --3d, which adds the subsolar point to the dump header.
 * Fri Aug 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.8.28-1.fmi
