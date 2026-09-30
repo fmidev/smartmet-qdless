@@ -278,17 +278,32 @@ def pointcloud():
     anim(fr, 'qd_3d', scale=0.45)
     still(fr[len(fr) // 2], 'qd_3d')
     s.close()
-    s = start([H + 'meps_hybrid.sqd', '-p', 'WindSpeedMS'], wait=2)
-    s.key('3', quiet=2)
-    for _ in range(7):
-        s.key('.', quiet=0.3)  # 0 -> 35 m/s: only the jet core remains
-    s.settle(1.5)
-    acts, t = keys(s, [('l', 24), ('k', 4), ('h', 12)], dt=0.2)
-    anim(s.record(t + 0.8, fps=8, actions=acts), 'qd_3d_jet', scale=0.45)
-    s.close()
     s = start([H + 'meps_hybrid.sqd', '-p', 'Temperature'], wait=2)
     s.key('3', quiet=2)
     s.key('x', quiet=4.0); still(s.snap(), 'qd_3d_extrema')
+    s.close()
+
+
+@scene
+def jet():
+    # The jet stream as a 3D body: wind speed on MEPS hybrid levels. The wind
+    # palette's bands (21-26 red, 26-32 red-orange, >32 orange) nest inside
+    # each other, so raising the threshold peels the jet down to its core.
+    # 3D sampling of this file takes ~0.5 s per frame, so keys are spaced to
+    # give every step its own frame.
+    s = start([H + 'meps_hybrid.sqd', '-p', 'WindSpeedMS'], wait=2)
+    s.key('3', quiet=2)
+    for _ in range(3):
+        s.key('.', quiet=0.4)  # 0 -> 15 m/s
+    for _ in range(2):
+        s.key('k', quiet=0.4)  # a little more oblique
+    s.settle(1.5)
+    acts, t = keys(s, [('.', 5), (',', 2)], t0=1.0, dt=1.4, gap=1.4)  # 15 -> 40 -> 30
+    fr = s.record(t + 1.5, fps=8, actions=acts)
+    anim(fr, 'qd_3d_jet_threshold', scale=0.5)
+    still(fr[-1], 'qd_3d_jet')
+    acts, t = keys(s, [('l', 30), ('j', 3), ('h', 20), ('k', 3)], t0=0.5, dt=0.6, gap=0.6)
+    anim(s.record(t + 1.0, fps=8, actions=acts), 'qd_3d_jet', scale=0.5)
     s.close()
 
 

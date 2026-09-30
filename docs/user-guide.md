@@ -363,12 +363,30 @@ Multi-level QueryData is sampled on a coarse 3D lattice. Cloud cover, humidity
 and probabilities are thresholded in percent (starting at 50 %). Any other
 parameter is thresholded in its own units, starting from the field's minimum
 so that everything is visible at first. Raising the threshold with `.` then
-isolates the interesting part: here, wind speed above 35 m/s leaves only the
-jet stream core.
+isolates the interesting part.
 
-| Total cloud cover above 50 % | Jet core: wind speed ≥ 35 m/s |
-| --- | --- |
-| ![3D cloud cover](images/qd_3d.webp) | ![3D jet stream core](images/qd_3d_jet.webp) |
+![3D total cloud cover above 50 %](images/qd_3d.webp)
+
+### The jet stream in 3D
+
+Wind speed on model levels shows the jet stream as a solid body. The wind
+palette's colour bands nest inside each other: 21–26 m/s red, 26–32 m/s
+red-orange, above 32 m/s orange. Raising the threshold therefore peels the
+jet from the outside in. Here it steps from 15 m/s, where the whole upper
+troposphere is filled, up to 40 m/s, where only the fastest cores are left,
+and back to 30 m/s:
+
+![raising the wind-speed threshold from 15 to 40 m/s peels the jet down to its core](images/qd_3d_jet_threshold.webp)
+
+At 30 m/s the jet is a single body, with the cores above 32 m/s showing as
+orange streaks inside it. Orbiting and pitching the camera (`h` `l` `j` `k`)
+shows how it runs from the Norwegian Sea over northern Scandinavia and turns
+south across Finland:
+
+![orbiting the 30 m/s jet stream body](images/qd_3d_jet.webp)
+
+To reproduce: `qdless -p WindSpeedMS meps_hybrid.sqd`, press `3`, then `.`
+six times.
 
 | Key | Action |
 | --- | --- |

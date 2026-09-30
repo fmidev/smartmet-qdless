@@ -19,7 +19,9 @@ covers every feature, view and key with screenshots and animations.
 | ![forecast animation](docs/images/animation.webp) | ![time-series probe](docs/images/probe.webp) |
 | **Cross-sections (`x`)** | **3D curtain through the jet stream (`v`)** |
 | ![cross-section](docs/images/cross_section.webp) | ![animated 3D curtain](docs/images/curtain_combo.webp) |
-| **3D point clouds (`3`)** | **Globe with twilight shadow (`G`, `u`)** |
+| **The jet stream in 3D (`3`)** | **Peeling it by wind-speed threshold (`.`)** |
+| ![jet stream body orbiting](docs/images/qd_3d_jet.webp) | ![threshold sweep from 15 to 40 m/s](docs/images/qd_3d_jet_threshold.webp) |
+| **Radar volumes in 3D (`3`)** | **Globe with twilight shadow (`G`, `u`)** |
 | ![radar volume in 3D](docs/images/pvol_3d.webp) | ![globe with the terminator](docs/images/globe_sun.webp) |
 
 - **Formats**: QueryData, GRIB1/2, NetCDF, ODIM HDF5 radar volumes and
