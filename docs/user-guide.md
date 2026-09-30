@@ -385,8 +385,14 @@ south across Finland:
 
 ![orbiting the 30 m/s jet stream body](images/qd_3d_jet.webp)
 
+`Space` plays the forecast in 3D too. Every hourly step is re-sampled, so you
+can watch the jet evolve. Over these 30 hours it swings east, splits into
+two branches, and a new core forms in the south:
+
+![the 30 m/s jet stream through 30 forecast hours](images/qd_3d_jet_time.webp)
+
 To reproduce: `qdless -p WindSpeedMS meps_hybrid.sqd`, press `3`, then `.`
-six times.
+six times, then `Space`.
 
 | Key | Action |
 | --- | --- |

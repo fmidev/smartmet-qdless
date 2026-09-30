@@ -3,6 +3,7 @@
 python3 prod.py [scene ...]   (no args = all scenes)
 Output: prod/<name>.png (stills) and prod/<name>.webp (animations).
 """
+import re
 import sys
 from common import *
 
@@ -304,6 +305,24 @@ def jet():
     still(fr[-1], 'qd_3d_jet')
     acts, t = keys(s, [('l', 30), ('j', 3), ('h', 20), ('k', 3)], t0=0.5, dt=0.6, gap=0.6)
     anim(s.record(t + 1.0, fps=8, actions=acts), 'qd_3d_jet', scale=0.5)
+    # The jet through one forecast day: fixed oblique camera, Space plays the
+    # hourly steps; the valid time is stamped large on every frame since the
+    # status line is unreadable at documentation size.
+    s.key('0', quiet=1.5)
+    for _ in range(2):
+        s.key('k', quiet=0.5)
+    for _ in range(4):
+        s.key('l', quiet=0.5)
+    s.key('-', quiet=1.0)  # keep the northern end of the jet in frame
+    s.key('home', quiet=2.0)
+    fr, texts = s.record(32, fps=8, with_text=True,
+                         actions={0.3: lambda: s.send(' '), 31.6: lambda: s.send(' ')})
+    stamped = []
+    for f, txt in zip(fr, texts):
+        m = next((re.search(r'(\d{4}-\d\d-\d\d \d\d:\d\d)', l) for l in txt if ' UTC' in l), None)
+        stamped.append(caption(f, f'wind speed >= 30 m/s   {m.group(1) if m else ""} UTC',
+                               h=64))
+    anim(stamped, 'qd_3d_jet_time', scale=0.5)
     s.close()
 
 

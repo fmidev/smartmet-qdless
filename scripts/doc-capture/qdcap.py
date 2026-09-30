@@ -291,7 +291,7 @@ class Session:
     def text(self):
         return "\n".join(self.screen.display)
 
-    def record(self, secs, fps=8, actions=None):
+    def record(self, secs, fps=8, actions=None, with_text=False):
         """Log raw output for `secs` (actions: {seconds: callable}), then render
         frames at exact 1/fps instants by replaying into a copy of the screen."""
         import copy
@@ -317,6 +317,7 @@ class Session:
         scr = base
         st = pyte.ByteStream(scr)
         frames = []
+        texts = []
         i = 0
         n = int(secs * fps)
         for k in range(n):
@@ -335,10 +336,11 @@ class Session:
                 i += 1
                 fed = True
             frames.append(render_screen(scr) if fed or not frames else frames[-1])
+            texts.append(list(scr.display))
         # bring the live screen up to date
         for _, d in log:
             self.stream.feed(d)
-        return frames
+        return (frames, texts) if with_text else frames
 
     def close(self):
         try:
