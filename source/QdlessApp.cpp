@@ -365,6 +365,7 @@ struct UnitGuess
   float scale = 1.0F;
   float offset = 0.0F;
   std::string palette;
+  std::string units;  // unit of the transformed values; empty = unchanged
 };
 
 // Map (parameter name + unit string) → suggested palette and value transform.
@@ -399,12 +400,14 @@ UnitGuess guessFromUnits(const std::string& shortName,
     {
       g.offset = -273.15F;
       g.palette = "seatemperature";
+      g.units = "\u00b0C";
     }
     else if (nameContains(both, {"temperature", "dewpoint", "dew point"}) || shortName == "T" ||
              shortName == "T-K" || shortName == "TD" || shortName == "TD-K" || shortName == "T2m")
     {
       g.offset = -273.15F;
       g.palette = "temperature";
+      g.units = "\u00b0C";
     }
   }
   // Pressure: Pa → hPa (palette is in hPa)
@@ -414,6 +417,7 @@ UnitGuess guessFromUnits(const std::string& shortName,
     {
       g.scale = 0.01F;
       g.palette = "pressure";
+      g.units = "hPa";
     }
   }
   // Wind speed: m/s
@@ -449,16 +453,19 @@ UnitGuess guessFromUnits(const std::string& shortName,
     {
       g.scale = 100.0F;
       g.palette = "humidity";
+      g.units = "%";
     }
     else if (nameContains(both, {"cloud"}))
     {
       g.scale = 100.0F;
       g.palette = "totalcloudcover_color";
+      g.units = "%";
     }
     else if (nameContains(both, {"probability"}))
     {
       g.scale = 100.0F;
       g.palette = "probability";
+      g.units = "%";
     }
   }
   // Precipitation: mm, mm/h, kg/m² (1 kg/m² ≈ 1 mm rain)
@@ -1232,6 +1239,8 @@ bool App::openCatalogPicker(UI& ui, const std::string& rootArg)
   namespace fs = std::filesystem;
   const std::string root = rootArg.empty() ? itsOpts.catalogRoot : rootArg;
   std::string here = root;
+  // Directory we just stepped up out of, so the cursor lands back on it.
+  std::string cameFrom;
 
   // Pretty-print a 12-digit reference time as "2026-06-13 00Z".
   auto label = [](const std::string& name) -> std::string
@@ -1313,24 +1322,42 @@ bool App::openCatalogPicker(UI& ui, const std::string& rootArg)
     // Wipe the screen so a smaller menu drawn after a larger one (e.g. when
     // stepping back up) doesn't leave the previous box ghosting around it.
     ui.clearBackground();
+    // Start on the first real entry, not "..": otherwise Enter / → on a freshly
+    // opened level would immediately climb back out. After stepping up, start
+    // on the directory we came from.
+    const int offset = canUp ? 1 : 0;
+    int start = subs.empty() ? 0 : offset;
+    if (!cameFrom.empty())
+    {
+      const auto it = std::find(subs.begin(), subs.end(), cameFrom);
+      if (it != subs.end())
+        start = offset + static_cast<int>(it - subs.begin());
+      cameFrom.clear();
+    }
     const int sel =
-        ui.popupMenu(title, items, 0, /*allowTab=*/false, /*onSelect=*/{}, /*arrowNav=*/true);
+        ui.popupMenu(title, items, start, /*allowTab=*/false, /*onSelect=*/{}, /*arrowNav=*/true);
+    auto stepUp = [&]()
+    {
+      const fs::path p(here);
+      cameFrom = p.filename().string();
+      here = p.parent_path().string();
+    };
     // Left arrow (or selecting ".."): step up one level without leaving the
     // picker. At the root there is nowhere to go up to, so just redraw.
     if (sel == UI::kPopupNavLeft)
     {
       if (canUp)
-        here = fs::path(here).parent_path().string();
+        stepUp();
       continue;
     }
     if (sel < 0)
       return false;  // Esc — keep whatever source was active
     if (canUp && sel == 0)
     {
-      here = fs::path(here).parent_path().string();
+      stepUp();
       continue;
     }
-    here += "/" + subs[static_cast<std::size_t>(canUp ? sel - 1 : sel)];
+    here += "/" + subs[static_cast<std::size_t>(sel - offset)];
   }
 }
 
@@ -1636,6 +1663,7 @@ void App::loadPalette()
   const UnitGuess guess = guessFromUnits(shortName, longName, units);
   panel.valueScale = guess.scale;
   panel.valueOffset = guess.offset;
+  panel.displayUnits = guess.units.empty() ? units : guess.units;
   if (guess.scale != 1.0F || guess.offset != 0.0F)
   {
     if (guess.scale == 1.0F)
@@ -1656,7 +1684,7 @@ void App::loadPalette()
   {
     // Try several palette locations so the tool works without `make install`
     // and regardless of cwd:
-    //   1. --palette-dir (default /usr/share/smartmet/qdless/palettes)
+    //   1. --palette-dir (default QDLESS_DATA_DIR/palettes)
     //   2. palettes/ next to the binary (build-tree layout)
     //   3. ../share/smartmet/qdless/palettes/ relative to binary (install)
     //   4. $HOME/.config/qdless/palettes/
@@ -2196,8 +2224,10 @@ void App::drawCrossSection(UI& ui)
   // Build raw-ANSI popup.
   // Width: border + label + " ┤ " + chart + border = 2 + labelW + 3 + chartW
   const int width = std::min(COLS - 4, labelW + chartW + 6);
-  // Height: border + title + chart + axis + endpoints + footer + border
-  const int height = chartH + 6;
+  // Height: top border (carries the title) + chart + axis + endpoints +
+  // footer + bottom border. Every row must be painted: an extra row here is
+  // left undrawn and the map shows through inside the box.
+  const int height = chartH + 5;
   // Dock the popup to the half of the map that has less of the cross-section
   // line in it, so the on-map line + endpoint markers stay visible. The
   // mouse-tracked dot ([[track-cross-hover-dot]]) lives on the line, so this
@@ -2311,6 +2341,10 @@ void App::drawCrossSection(UI& ui)
   // Hovmöller when the source has more than one time step.
   pos(3 + chartH);
   const bool offerH = itsSource->timeCount() > 1;
+  // Without the height axis a radar volume shows one row per elevation
+  // angle; model data shows one row per (pressure / hybrid) level.
+  const std::string rowAxisName =
+      dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr ? "angle" : "levels";
   std::string footerStr;
   if (hovmollerMode)
     footerStr = std::string(" 'x' close, 'H' back to ") +
@@ -2318,7 +2352,8 @@ void App::drawCrossSection(UI& ui)
                 std::string(", \xe2\x86\x90/\xe2\x86\x92 step time");
   else if (itsSource->hasNativeHeight())
     footerStr = std::string(" 'x' close, 'y' Y-axis: ") +
-                (effectiveHeightMode ? "km \xe2\x86\x92 angle" : "angle \xe2\x86\x92 km") +
+                (effectiveHeightMode ? std::string("km \xe2\x86\x92 ") + rowAxisName
+                                     : rowAxisName + " \xe2\x86\x92 km") +
                 (offerH ? std::string(", 'H' Hovmöller") : std::string()) +
                 ", \xe2\x86\x90/\xe2\x86\x92 step time";
   else
@@ -2363,7 +2398,7 @@ bool App::ensureCityIndex() const
   itsCityIndexAttempted = true;
 
   std::vector<std::filesystem::path> candidates{
-      std::filesystem::path("/usr/share/smartmet/qdless/cities1000.tsv"),
+      std::filesystem::path(QDLESS_DATA_DIR "/cities1000.tsv"),
   };
   try
   {
@@ -2579,9 +2614,25 @@ std::string App::exportPng(std::string& err) const
 
   // Build filename: <basename>_<param>_<YYYYMMDD_HHMM>.png in cwd.
   NFmiEnumConverter conv;
-  std::filesystem::path inputPath(itsOpts.filename);
-  const std::string base = inputPath.stem().string();
-  const std::string param = itsSource->paramShortName(itsSource->currentParamId());
+  // Name after the input; a catalog cube, --dir series or PostGIS table has
+  // no single file name, so fall back to its directory / first file / table.
+  std::string input = itsOpts.filename;
+  if (input.empty() && !itsOpts.filenames.empty())
+    input = itsOpts.filenames.front();
+  if (input.empty())
+    input = !itsOpts.catalogRoot.empty()  ? itsOpts.catalogRoot
+            : !itsOpts.browseRoot.empty() ? itsOpts.browseRoot
+                                          : itsOpts.pgTable;
+  while (input.size() > 1 && input.back() == '/')
+    input.pop_back();  // "cube/" -> stem "cube", not ""
+  std::string base = std::filesystem::path(input).stem().string();
+  if (base.empty())
+    base = "qdless";
+  // Parameter names from GeoTIFF / NetCDF metadata may contain spaces or
+  // slashes ("Precipitation accumulation"); keep the file name shell-safe.
+  std::string param = itsSource->paramShortName(itsSource->currentParamId());
+  std::replace_if(
+      param.begin(), param.end(), [](char c) { return c == ' ' || c == '/' || c == '\\'; }, '_');
   NFmiMetTime t = itsSource->currentValidTime();
   const std::string filename = fmt::format("{}_{}_{:04}{:02}{:02}_{:02}{:02}.png",
                                            base,
@@ -2916,7 +2967,12 @@ bool App::hasWindComponents() const
          std::find(ids.begin(), ids.end(), vEnum) != ids.end();
 }
 
-std::string App::buildWindArrows(int cellW, int cellH, int originRow, int originCol)
+std::string App::buildWindArrows(int cellW,
+                                 int cellH,
+                                 int originRow,
+                                 int originCol,
+                                 const std::vector<Rgb>& pixels,
+                                 int subWidth)
 {
   // Find U and V param IDs in this file. If either is missing, render nothing.
   if (!hasWindComponents())
@@ -3017,8 +3073,21 @@ std::string App::buildWindArrows(int cellW, int cellH, int originRow, int origin
     else
       color = Rgb{255, 170, 0};
 
+    // Keep the data colour behind the arrow: sample the rendered raster at
+    // the centre of the cell (works for block and graphics sub-pixel grids).
+    Rgb bg{};
+    bg.transparent = true;
+    if (subWidth > 0 && !pixels.empty())
+    {
+      const int subHeight = static_cast<int>(pixels.size()) / subWidth;
+      const int px = (s.cx * subWidth + subWidth / 2) / cellW;
+      const int py = (s.cy * subHeight + subHeight / 2) / cellH;
+      if (px >= 0 && px < subWidth && py >= 0 && py < subHeight)
+        bg = pixels[static_cast<std::size_t>(py) * subWidth + px];
+    }
     os << "\x1b[" << (originRow + s.cy + 1) << ';' << (originCol + s.cx + 1) << 'H'
-       << itsRenderer.fgEscape(color) << "\x1b[1m" << kArrows[idx] << "\x1b[0m";
+       << itsRenderer.bgEscape(bg) << itsRenderer.fgEscape(color) << "\x1b[1m" << kArrows[idx]
+       << "\x1b[0m";
   }
   return os.str();
 }
@@ -3764,6 +3833,10 @@ std::string App::buildCityLabels(int cellW, int cellH, int originRow, int origin
 std::string App::currentTimeLabel() const
 {
   NFmiMetTime t = itsSource->currentValidTime();
+  // Same "no time" convention as originTimeLabel: sources without a time
+  // axis (shapefiles, PostGIS layers) report year 0.
+  if (t.GetYear() < 2000)
+    return {};
   return fmt::format("{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
                      static_cast<int>(t.GetYear()),
                      static_cast<int>(t.GetMonth()),
@@ -3777,8 +3850,11 @@ void App::renderTimeline(UI& ui)
 {
   const int id = itsSource->currentParamId();
   std::string label = itsSource->paramShortName(id);
-  label += "  ";
-  label += currentTimeLabel();
+  if (const std::string valid = currentTimeLabel(); !valid.empty())
+  {
+    label += "  ";
+    label += valid;
+  }
   // Level reminder for multi-level sources (pressure/hybrid/elangle/CAPPI).
   // Single-level sources skip this so we don't waste bar real estate.
   if (itsSource->levelCount() > 1)
@@ -4123,6 +4199,10 @@ void App::selectParam(int newIndex)
   itsSource->selectLevelGroup(paramId, g);
   activePanel().levelIndex = itsSource->currentLevelIndex();
   loadPalette();  // re-resolve palette for the active panel's new parameter
+  // The 3D threshold is in the parameter's own units; re-seed it so switching
+  // e.g. cloud cover → wind speed inside the point cloud doesn't keep a stale %.
+  if (itsMode3D)
+    apply3DDefaultsForSource();
   refreshPhenomenonHint();
 }
 
@@ -4504,7 +4584,9 @@ void App::openProbeAt(double lat, double lon, UI& ui)
       }
       return s;
     };
-    const std::string units = itsSource->paramUnits(itsSource->currentParamId());
+    // Values in the series are transformed (K → °C etc.), so label them with
+    // the transformed unit, not the file's raw one.
+    const std::string units = activePanel().displayUnits;
     // Viewport stats sweep across times; they're meaningless when the popup
     // is iterating levels, so suppress that overlay in VPR mode.
     int finalIdx = ui.popupTimeseries(param,
@@ -5151,7 +5233,12 @@ bool App::handleKey(int key, UI& ui, bool& quit)
           // Per-row label: just the type-aware value string (the header
           // already names the type when multi; we keep the unit suffix
           // for clarity in single-group case too).
-          r.label = DataSource::formatLevelByType(groups[gi].typeId, groups[gi].values[li]);
+          // The synthetic single group (type 0) of sources without typed
+          // levels defers to the source's own label — that is what turns
+          // ODIM's +inf composite sentinel into "MAX" instead of "inf".
+          r.label = groups[gi].typeId == 0
+                        ? itsSource->levelLabel(li)
+                        : DataSource::formatLevelByType(groups[gi].typeId, groups[gi].values[li]);
           rows.push_back(std::move(r));
           rowToGL.emplace_back(static_cast<int>(gi), static_cast<int>(li));
           if (static_cast<int>(gi) == savedGroup && static_cast<int>(li) == savedLevel)
@@ -5669,8 +5756,10 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       {
         itsCrossHeightAxis = !itsCrossHeightAxis;
         itsCrossTimeAxis = false;  // mutually exclusive with Hovmöller
+        const bool radar = dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr;
         itsLastMessage = itsCrossHeightAxis ? "Cross-section: Y-axis = height (km)"
-                                            : "Cross-section: Y-axis = elevation angle";
+                         : radar            ? "Cross-section: Y-axis = elevation angle"
+                                            : "Cross-section: Y-axis = levels";
       }
       else if (itsCrossActive)
       {
@@ -6214,7 +6303,7 @@ void App::drawMap(UI& ui)
       appendPolylineBraille(os, itsShapeOutlines, borderColor(), pixels, subW, r.row, r.col);
 
     if (itsShowWindArrows)
-      os << buildWindArrows(r.width, r.height, r.row, r.col);
+      os << buildWindArrows(r.width, r.height, r.row, r.col, pixels, subW);
     os << buildCityLabels(r.width, r.height, r.row, r.col);
   }
 
@@ -7788,10 +7877,12 @@ void App::draw3DCrossSection(const Layout& layout)
   const double hxR = baseHx * cosAz - baseHy * sinAz;
   const double hyR = baseHx * sinAz + baseHy * cosAz;
   // Swing translates the plane along its own normal — i.e. the perp
-  // direction to the (post-rotate) AB. Amplitude = one bbox-extent so a
-  // full half-period traverses the data from one side to the other.
-  // If rotate is also on, the swept axis spins with the plane, which
-  // is the natural "stays perpendicular to the plane" behaviour.
+  // direction to the (post-rotate) AB. The amplitude is the distance from
+  // the centre to the data box edge along that direction (a little inside
+  // it), so a half-period traverses the data from one side to the other
+  // without the plane leaving the data. If rotate is also on, the swept
+  // axis spins with the plane, which is the natural "stays perpendicular
+  // to the plane" behaviour.
   if (itsCurtainAutoSwing)
   {
     const double Lrot = std::hypot(hxR, hyR);
@@ -7799,7 +7890,43 @@ void App::draw3DCrossSection(const Layout& layout)
     {
       const double perpX = -hyR / Lrot;
       const double perpY = hxR / Lrot;
-      const double offset = extent * std::sin(itsCurtainSwingPhase);
+      // Largest t with |c ± t·perp| inside [-extentX, extentX] × [-extentY, extentY].
+      auto reachBoth = [&](double c, double d, double half)
+      {
+        if (std::abs(d) < 1e-12)
+          return std::numeric_limits<double>::infinity();
+        // Distance to the wall ahead and to the wall behind; the swing is
+        // symmetric, so the nearer one bounds it.
+        const double ahead = (d > 0 ? half - c : -half - c) / d;
+        const double behind = (d > 0 ? c + half : half - c) / std::abs(d);
+        return std::max(0.0, std::min(ahead, behind));
+      };
+      // The lat/lon box overstates the footprint of projected grids (a
+      // Lambert domain's box has empty corners), so also march out from the
+      // centre and stop where the field itself runs out.
+      auto dataReach = [&](double dx, double dy)
+      {
+        constexpr int kSteps = 40;
+        double last = 0.0;
+        for (int k = 1; k <= kSteps; ++k)
+        {
+          const double t = extent * k / kSteps;
+          double la = 0;
+          double lo = 0;
+          xyToLatLon(cxC + t * dx, cyC + t * dy, la, lo);
+          const float v = itsSource->interpolatedValue(la, lo);
+          if (v == kFloatMissing || !std::isfinite(v))
+            break;
+          last = t;
+        }
+        return last;
+      };
+      double amp = std::min(reachBoth(cxC, perpX, extentX), reachBoth(cyC, perpY, extentY));
+      const double dataAmp = std::min(dataReach(perpX, perpY), dataReach(-perpX, -perpY));
+      if (dataAmp > 0.0)
+        amp = std::min(amp, dataAmp);
+      amp *= 0.85;
+      const double offset = (std::isfinite(amp) ? amp : extent) * std::sin(itsCurtainSwingPhase);
       cxC += offset * perpX;
       cyC += offset * perpY;
     }
@@ -8776,7 +8903,15 @@ void App::apply3DDefaultsForSource()
   // and aspect ratio of the data differ wildly: dBZ ranges roughly
   // -30..70 while cloud cover is 0..100, and NWP domains are two orders
   // of magnitude wider than they are tall.
-  if (dynamic_cast<const QueryDataSource*>(itsSource.get()) != nullptr)
+  // QueryData carries no unit strings, so recognise the percent quantities
+  // (cloud cover, humidity, probabilities) by name. The single-level surface
+  // stack always gates cloud-cover layers, so it keeps the % threshold too.
+  const auto* qdSource = dynamic_cast<const QueryDataSource*>(itsSource.get());
+  const bool qdPercent =
+      qdSource != nullptr && (!qdSource->isVolumetric() ||
+                              nameContains(itsSource->paramShortName(itsSource->currentParamId()),
+                                           {"cloud", "humidity", "probability", "pop"}));
+  if (qdPercent)
   {
     // 50% gates out the thin / partial-cover cells that the
     // totalcloudcover_color palette still paints visibly, so the volume
@@ -8895,6 +9030,24 @@ void App::ensureExtremaCache()
   keepProminent(minima);
 }
 
+// What the headless headers call the input: the file, else the catalog /
+// browse root or PostGIS table the source came from (a catalog cube has no
+// single file name).
+std::string App::inputLabel() const
+{
+  if (!itsOpts.filename.empty())
+    return itsOpts.filename;
+  if (!itsOpts.filenames.empty())
+    return fmt::format("{} (+{} files)", itsOpts.filenames.front(), itsOpts.filenames.size() - 1);
+  if (!itsOpts.catalogRoot.empty())
+    return itsOpts.catalogRoot;
+  if (!itsOpts.browseRoot.empty())
+    return itsOpts.browseRoot;
+  if (!itsOpts.pgTable.empty())
+    return itsOpts.pgTable;
+  return {};
+}
+
 int App::dumpExtremaReport() const
 {
   const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get());
@@ -8922,7 +9075,7 @@ int App::dumpExtremaReport() const
   const auto maxima = findExtrema(grid, ExtremumKind::Max, 0.0F, kTopN);
   const auto minima = findExtrema(grid, ExtremumKind::Min, 0.0F, kTopN);
 
-  std::cout << "[qdless --extrema] " << itsOpts.filename << " | param: " << param << " (" << units
+  std::cout << "[qdless --extrema] " << inputLabel() << " | param: " << param << " (" << units
             << ") | time: " << currentTimeLabel() << " | grid: " << grid.nx << "x" << grid.ny << "x"
             << grid.nz << " | detrend: per-level area-weighted median (values are anomalies)\n";
 
@@ -9034,9 +9187,10 @@ int App::runOnce()
   const int id = itsSource->currentParamId();
   std::string shortName = itsSource->paramShortName(id);
   const std::string origLabel = originTimeLabel();
-  std::cout << "[qdless] " << itsOpts.filename << " | param: " << shortName
-            << " | time: " << currentTimeLabel() << " (" << (itsSource->currentTimeIndex() + 1)
-            << "/" << itsSource->timeCount() << ")";
+  const std::string validLabel = currentTimeLabel();
+  std::cout << "[qdless] " << inputLabel() << " | param: " << shortName
+            << " | time: " << (validLabel.empty() ? std::string("none") : validLabel) << " ("
+            << (itsSource->currentTimeIndex() + 1) << "/" << itsSource->timeCount() << ")";
   if (!origLabel.empty())
     std::cout << " | analysis: " << origLabel;
   std::cout << " | level: " << itsSource->levelLabel(itsSource->currentLevelIndex()) << " ("
@@ -9162,6 +9316,19 @@ int App::runInteractive()
   // briefly raw-modes stdin to read the DA1 / \e[16t / Kitty replies, then
   // restores it. No-op on non-tty contexts.
   itsCaps = probeTerminalCapabilities();
+
+  // GDAL / PROJ report per-point failures (e.g. "Point outside of projection
+  // domain" while projecting coastlines onto a transverse Mercator grid)
+  // straight to stderr, which lands on top of the ncurses screen. Out-of-
+  // domain points are expected and already handled as off-grid, so silence
+  // GDAL for the lifetime of the interactive session. --dump keeps the
+  // messages on stderr. The global handler (not CPLPushErrorHandler, whose
+  // stack is per-thread) also covers errors raised on worker threads.
+  struct QuietGdal
+  {
+    CPLErrorHandler previous = CPLSetErrorHandler(CPLQuietErrorHandler);
+    ~QuietGdal() { CPLSetErrorHandler(previous); }
+  } quietGdal;
 
   UI ui;
 

@@ -463,8 +463,11 @@ bool ShapeSource::selectParamId(int paramId) { return paramId == 1; }
 std::size_t ShapeSource::timeCount() const { return 1; }
 std::size_t ShapeSource::currentTimeIndex() const { return 0; }
 void ShapeSource::selectTimeIndex(std::size_t /*i*/) {}
-NFmiMetTime ShapeSource::currentValidTime() const { return NFmiMetTime(); }
-NFmiMetTime ShapeSource::originTime() const { return NFmiMetTime(); }
+// Vector layers have no time. A default NFmiMetTime is "now", which the
+// status bar would show as a bogus valid / analysis time; year 0 is the
+// explicit "no time" marker the UI suppresses.
+NFmiMetTime ShapeSource::currentValidTime() const { return NFmiMetTime(0, 0, 0, 0, 0); }
+NFmiMetTime ShapeSource::originTime() const { return NFmiMetTime(0, 0, 0, 0, 0); }
 
 std::size_t ShapeSource::levelCount() const { return 1; }
 std::size_t ShapeSource::currentLevelIndex() const { return 0; }

@@ -251,22 +251,22 @@ std::unique_ptr<DataSource> DataSource::open(const std::string& requestedPath)
         return src;
       return std::make_unique<QueryDataSource>(filename);
     case FileKind::kGrib:
-      return std::make_unique<GridFilesSource>(filename);
     case FileKind::kNetCDF:
     {
-      // grid-files is the primary NetCDF reader (handles levels / times /
-      // multiple params for grids registered in its geometry table). But CF
-      // NetCDF with a bare lon/lat axis grid that isn't registered yields no
-      // geometry ("Geometry not found") and renders blank — wave / ocean
-      // model output (WAM, NEMO) is exactly this. For those, fall back to
-      // GDAL's CF reader, which georeferences the regular lat/lon grid
-      // directly.
+      // grid-files is the primary GRIB / NetCDF reader (handles levels /
+      // times / multiple params for grids registered in its geometry table).
+      // A grid that isn't registered yields no geometry ("Geometry not
+      // found" / "GRIB2 Geometry not configured") and renders blank: CF
+      // NetCDF with a bare lon/lat axis grid (wave / ocean model output such
+      // as WAM, NEMO) and GRIB on projections missing from the table (e.g.
+      // transverse Mercator). For those, fall back to GDAL, whose netCDF and
+      // GRIB drivers georeference the grid directly.
       std::unique_ptr<GridFilesSource> src;
       bool resolvable = false;
       {
-        // Silence over construction + probe: grid-files emits the
-        // "Geometry not found" banner from inside indexMessages too, not
-        // only the explicit geometry probe.
+        // Silence over construction + probe: grid-files emits the geometry
+        // banner from inside indexMessages too, not only the explicit
+        // geometry probe, and stdout output would corrupt the ncurses screen.
         StdoutSilencer silence;
         src = std::make_unique<GridFilesSource>(filename);
         resolvable = src->geometryResolvable();

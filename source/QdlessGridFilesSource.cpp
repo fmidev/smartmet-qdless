@@ -5,6 +5,7 @@
 #include <grid-files/grid/Message.h>
 #include <grid-files/grid/Typedefs.h>
 #include <grid-files/identification/GridDef.h>
+#include <cstdlib>
 
 #include <newbase/NFmiEnumConverter.h>
 
@@ -56,11 +57,14 @@ void GridFilesSource::ensureGridDef()
   // Search common locations for grid-files.conf. The library's parameter
   // mapping CSVs live in the same dir; the conf references them via
   // "%(DIR)/...".
-  const std::vector<std::filesystem::path> candidates = {
-      "/usr/share/smartmet/library/grid-files/grid-files.conf",
-      "/usr/share/smartmet/grid-files/grid-files.conf",
-      "/usr/share/smartmet/test/grid/library/grid-files.conf",
-  };
+  // $QDLESS_GRID_FILES_CONF wins, for installs outside /usr (Homebrew).
+  std::vector<std::filesystem::path> candidates;
+  if (const char* conf = std::getenv("QDLESS_GRID_FILES_CONF"); conf != nullptr && *conf != '\0')
+    candidates.emplace_back(conf);
+  for (const char* p : {"/usr/share/smartmet/library/grid-files/grid-files.conf",
+                        "/usr/share/smartmet/grid-files/grid-files.conf",
+                        "/usr/share/smartmet/test/grid/library/grid-files.conf"})
+    candidates.emplace_back(p);
   for (const auto& p : candidates)
   {
     if (std::filesystem::exists(p))
@@ -608,6 +612,8 @@ bool GridFilesSource::ensureGridGeometry() const
       }
     }
 
+    cacheUnregisteredCoordinates(msg);
+
     double lat0 = 0;
     double lon0 = 0;
     double lat1 = 0;
@@ -623,6 +629,45 @@ bool GridFilesSource::ensureGridGeometry() const
   catch (const std::exception&)
   {
     return false;
+  }
+}
+
+void GridFilesSource::cacheUnregisteredCoordinates(SmartMet::GRID::Message* msg) const
+{
+  // grid-files caches a grid's coordinate arrays by geometry id. A grid that
+  // is not in its geometry table (e.g. transverse Mercator GRIB2, "Geometry
+  // not configured") has id 0 and is never cached, so every single-point
+  // getGridLatLonCoordinatesByGridPoint recomputes the whole grid — the
+  // phenomenon sweep alone then took ~20 s on a 760×1226 TM grid. For those
+  // grids fetch the full lat/lon array once and index it ourselves.
+  itsLatLonCache.clear();
+  try
+  {
+    if (msg->getGridGeometryId() != 0)
+      return;
+    const auto coords = msg->getGridLatLonCoordinates();
+    const std::size_t n = static_cast<std::size_t>(itsNx) * itsNy;
+    if (!coords || coords->size() != n)
+      return;
+    auto wrap = [](double lon) { return lon > 180.0 ? lon - 360.0 : lon; };
+    // Only trust the array if it agrees with the per-point accessor (whose
+    // lat/lon ordering was resolved into itsCoordsSwapped above).
+    double a = 0;
+    double b = 0;
+    if (!msg->getGridLatLonCoordinatesByGridPoint(0, 0, a, b))
+      return;
+    const double lat0 = itsCoordsSwapped ? b : a;
+    const double lon0 = itsCoordsSwapped ? a : b;
+    const auto& c0 = (*coords)[0];
+    if (std::abs(c0.y() - lat0) > 1e-6 || std::abs(wrap(c0.x()) - wrap(lon0)) > 1e-6)
+      return;
+    itsLatLonCache.reserve(n);
+    for (const auto& c : *coords)
+      itsLatLonCache.emplace_back(c.y(), wrap(c.x()));
+  }
+  catch (const std::exception&)
+  {
+    itsLatLonCache.clear();
   }
 }
 
@@ -646,10 +691,19 @@ bool GridFilesSource::readGridLatLon(SmartMet::GRID::Message* msg, double gi, do
     r = std::clamp(r, 0L, static_cast<long>(n) - 1);
     return static_cast<unsigned>(r);
   };
+  const unsigned ci = clampRound(gi, itsNx);
+  const unsigned cj = clampRound(gj, itsNy);
+  if (!itsLatLonCache.empty())
+  {
+    // Unregistered geometry: see cacheUnregisteredCoordinates.
+    const auto& c = itsLatLonCache[static_cast<std::size_t>(cj) * itsNx + ci];
+    lat = c.first;
+    lon = c.second;
+    return true;
+  }
   double a = 0;
   double b = 0;
-  if (!msg->getGridLatLonCoordinatesByGridPoint(clampRound(gi, itsNx), clampRound(gj, itsNy), a,
-                                                b))
+  if (!msg->getGridLatLonCoordinatesByGridPoint(ci, cj, a, b))
     return false;
   if (itsCoordsSwapped)
   {

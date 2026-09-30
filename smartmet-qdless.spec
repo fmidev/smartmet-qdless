@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.9.26
+Version: 26.9.30
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -115,6 +115,25 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Wed Sep 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.9.30-1.fmi
+- New user guide docs/user-guide.md with screenshots and animations of every feature; README rewritten around it
+- Curtain swing ([s]) stays over the data: its sweep is bounded by the data box and by where the field runs out, so the plane no longer leaves projected (Lambert) domains; help text now describes the sweep
+- Wind arrows keep the data colour behind them instead of the terminal default background
+- Probe labels transformed values with the transformed unit (GRIB Kelvin fields showed degrees Celsius labelled K)
+- 3D point cloud: QueryData parameters other than cloud cover / humidity / probability are thresholded in their own units starting from the field minimum (wind speed used to start at 50 labelled %); the threshold is re-seeded when the parameter changes in 3D
+- Radar volume levels are labelled as elevation angles and the composite level as MAX (the level menu showed inf)
+- Shapefiles and PostGIS layers no longer show the current time as their valid and analysis time
+- GRIB files grid-files cannot georeference fall back to GDAL like NetCDF, and grid-files' geometry banners no longer print over the screen
+- Grids without a grid-files geometry id (e.g. transverse Mercator GRIB2) cache their coordinates: opening one took 20 s, now 4 s
+- GDAL/PROJ error messages no longer print over the interactive screen
+- Cross-section popup: no unpainted row inside the box; the y toggle says levels for model data (angle only for radar)
+- Catalog picker starts on the first entry instead of ".. (up)", returns to the entry you came from, and shows the arrow keys in its footer
+- Help lists [s] graphics mode and [d] source picker, and scrolls when taller than the terminal
+- PNG export names catalog cubes, --dir series and PostGIS tables sensibly and keeps parameter names shell-safe
+- --dump / --extrema headers name the input for catalog cubes and multi-file series, and say "time: none" for sources without time
+- $QDLESS_GRID_FILES_CONF overrides the grid-files configuration path and -DQDLESS_DATA_DIR the data directory, as the README documented
+- scripts/doc-capture regenerates the documentation media from live sessions
+
 * Sat Sep 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.9.26-1.fmi
 - Repackaged due to grid-files ABI changes
 - Require the 26.9.26 releases of the SmartMet dependencies

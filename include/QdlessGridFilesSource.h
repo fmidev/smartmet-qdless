@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Forward-declare GRID::GridFile to keep grid-files headers out of this
@@ -117,6 +118,7 @@ class GridFilesSource : public DataSource
 
   // Swap-aware wrappers around getGridLatLonCoordinatesByGridPosition /
   // getGridPointByLatLonCoordinates. See `itsCoordsSwapped`.
+  void cacheUnregisteredCoordinates(SmartMet::GRID::Message* msg) const;
   bool readGridLatLon(SmartMet::GRID::Message* msg, double gi, double gj,
                       double& lat, double& lon) const;
   bool lookupGridPoint(SmartMet::GRID::Message* msg, double lat, double lon,
@@ -164,6 +166,10 @@ class GridFilesSource : public DataSource
   // unswap on every call so the rest of the code can treat the API
   // consistently.
   mutable bool itsCoordsSwapped = false;
+
+  // Full-grid (lat, lon) array for grids grid-files cannot cache itself
+  // (geometry id 0); empty otherwise. Row-major, index = grid_j*itsNx + grid_i.
+  mutable std::vector<std::pair<double, double>> itsLatLonCache;
 
   // Cached decoded value grid for sampleValueAtUV(). Keyed on the message it
   // was decoded from; cleared/repopulated by ensureValueGrid() when the

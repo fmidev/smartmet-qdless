@@ -247,7 +247,9 @@ float OdimVolumeSource::levelValueAt(std::size_t i) const
 
 std::string OdimVolumeSource::levelLabel(std::size_t i) const
 {
-  if (i < itsSweeps.size()) return fmt::format("{:g}", itsSweeps[i].elangle);
+  // Sweeps are elevation angles, so say so.
+  if (i < itsSweeps.size())
+    return fmt::format("{:g}\xc2\xb0", itsSweeps[i].elangle);
   return "MAX";
 }
 

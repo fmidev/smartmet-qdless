@@ -29,6 +29,13 @@ namespace Qdless
 // QdlessApp.cpp.
 struct Layout;
 
+// Install location of palettes/, qdless.conf and cities1000.tsv. Packagers
+// with a different prefix (e.g. Homebrew) bake theirs in with
+// -DQDLESS_DATA_DIR=...; --palette-dir / --config still override at runtime.
+#ifndef QDLESS_DATA_DIR
+#define QDLESS_DATA_DIR "/usr/share/smartmet/qdless"
+#endif
+
 struct Options
 {
   // Single-file convenience. Either `filename` or `filenames` (multi) is
@@ -63,8 +70,8 @@ struct Options
   // Set by a bare `--catalog` (no path): discover weather-data mounts from
   // fstab and present them as the top-level picker. See openCatalogRootPicker.
   bool catalogDiscover = false;
-  std::string paletteDir = "/usr/share/smartmet/qdless/palettes";
-  std::string configFile = "/usr/share/smartmet/qdless/qdless.conf";
+  std::string paletteDir = QDLESS_DATA_DIR "/palettes";
+  std::string configFile = QDLESS_DATA_DIR "/qdless.conf";
   std::string coastlineDir = "/usr/share/gshhg-gmt-nc4";
   // Parameters to launch with. Empty -> use first parameter in the file.
   // 1 entry -> Single layout. 2 -> Side. 3 or 4 -> Quad. >4 is rejected.
@@ -119,6 +126,9 @@ struct Panel
   Palette palette;
   float valueScale = 1.0F;
   float valueOffset = 0.0F;
+  // Unit of the values after valueScale / valueOffset (e.g. "°C" for a
+  // Kelvin GRIB field); the raw file unit when no transform applies.
+  std::string displayUnits;
 };
 
 // Sub-rectangle of cell coordinates inside the map area. Width/height in
@@ -281,6 +291,7 @@ class App
   void renderTimeline(UI& ui);
   std::vector<std::string> paramLabels() const;
   std::vector<std::string> levelLabels() const;
+  std::string inputLabel() const;
 
   Options itsOpts;
   std::unique_ptr<DataSource> itsSource;
@@ -769,7 +780,14 @@ class App
                              int subWidth,
                              int originRow,
                              int originCol) const;
-  std::string buildWindArrows(int cellW, int cellH, int originRow, int originCol);
+  // Wind arrows over the panel; `pixels` (subWidth wide) is the rendered
+  // raster, sampled so each arrow keeps the data colour behind it.
+  std::string buildWindArrows(int cellW,
+                              int cellH,
+                              int originRow,
+                              int originCol,
+                              const std::vector<Rgb>& pixels,
+                              int subWidth);
   std::string buildCityLabels(int cellW, int cellH, int originRow, int originCol);
   // 3D volume renderer. Active only when itsMode3D and the source is a
   // PVOL. Writes a complete frame (radar points + ground-plane coastlines

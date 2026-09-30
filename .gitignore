@@ -16,3 +16,7 @@ fmi_*.png
 /masala
 /masala-sample.tgz
 /test/data/
+
+# doc-capture output (scripts/doc-capture/README.md)
+/scripts/doc-capture/prod/
+/scripts/doc-capture/out/

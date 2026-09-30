@@ -109,11 +109,17 @@ encoded in the path + filename (radon convention
   rotated-ll/Lambert rendering fix it required are in
   `docs/masala-catalog-plan.md` (§7–8).
 - **GRIB** renders best on `rll`/`regular_ll` (MEPS, ECMWF, GFS); `lcc` works but
-  is slow. **NetCDF** (`.nc` wave/ocean — WAM, NEMO) renders via a GDAL fallback:
-  grid-files is tried first, and when it can't georeference the grid
-  (`geometryResolvable()` false, the "Geometry not found" case) `DataSource::open`
-  hands the file to `GdalRasterSource` (which assumes WGS84 for a bare lon/lat
-  geotransform). **Radar GeoTIFF nowcasts** (`.tif`, e.g. producer 110 `PPNFIN3`,
+  is slow. **NetCDF** (`.nc` wave/ocean — WAM, NEMO) and **GRIB** on grids
+  grid-files can't georeference render via a GDAL fallback: grid-files is tried
+  first (stdout silenced — its geometry banners would corrupt the ncurses
+  screen), and when `geometryResolvable()` is false ("Geometry not found")
+  `DataSource::open` hands the file to `GdalRasterSource` (which assumes WGS84
+  for a bare lon/lat geotransform). Grids that grid-files *can* read but not
+  cache (geometry id 0, e.g. transverse Mercator GRIB2 "Geometry not
+  configured") get their full lat/lon array cached in
+  `GridFilesSource::cacheUnregisteredCoordinates`; without it every
+  single-point lookup recomputes the whole grid.
+  **Radar GeoTIFF nowcasts** (`.tif`, e.g. producer 110 `PPNFIN3`,
   laid out `<geometry>/<YYYYMMDD>/*.tif`) are recognised as a *raster cube*
   (`MasalaCatalog::isRasterCubeDir`) and opened as a time-animated
   `MultiFileSource` by `App::openCatalogRasterCube` — files are grouped by product
@@ -164,6 +170,19 @@ the data keeps reading normally.
 - Headless check: `--sun` works with `--dump`, `--dump --globe` and
   `--dump --3d`; the 2D dump header gains
   `| sun: twilight shadow, subsolar 23.2°N 180.0°E`.
+
+## Documentation
+
+- `README.md` is the overview; `docs/user-guide.md` documents every feature,
+  view and key. Keep both in sync with the `?` help screens
+  (`UI::popupHelp`) when adding or changing keys.
+- The screenshots and animations in `docs/images/` are captured from live
+  sessions by `scripts/doc-capture/` (pty + pyte emulator + rasteriser; see
+  its README). Re-run the affected scene after changing what a view looks
+  like. Animations are WebP (about half the size of GIF for this content).
+- GDAL/PROJ errors are silenced for the whole interactive session
+  (`runInteractive` installs `CPLQuietErrorHandler` globally) because
+  anything on stderr lands on top of the ncurses screen; `--dump` keeps them.
 
 ## Key dependencies
 

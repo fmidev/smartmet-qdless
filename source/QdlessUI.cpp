@@ -277,6 +277,8 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
   int maxLabel = 0;
   for (const auto& s : items) maxLabel = std::max(maxLabel, utf8Width(s));
   int width = std::max(maxLabel + 8, utf8Width(title) + 6);
+  if (arrowNav)
+    width = std::max(width, 30);  // room for the "→ / Enter open  ← back" footer
   width = std::min(width, COLS - 4);
   int interiorW = width - 2;
 
@@ -291,8 +293,14 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
   int scroll = std::max(0, sel - innerH / 2);
   int result = -1;
 
-  static const std::array<std::string_view, 3> kFooter = {
+  static const std::array<std::string_view, 3> kPlainFooter = {
       "\xe2\x86\x91\xe2\x86\x93 select", "Enter pick", "Esc cancel"};
+  // With arrow navigation the footer advertises the Miller-column keys too.
+  static const std::array<std::string_view, 3> kArrowFooter = {
+      "\xe2\x86\x91\xe2\x86\x93 select",
+      "\xe2\x86\x92 / Enter open   \xe2\x86\x90 back",
+      "Esc cancel"};
+  const auto& kFooter = arrowNav ? kArrowFooter : kPlainFooter;
 
   while (true)
   {
@@ -1004,7 +1012,7 @@ void UI::popupHelp(HelpContext ctx)
     add("+ - (View)", "Zoom camera in / out");
     add("0", "Reset camera");
     add("x", "X-cross: add a second perpendicular plane");
-    add("s", "Swing: oscillate the plane azimuth +/-45\xc2\xb0");
+    add("s", "Swing: sweep the plane sideways across the data and back");
     add("r", "Continuous rotation about the centre");
     add("o", "Centre orbit (the cross-section drifts in a circle)");
     add("T", "3D tilt: rotate the plane(s) about their long axis");
@@ -1076,6 +1084,8 @@ void UI::popupHelp(HelpContext ctx)
       add("b", "Borders: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
     }
     add("t", "Cell style: sextants \xe2\x86\x92 triangles \xe2\x86\x92 squares (font fallback)");
+    add("s",
+        "Graphics: blocks \xe2\x86\x92 Kitty \xe2\x86\x92 Sixel (when the terminal supports them)");
     if (!noProj)
     {
       add("n", "Graticule: braille \xe2\x86\x92 thick \xe2\x86\x92 off");
@@ -1088,7 +1098,7 @@ void UI::popupHelp(HelpContext ctx)
       {
         add("x", "Cross-section");
         if (ctx.hasNativeHeight)
-          add("y in section", "Y-axis: height (km) \xe2\x86\x94 elevation angle");
+          add("y in section", "Y-axis: height (km) \xe2\x86\x94 levels / elevation angles");
         add("H in section", "Hovmöller: chart Y-axis becomes time (multi-time files only)");
       }
       if (ctx.has3DVolume || ctx.hasNativeHeight || ctx.hasGlobe)
@@ -1103,7 +1113,10 @@ void UI::popupHelp(HelpContext ctx)
       }
     }
     add("e", "Export PNG");
-    if (ctx.isCatalog) add("d", "Re-open masala catalog picker");
+    if (ctx.isCatalog)
+      add("d", "Re-open masala catalog picker");
+    else if (!ctx.isPg)
+      add("d", "Pick another data source (PNG tree / weather-data mounts)");
     add("", "");
     add("M", "File metadata");
     if (multiPanel)
@@ -1149,66 +1162,103 @@ void UI::popupHelp(HelpContext ctx)
   const int interiorW = width - 2;
 
   // Layout: top border + N body rows + 1 footer + bottom border = N + 3.
-  const int height = static_cast<int>(kEntries.size()) + 3;
+  // When that doesn't fit the terminal, show a scrollable window of rows.
+  const int nEntries = static_cast<int>(kEntries.size());
+  const int bodyRows = std::max(1, std::min(nEntries, LINES - 3));
+  const bool scrolls = bodyRows < nEntries;
+  const int height = bodyRows + 3;
   const int top = std::max(0, (LINES - height) / 2);
   const int left = std::max(0, (COLS - width) / 2);
 
-  std::ostringstream os;
-
-  // Top border with embedded title.
-  putAt(os, top, left);
-  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x8c\xe2\x94\x80[" << kEscFgWhite
-     << title << kEscFgCyan << "]";
-  int titleConsumed = 4 + utf8Width(title);
-  for (int i = 0; i < width - titleConsumed - 1; ++i) os << "\xe2\x94\x80";
-  os << "\xe2\x94\x90" << kEscReset;
-
-  // Body rows.
-  for (std::size_t i = 0; i < kEntries.size(); ++i)
+  auto render = [&](int offset)
   {
-    putAt(os, top + 1 + static_cast<int>(i), left);
-    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack;
+    std::ostringstream os;
 
-    const auto& [keys, action] = kEntries[i];
-    if (keys.empty() && action.empty())
+    // Top border with embedded title.
+    putAt(os, top, left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x8c\xe2\x94\x80[" << kEscFgWhite
+       << title << kEscFgCyan << "]";
+    int titleConsumed = 4 + utf8Width(title);
+    for (int i = 0; i < width - titleConsumed - 1; ++i)
+      os << "\xe2\x94\x80";
+    os << "\xe2\x94\x90" << kEscReset;
+
+    // Body rows.
+    for (int row = 0; row < bodyRows; ++row)
     {
-      // Separator row.
-      os << kEscFgWhite;
-      pad(os, interiorW);
+      const auto i = static_cast<std::size_t>(offset + row);
+      putAt(os, top + 1 + row, left);
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack;
+
+      const auto& [keys, action] = kEntries[i];
+      if (keys.empty() && action.empty())
+      {
+        // Separator row.
+        os << kEscFgWhite;
+        pad(os, interiorW);
+      }
+      else
+      {
+        os << ' ';
+        // Keys in red.
+        os << kEscFgRed << kEscBold << keys << kEscReset << kEscBgBlack << kEscFgWhite;
+        pad(os, maxL - utf8Width(keys));
+        // Separator + action.
+        pad(os, sep);
+        os << action;
+        pad(os, interiorW - 1 - maxL - sep - utf8Width(action));
+      }
+      os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
     }
+
+    // Footer.
+    putAt(os, top + height - 2, left);
+    const std::string footer =
+        scrolls
+            ? fmt::format(
+                  "\xe2\x86\x91\xe2\x86\x93 PgUp PgDn scroll ({}-{} of {}), any other key to close",
+                  offset + 1,
+                  offset + bodyRows,
+                  nEntries)
+            : std::string("any key to close");
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
+       << ' ' << footer;
+    pad(os, interiorW - 1 - utf8Width(footer));
+    os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+
+    // Bottom border.
+    putAt(os, top + height - 1, left);
+    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
+    for (int i = 0; i < width - 2; ++i)
+      os << "\xe2\x94\x80";
+    os << "\xe2\x94\x98" << kEscReset;
+
+    const std::string out = os.str();
+    std::fwrite(out.data(), 1, out.size(), stdout);
+    std::fflush(stdout);
+  };
+
+  int offset = 0;
+  const int maxOffset = nEntries - bodyRows;
+  while (true)
+  {
+    render(offset);
+    const int ch = wgetch(itsStatusWin);
+    if (!scrolls)
+      break;
+    int next = offset;
+    if (ch == KEY_DOWN)
+      next = offset + 1;
+    else if (ch == KEY_UP)
+      next = offset - 1;
+    else if (ch == KEY_NPAGE)
+      next = offset + bodyRows;
+    else if (ch == KEY_PPAGE)
+      next = offset - bodyRows;
     else
-    {
-      os << ' ';
-      // Keys in red.
-      os << kEscFgRed << kEscBold << keys << kEscReset << kEscBgBlack << kEscFgWhite;
-      pad(os, maxL - utf8Width(keys));
-      // Separator + action.
-      pad(os, sep);
-      os << action;
-      pad(os, interiorW - 1 - maxL - sep - utf8Width(action));
-    }
-    os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
+      break;
+    offset = std::clamp(next, 0, maxOffset);
   }
-
-  // Footer.
-  putAt(os, top + height - 2, left);
-  std::string_view footer = "any key to close";
-  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscBgBlack << kEscFgWhite
-     << ' ' << footer;
-  pad(os, interiorW - 1 - utf8Width(footer));
-  os << kEscBgBlack << kEscFgCyan << "\xe2\x94\x82" << kEscReset;
-
-  // Bottom border.
-  putAt(os, top + height - 1, left);
-  os << kEscReset << kEscBgBlack << kEscFgCyan << "\xe2\x94\x94";
-  for (int i = 0; i < width - 2; ++i) os << "\xe2\x94\x80";
-  os << "\xe2\x94\x98" << kEscReset;
-
-  const std::string s = os.str();
-  std::fwrite(s.data(), 1, s.size(), stdout);
-  std::fflush(stdout);
-
-  wgetch(itsStatusWin);
   touch();
 }
 
