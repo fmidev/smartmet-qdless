@@ -66,6 +66,10 @@ const char* exitEffectName(int effectIndex);
 int exitThemeCount();
 const char* exitThemeName(int themeIndex);
 int exitEffectTheme(int effectIndex);
+// Indices of the effects in a theme, sorted by name (case-insensitively).
+// The roster itself is index-aligned with the dispatch and only roughly
+// alphabetical, so listings go through this.
+std::vector<int> exitEffectsInTheme(int themeIndex);
 
 // Resolve a name to its effect index, or -1 if no match. Case-insensitive and
 // punctuation/space-insensitive, so "tears in rain", "Tears-In-Rain" and

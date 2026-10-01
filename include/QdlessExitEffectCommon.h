@@ -64,8 +64,18 @@ inline Rgb sample(const std::vector<Rgb>& src, int w, int h, float fx, float fy)
   return src[static_cast<std::size_t>(y) * w + x];
 }
 
+// Headless frame capture: when set, present() hands every frame here instead
+// of writing to the terminal, and runFrames() neither sleeps nor polls stdin.
+// Used by preview / regression harnesses to look at an effect frame by frame.
+inline std::function<void(const std::vector<Rgb>&, int, int)> g_frameSink;
+
 inline void present(const Renderer& renderer, const std::vector<Rgb>& buf, int w, int h)
 {
+  if (g_frameSink)
+  {
+    g_frameSink(buf, w, h);
+    return;
+  }
   std::ostringstream os;
   renderer.render(os, buf, w, h, 0, 0);
   const std::string body = os.str();
@@ -111,6 +121,8 @@ void runFrames(const Renderer& renderer, int w, int h, int durationMs, Fill&& fi
     std::fill(dst.begin(), dst.end(), kBlank);
     fill(t, dst);
     present(renderer, dst, w, h);
+    if (g_frameSink)
+      continue;  // headless capture: no real-time pacing, no key polling
     if (exitKeyPressed())
       return;  // any key aborts -> caller clears the screen and exits/returns
     if (g_stompArmed)
@@ -1503,7 +1515,7 @@ inline void drawKenneyFrame(std::vector<Rgb>& dst, int w, int h, float ya,
   }
 }
 
-constexpr int kEffectCount = 330;
+constexpr int kEffectCount = 342;
 
 enum class Theme : std::uint8_t
 {
@@ -1870,6 +1882,18 @@ constexpr Theme kThemes[kEffectCount] = {
     // sorted at runtime, and the picker navigates by theme, so its position
     // within the Maths & physics group is irrelevant.
     /* 329 Rube Goldberg          */ Theme::Physics,
+    /* 330 Kelvin-Helmholtz       */ Theme::Weather,
+    /* 331 Karman Vortex          */ Theme::Weather,
+    /* 332 Radar Sweep            */ Theme::Weather,
+    /* 333 Isolines               */ Theme::Weather,
+    /* 334 Rain on Glass          */ Theme::Weather,
+    /* 335 Hoarfrost              */ Theme::Weather,
+    /* 336 Earthquake             */ Theme::Weather,
+    /* 337 Green Flash            */ Theme::Weather,
+    /* 338 Benard Cells           */ Theme::Weather,
+    /* 339 Red Sprites            */ Theme::Weather,
+    /* 340 Water Cycle            */ Theme::Weather,
+    /* 341 Mirage                 */ Theme::Weather,
 };
 
 static_assert(sizeof(kThemes) / sizeof(kThemes[0]) == kEffectCount,

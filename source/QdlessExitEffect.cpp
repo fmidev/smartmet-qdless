@@ -132,7 +132,11 @@ const char* exitEffectName(int effectIndex)
       // kNames is index-aligned with the dispatch switch, so an in-order insert
       // would renumber ~100 cases. It is the lone member of its own theme, so
       // the out-of-order placement is invisible in the theme-first picker.
-      "Rube Goldberg"};
+      "Rube Goldberg",
+      // Earth-science effects, appended for the same reason.
+      "Kelvin-Helmholtz"   , "Karman Vortex"      , "Radar Sweep"        , "Isolines",
+      "Rain on Glass"      , "Hoarfrost"          , "Earthquake"         , "Green Flash",
+      "Benard Cells"       , "Red Sprites"        , "Water Cycle"        , "Mirage"};
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return "random";
   return kNames[effectIndex];
@@ -155,6 +159,25 @@ int exitEffectTheme(int effectIndex)
   if (effectIndex < 0 || effectIndex >= kEffectCount)
     return -1;
   return static_cast<int>(kThemes[effectIndex]);
+}
+
+std::vector<int> exitEffectsInTheme(int themeIndex)
+{
+  std::vector<int> out;
+  for (int i = 0; i < kEffectCount; ++i)
+    if (static_cast<int>(kThemes[i]) == themeIndex)
+      out.push_back(i);
+  auto lower = [](const char* s)
+  {
+    std::string o(s);
+    for (auto& c : o)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return o;
+  };
+  std::sort(out.begin(),
+            out.end(),
+            [&](int a, int b) { return lower(exitEffectName(a)) < lower(exitEffectName(b)); });
+  return out;
 }
 
 int exitWordlineCount()
@@ -231,9 +254,14 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
   // didn't pick a stomp on this run.
   const bool useTransfoot = (rng() % 2U) == 0U;
   std::unique_ptr<ImageSource> stompFoot;
-  // Foot Stomp (97), Monty Python (176), Python Wars (227) — these already
-  // end on a foot, so don't double-stomp them.
-  if (stompRoll && e != 97 && e != 176 && e != 228)
+  // These already end on a foot, so don't double-stomp them. Looked up by
+  // name: hard-coded indices silently drift whenever the roster changes.
+  const std::string ename = exitEffectName(e);
+  const bool endsOnFoot = ename == "Foot Stomp" || ename == "Monty Python" ||
+                          ename == "Python Wars" || ename == "Damocles Foot" ||
+                          ename == "Pandora Foot" || ename == "Trojan Foot";
+  // A headless capture (g_frameSink) must be deterministic: no wall-clock stomp.
+  if (stompRoll && !endsOnFoot && !g_frameSink)
   {
     std::size_t sfw = 0;
     std::size_t sfh = 0;
@@ -588,6 +616,18 @@ ExitEffectPlay playExitEffect(const Renderer& renderer,
     case 327: effectYMCA(renderer, frame, subW, subH); break;
     case 328: effectYorick(renderer, frame, subW, subH); break;
     case 329: effectRubeGoldberg(renderer, frame, subW, subH); break;
+    case 330: effectKelvinHelmholtz(renderer, frame, subW, subH); break;
+    case 331: effectKarmanVortex(renderer, frame, subW, subH); break;
+    case 332: effectRadarSweep(renderer, frame, subW, subH); break;
+    case 333: effectIsolines(renderer, frame, subW, subH); break;
+    case 334: effectRainOnGlass(renderer, frame, subW, subH, rng); break;
+    case 335: effectHoarfrost(renderer, frame, subW, subH, rng); break;
+    case 336: effectEarthquake(renderer, frame, subW, subH, rng); break;
+    case 337: effectGreenFlash(renderer, frame, subW, subH); break;
+    case 338: effectBenardCells(renderer, frame, subW, subH); break;
+    case 339: effectRedSprites(renderer, frame, subW, subH, rng); break;
+    case 340: effectWaterCycle(renderer, frame, subW, subH); break;
+    case 341: effectMirage(renderer, frame, subW, subH); break;
     default: effectFade(renderer, frame, subW, subH); break;
   }
 

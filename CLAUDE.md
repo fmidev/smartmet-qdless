@@ -171,6 +171,27 @@ the data keeps reading normally.
   `--dump --3d`; the 2D dump header gains
   `| sun: twilight shadow, subsolar 23.2°N 180.0°E`.
 
+## Exit effects
+
+- The roster lives in three index-aligned tables: `kNames` + the dispatch
+  `switch` in `QdlessExitEffect.cpp`, and `kThemes` in
+  `QdlessExitEffectCommon.h`. New effects are **appended** (index 330+), never
+  inserted, so existing indices (and stored `{index, seed}` replays) stay
+  valid. Listings (`--list-exit-effects`, the F8 picker) go through
+  `exitEffectsInTheme`, which sorts by name, so the append order is invisible.
+  Code that must single out effects looks them up by name, not index.
+- The strongest effects use the view itself as the medium rather than drawing
+  a diagram over a tinted background. `QdlessExitEffectEarth.cpp` has the
+  toolkit for that: `FlowMap` (semi-Lagrangian advection of source coordinates
+  through an analytic velocity field, with Clamp/Wrap/Open boundaries; pair
+  Open with `bilinearMirrored`), `bilinear`, `fbm`/`vnoise`, `blurred`, and
+  `dbzColour`.
+- `ee_detail::g_frameSink` captures frames headlessly: when set, `present()`
+  hands each frame to it and `runFrames()` neither sleeps nor polls stdin
+  (and the random foot stomp is disabled). Use it to look at an effect frame
+  by frame and to check its per-frame cost, which must stay well under the
+  33 ms frame budget at full-terminal sizes.
+
 ## Documentation
 
 - `README.md` is the overview; `docs/user-guide.md` documents every feature,

@@ -150,7 +150,7 @@ void effectTrojanHorse(const Renderer& renderer, const std::vector<Rgb>& src, in
           }
         }
       // Battlement.
-      for (int xo = 0; xo < static_cast<int>(mn * 0.08F); xo += static_cast<int>(mn * 0.012F)) {
+      for (int xo = 0; xo < static_cast<int>(mn * 0.08F); xo += std::max(1, static_cast<int>(mn * 0.012F))) {
         const int xx = static_cast<int>(wallX) + xo;
         const int top = static_cast<int>(h * 0.20F);
         if (xx >= 0 && xx < w && top - 4 >= 0)
@@ -835,7 +835,7 @@ void effectEiffel(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
       for (int x = 0; x < w; ++x)
         dst[static_cast<std::size_t>(groundY) * w + x] = Rgb{40, 30, 30, false};
       const float cx = w * 0.5F;
-      const float towerTop = groundY - mn * 0.70F;
+      const float towerTop = groundY - mn * 0.70F / ya;  // mn is isotropic, rows are not
       const float reveal = std::clamp(t * 1.3F, 0.0F, 1.0F);
       const float topReveal = groundY - (groundY - towerTop) * reveal;
       const Rgb iron{60, 40, 30, false};
@@ -844,7 +844,7 @@ void effectEiffel(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
         const float yf = (groundY - y) / (groundY - towerTop);
         return mn * (0.18F * (1.0F - 0.85F * yf));
       };
-      for (int yy = static_cast<int>(topReveal); yy <= static_cast<int>(groundY); ++yy) {
+      for (int yy = std::max(0, static_cast<int>(topReveal)); yy <= static_cast<int>(groundY); ++yy) {
         const float ww = width_at(yy);
         // Left leg
         for (int yo = 0; yo < 2; ++yo) {
@@ -854,8 +854,8 @@ void effectEiffel(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
         }
       }
       // Cross-hatching every N rows.
-      const int spacing = static_cast<int>(mn * 0.04F);
-      for (int yy = static_cast<int>(topReveal); yy <= static_cast<int>(groundY); yy += spacing) {
+      const int spacing = std::max(1, static_cast<int>(mn * 0.04F));
+      for (int yy = std::max(0, static_cast<int>(topReveal)); yy <= static_cast<int>(groundY); yy += spacing) {
         const float ww = width_at(yy);
         const float ww2 = width_at(yy + spacing);
         drawSeg(dst, w, h, cx - ww, yy, cx + ww2, yy + spacing, std::max(1.0F, mn * 0.002F), ya, iron);
@@ -895,7 +895,7 @@ void effectStephenson(const Renderer& renderer, const std::vector<Rgb>& src, int
       drawSeg(dst, w, h, 0, trackY, w, trackY, std::max(1.0F, mn * 0.004F), ya, Rgb{60, 50, 40, false});
       drawSeg(dst, w, h, 0, trackY + mn * 0.015F, w, trackY + mn * 0.015F, std::max(1.0F, mn * 0.004F), ya, Rgb{60, 50, 40, false});
       // Sleepers.
-      for (int x = 0; x < w; x += static_cast<int>(mn * 0.04F))
+      for (int x = 0; x < w; x += std::max(1, static_cast<int>(mn * 0.04F)))
         drawSeg(dst, w, h, x, trackY - mn * 0.005F, x, trackY + mn * 0.020F, std::max(1.0F, mn * 0.008F), ya, Rgb{80, 50, 30, false});
       const float ex = -mn * 0.3F + t * (w + mn * 0.5F);
       const float by = trackY - mn * 0.04F;

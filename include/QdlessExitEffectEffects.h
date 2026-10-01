@@ -341,4 +341,18 @@ void effectYorick(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
 
 void effectRubeGoldberg(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
 
+// Earth science (QdlessExitEffectEarth.cpp)
+void effectKelvinHelmholtz(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectKarmanVortex(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectRadarSweep(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectIsolines(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectRainOnGlass(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng);
+void effectHoarfrost(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng);
+void effectEarthquake(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng);
+void effectGreenFlash(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectBenardCells(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectRedSprites(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng);
+void effectWaterCycle(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+void effectMirage(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h);
+
 }}  // namespace Qdless::ee_detail

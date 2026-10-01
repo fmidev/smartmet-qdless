@@ -134,21 +134,14 @@ int main(int argc, char* argv[])
       // identifier for --exit-effect (theme is purely a display detail).
       std::cout << "Exit effects (use names with --exit-effect):\n";
       const int nThemes = Qdless::exitThemeCount();
-      const int nEffects = Qdless::exitEffectCount();
       for (int t = 0; t < nThemes; ++t)
       {
-        bool wroteHeader = false;
-        for (int i = 0; i < nEffects; ++i)
-        {
-          if (Qdless::exitEffectTheme(i) != t)
-            continue;
-          if (!wroteHeader)
-          {
-            std::cout << "\n  " << Qdless::exitThemeName(t) << ":\n";
-            wroteHeader = true;
-          }
+        const std::vector<int> members = Qdless::exitEffectsInTheme(t);
+        if (members.empty())
+          continue;
+        std::cout << "\n  " << Qdless::exitThemeName(t) << ":\n";
+        for (int i : members)
           std::cout << "    " << Qdless::exitEffectName(i) << '\n';
-        }
       }
       return 0;
     }

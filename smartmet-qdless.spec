@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.9.30
+Version: 26.10.1
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -115,6 +115,14 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Thu Oct 1 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.1-1.fmi
+- Twelve new earth-science exit effects in which the view itself is the medium: Kelvin-Helmholtz (the map shears and rolls up into Stuart-vortex billows), Karman Vortex (a vortex street shed by an island), Radar Sweep (a PPI scope with phosphor afterglow and drifting echoes), Isolines (the map dissolves into its own marching contours), Rain on Glass (drops as inverting lenses, stick-slip trails, fogging glass), Hoarfrost (frost ferns freeze the map), Earthquake (P and S waves, fault rupture and slip, live seismogram), Green Flash (sunset over the map as a sea), Benard Cells, Red Sprites, Water Cycle and Mirage
+- Reworked the static weather effects Hurricane Eye, Coriolis, Hadley Cell, Mammatus, Derecho, Polar Vortex, Tsunami and Fogbow so the map is advected, overturned, lit or refracted by the phenomenon instead of decorated with a diagram. New QdlessExitEffectEarth.cpp holds the shared toolkit: a semi-Lagrangian FlowMap with clamp/wrap/open boundaries, value noise, blurs and radar colours
+- --list-exit-effects and the F8 picker list each theme alphabetically (exitEffectsInTheme), so effects appended to the index-aligned roster sort in
+- The random foot stomp skipped Monolith and Pythagoras instead of Monty Python and Python Wars; the effects that already end on a foot are now looked up by name and include Damocles, Pandora and Trojan Foot
+- Eiffel Tower could crash on quit: the tower height mixed isotropic and row units and went off the top of screens less than about twice as wide as tall (in cells), writing before the frame buffer. Two effects could loop forever on tiny screens with a zero step
+- ee_detail::g_frameSink captures exit-effect frames headlessly for previews and timing
+
 * Wed Sep 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.9.30-1.fmi
 - Documentation: new docs/user-guide.md documents every view, key, data source, configuration file and command-line option in 24 sections, with a key reference per view. It is illustrated with 65 screenshots and animations captured from live sessions on real data: zoom and pan, time animation, overlays, cell styles, place search, the time-series probe, cross-sections with chart hover and Hovmoller, every 3D curtain animation (swing, rotate, orbit, tilt, X-cross, combined, endpoint editing, camera, ceiling, time), radar and model point clouds, the globe, the twilight shadow, multi-panel layouts, shapefiles, the masala catalog and exit effects. Animations are WebP, about half the size of GIF for this content, and GitHub plays them. README.md is rewritten as a short overview with six headline animations that links to the guide. The screenshots in the old README predated the braille coastlines and are replaced
 - New scripts/doc-capture tool regenerates the documentation media. It runs qdless in a pseudo-terminal, sends keystrokes and SGR mouse events on a schedule, emulates the terminal with pyte and rasterises the screen, drawing sextant, quadrant, small-triangle, braille and box-drawing glyphs geometrically so they tile like a real terminal. Animations log the raw terminal output with timestamps and are rendered afterwards at exact frame times, only at moments when the output has gone quiet, so they play at real speed and never show a half-drawn screen. Paths are configurable with QDLESS_BIN, QDLESS_DOC_DATA and QDLESS_DOC_OUT

@@ -626,6 +626,15 @@ read from the local s3fs cache when a cached copy exists.
 Quitting plays a short full-screen animation drawn from the current view.
 There are over 300 effects in eleven themes, from cinema to weather.
 
+Many of the weather and earth-science effects turn the map itself into the
+phenomenon: it rolls up into Kelvin-Helmholtz billows, streams past an
+island as a Kármán vortex street, spins up into a hurricane, is overturned
+by the Hadley cells, wraps around the pole and splits in a sudden
+stratospheric warming, is swept by a radar beam, dissolves into its own
+isolines, breaks into Bénard convection cells, shears along an earthquake
+fault, evaporates and rains back down, freezes under hoarfrost, or becomes
+the sea under a green-flash sunset.
+
 | Tornado | Aurora | Hurricane eye |
 | --- | --- | --- |
 | ![Tornado exit effect](images/exit_tornado.webp) | ![Aurora exit effect](images/exit_aurora.webp) | ![Hurricane eye exit effect](images/exit_hurricane_eye.webp) |

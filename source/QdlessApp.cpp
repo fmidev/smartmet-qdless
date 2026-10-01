@@ -5060,13 +5060,10 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         // index so the selection maps back to playExitEffect.
         std::vector<std::string> effectItems;
         std::vector<int> globalIdx;
-        for (int i = 0; i < exitEffectCount(); ++i)
+        for (int i : exitEffectsInTheme(themeSel))
         {
-          if (exitEffectTheme(i) == themeSel)
-          {
-            effectItems.emplace_back(exitEffectName(i));
-            globalIdx.push_back(i);
-          }
+          effectItems.emplace_back(exitEffectName(i));
+          globalIdx.push_back(i);
         }
         if (effectItems.empty())
           continue;  // empty theme (shouldn't happen) — back to theme picker
