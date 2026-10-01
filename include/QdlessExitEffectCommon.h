@@ -96,6 +96,9 @@ inline bool exitKeyPressed()
   return false;
 }
 
+// gshhg-gmt-nc4 directory for the globe effects' land mask.
+inline std::string g_coastlineDir = "/usr/share/gshhg-gmt-nc4";
+
 inline bool g_stompArmed = false;
 
 inline bool g_stompFired = false;

@@ -3,7 +3,7 @@
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
 Version: 26.10.1
-Release: 1%{?dist}.fmi
+Release: 2%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -115,6 +115,10 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Thu Oct 1 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.1-2.fmi
+- The 14 globe weather exit effects (El Nino, Monsoon, ITCZ, MJO, Walker Cell, AMOC, Saharan Dust, Wildfire Smoke, Krakatoa, Hurricane Tracks, Sea Ice, Ozone Hole, Auroral Oval, Jet Stream) are rewritten on a lit orthographic Earth with real coastlines: the crude GSHHS file is rasterised through LandSea on first use (~40 ms, threaded) and coloured by a coarse biome model, with seamless noise fields for clouds and plumes, a day/night terminator, ocean glint and atmospheric rim. Each effect animates its phenomenon in latitude/longitude instead of drawing box-shaped continents
+- The exit-effect toolkit moved to QdlessExitEffectKit.h; setExitEffectCoastlineDir passes --coastline-dir to the effects
+
 * Thu Oct 1 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.1-1.fmi
 - Twelve new earth-science exit effects in which the view itself is the medium: Kelvin-Helmholtz (the map shears and rolls up into Stuart-vortex billows), Karman Vortex (a vortex street shed by an island), Radar Sweep (a PPI scope with phosphor afterglow and drifting echoes), Isolines (the map dissolves into its own marching contours), Rain on Glass (drops as inverting lenses, stick-slip trails, fogging glass), Hoarfrost (frost ferns freeze the map), Earthquake (P and S waves, fault rupture and slip, live seismogram), Green Flash (sunset over the map as a sea), Benard Cells, Red Sprites, Water Cycle and Mirage
 - Reworked the static weather effects Hurricane Eye, Coriolis, Hadley Cell, Mammatus, Derecho, Polar Vortex, Tsunami and Fogbow so the map is advected, overturned, lit or refracted by the phenomenon instead of decorated with a diagram. New QdlessExitEffectEarth.cpp holds the shared toolkit: a semi-Lagrangian FlowMap with clamp/wrap/open boundaries, value noise, blurs and radar colours

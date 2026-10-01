@@ -81,4 +81,8 @@ int exitEffectIndexByName(const std::string& name);
 // returns "" out of range.
 int exitWordlineCount();
 const char* exitWordline(int index);
+
+// Directory of the gshhg-gmt-nc4 files; the globe effects build a world land
+// mask from it on first use. Defaults to /usr/share/gshhg-gmt-nc4.
+void setExitEffectCoastlineDir(const std::string& dir);
 }  // namespace Qdless

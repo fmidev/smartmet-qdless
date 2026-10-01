@@ -616,6 +616,7 @@ void Viewport::pan(float duFrac, float dvFrac)
 
 App::App(Options opts) : itsOpts(std::move(opts))
 {
+  setExitEffectCoastlineDir(itsOpts.coastlineDir);
   if (itsOpts.globeSurface == "ocean")
     itsGlobeSurface = GlobeSurface::Ocean;
   else if (itsOpts.globeSurface == "land")

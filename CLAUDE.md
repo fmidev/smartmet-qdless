@@ -185,7 +185,17 @@ the data keeps reading normally.
   toolkit for that: `FlowMap` (semi-Lagrangian advection of source coordinates
   through an analytic velocity field, with Clamp/Wrap/Open boundaries; pair
   Open with `bilinearMirrored`), `bilinear`, `fbm`/`vnoise`, `blurred`, and
-  `dbzColour`.
+  `dbzColour`; it lives in `QdlessExitEffectKit.h` so other effect files can
+  share it.
+- Globe effects (`QdlessExitEffectGlobe.cpp`) draw on a lit orthographic
+  Earth with real coastlines: `earthMap()` rasterises the crude GSHHS file
+  through `LandSea` on first use (0.5° grid, biome colours, plus three
+  seamless 1° noise fields for clouds and plumes, built on a few threads:
+  ~40 ms once per process), from the directory set by
+  `setExitEffectCoastlineDir` (the App passes `--coastline-dir`). Without
+  GSHHS the Earth renders as all ocean. Effects supply a `paint` callback
+  (surface albedo/cloud per lat/lon) and a `glow` callback (emitted light),
+  and `splat` tracers at an altitude above the surface.
 - `ee_detail::g_frameSink` captures frames headlessly: when set, `present()`
   hands each frame to it and `runFrames()` neither sleeps nor polls stdin
   (and the random foot stomp is disabled). Use it to look at an effect frame

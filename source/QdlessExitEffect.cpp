@@ -180,6 +180,11 @@ std::vector<int> exitEffectsInTheme(int themeIndex)
   return out;
 }
 
+void setExitEffectCoastlineDir(const std::string& dir)
+{
+  g_coastlineDir = dir;
+}
+
 int exitWordlineCount()
 {
   return kExitWordlineCount;

@@ -634,6 +634,10 @@ stratospheric warming, is swept by a radar beam, dissolves into its own
 isolines, breaks into Bénard convection cells, shears along an earthquake
 fault, evaporates and rains back down, freezes under hoarfrost, or becomes
 the sea under a green-flash sunset.
+The global ones (El Niño, the monsoon, the ITCZ and MJO, the Walker cell and
+AMOC, Saharan dust, wildfire smoke, Krakatoa, hurricane season, sea ice, the
+ozone hole, the auroral oval and the jet stream) wrap the view onto a lit
+Earth with real coastlines from the GSHHS data qdless already uses.
 
 | Tornado | Aurora | Hurricane eye |
 | --- | --- | --- |
