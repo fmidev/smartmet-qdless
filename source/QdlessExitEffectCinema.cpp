@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include "QdlessExitEffectCommon.h"
 #include "QdlessMarionette.h"
 
@@ -1058,7 +1060,7 @@ void effectTruman(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
                   ya,
                   c);
         };
-        float fx, fyFeet, ht = h * 0.15F, lean = 0.0F;
+        float fx = NAN, fyFeet = NAN, ht = h * 0.15F, lean = 0.0F;
         bool drawFig = true;
         if (t < 0.50F)
         {
@@ -2092,7 +2094,7 @@ void effectJaws(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
       });
 }
 
-void effectStarGate(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+void effectStarGate(const Renderer& renderer, const std::vector<Rgb>& /*src*/, int w, int h)
 {
   const float ya = yAspectFor(renderer);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
@@ -2102,7 +2104,7 @@ void effectStarGate(const Renderer& renderer, const std::vector<Rgb>& src, int w
     const float H = hh * 6.0F;
     const int i = static_cast<int>(H);
     const float f = H - i, p = v * (1 - s), q = v * (1 - s * f), tt = v * (1 - s * (1 - f));
-    float r, g, b;
+    float r = NAN, g = NAN, b = NAN;
     switch (i % 6)
     {
       case 0:
@@ -3167,8 +3169,7 @@ void effectKong(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
                 h * 0.62F + std::sin(x * 0.21F) * h * 0.04F + std::sin(x * 0.07F) * h * 0.05F;
             if (y > skylineY)  // buildings: dark with lit windows from data
             {
-              const bool win =
-                  (static_cast<int>(x) % 3 == 0) && (static_cast<int>(y) % 2 == 0) && l > 120;
+              const bool win = (x % 3 == 0) && (y % 2 == 0) && l > 120;
               dst[static_cast<std::size_t>(y) * w + x] =
                   win ? Rgb{200, 190, 120, false} : Rgb{u8(10 + l * 0.04F), u8(10), u8(16), false};
             }
@@ -3198,10 +3199,9 @@ void effectKong(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
                  x <= static_cast<int>(towerX + tw * taper);
                  ++x)
               if (x >= 0 && x < w)
-                dst[static_cast<std::size_t>(y) * w + x] =
-                    ((static_cast<int>(y) % 2 == 0) && (static_cast<int>(x) % 2 == 0))
-                        ? Rgb{120, 110, 80, false}
-                        : Rgb{34, 32, 42, false};
+                dst[static_cast<std::size_t>(y) * w + x] = ((y % 2 == 0) && (x % 2 == 0))
+                                                               ? Rgb{120, 110, 80, false}
+                                                               : Rgb{34, 32, 42, false};
           }
         }
         const float fall = std::clamp((t - 0.82F) / 0.18F, 0.0F, 1.0F);
@@ -3217,7 +3217,7 @@ void effectKong(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
             ox = kongX + lx * ca - ly * sa;
             oy = kongY + (lx * sa + ly * ca) / ya;
           };
-          float bx, by, hx, hy, ax, ay;
+          float bx = NAN, by = NAN, hx = NAN, hy = NAN, ax = NAN, ay = NAN;
           rp(0, 0, bx, by);
           rp(0, -s * 1.3F, hx, hy);
           const float swat = std::sin(t * 12.0F) * 0.6F;  // swatting arm
@@ -5217,7 +5217,7 @@ void effectHalStare(const Renderer& renderer, const std::vector<Rgb>& src, int w
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n)
   { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
-  const int corner = static_cast<int>(hash(static_cast<int>(w + h)) * 4.0F) % 4;
+  const int corner = static_cast<int>(hash((w + h)) * 4.0F) % 4;
   const float cx =
       (corner == 0 || corner == 2) ? mn * 0.18F : w - mn * 0.18F;
   const float cy = (corner < 2) ? mn * 0.18F : h - mn * 0.18F;

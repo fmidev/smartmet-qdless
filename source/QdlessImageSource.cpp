@@ -142,8 +142,8 @@ bool tryDecodeAnimatedWebP(const std::string& filename,
   // Cheap gate: only feed real WebP bytes to the demuxer (it would
   // accept and reject anything else, but the malloc + parse is wasted
   // work on a non-WebP).
-  if (!(buf[0] == 'R' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == 'F' &&
-        buf[8] == 'W' && buf[9] == 'E' && buf[10] == 'B' && buf[11] == 'P'))
+  if (buf[0] != 'R' || buf[1] != 'I' || buf[2] != 'F' || buf[3] != 'F' || buf[8] != 'W' ||
+      buf[9] != 'E' || buf[10] != 'B' || buf[11] != 'P')
     return false;
 
   WebPData data{buf.data(), buf.size()};
@@ -409,11 +409,14 @@ Rgb ImageSource::pixelAtUV(double u, double v) const
   const double dx = fx - static_cast<double>(x0);
   const double dy = fy - static_cast<double>(y0);
 
-  auto fetch = [&](long x, long y) -> Rgb {
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x >= static_cast<long>(itsNx)) x = static_cast<long>(itsNx) - 1;
-    if (y >= static_cast<long>(itsNy)) y = static_cast<long>(itsNy) - 1;
+  auto fetch = [&](long x, long y) -> Rgb
+  {
+    x = std::max<long>(x, 0);
+    y = std::max<long>(y, 0);
+    if (x >= static_cast<long>(itsNx))
+      x = static_cast<long>(itsNx) - 1;
+    if (y >= static_cast<long>(itsNy))
+      y = static_cast<long>(itsNy) - 1;
     return frame[static_cast<std::size_t>(y) * itsNx +
                  static_cast<std::size_t>(x)];
   };

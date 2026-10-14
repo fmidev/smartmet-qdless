@@ -255,15 +255,15 @@ float OdimSource::interpolatedValue(double lat, double lon) const
   if (w <= 0 || h <= 0) return std::numeric_limits<float>::quiet_NaN();
   const double u = xy.X() / w;
   const double v = xy.Y() / h;
-  if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1))
+  if (u < 0 || u > 1 || v < 0 || v > 1)
     return std::numeric_limits<float>::quiet_NaN();
 
   // Nearest-neighbour. Radar data is naturally pixelated and bilinear
   // interpolation across nodata/undetect cells produces misleading averages.
   long col = static_cast<long>(u * static_cast<double>(itsNx));
   long row = static_cast<long>(v * static_cast<double>(itsNy));
-  if (col < 0) col = 0;
-  if (row < 0) row = 0;
+  col = std::max<long>(col, 0);
+  row = std::max<long>(row, 0);
   if (col >= static_cast<long>(itsNx)) col = static_cast<long>(itsNx) - 1;
   if (row >= static_cast<long>(itsNy)) row = static_cast<long>(itsNy) - 1;
   return itsValues[static_cast<std::size_t>(row) * itsNx + static_cast<std::size_t>(col)];

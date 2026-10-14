@@ -513,7 +513,7 @@ class App
   double itsCurtainRotatePhase = 0.0;
   double itsCurtainOrbitPhase = 0.0;
   double itsCurtainTiltPhase = 0.0;
-  std::chrono::steady_clock::time_point itsCurtainAnimLastTick{};
+  std::chrono::steady_clock::time_point itsCurtainAnimLastTick;
   bool itsCurtainAnimTickValid = false;
 
   // Animation state.

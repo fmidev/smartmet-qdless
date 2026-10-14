@@ -11,71 +11,123 @@ void effectAnubis(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  runFrames(renderer, w, h, 5400,
-    [&](float t, std::vector<Rgb>& dst) {
-      // Desert sky.
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          const float sf = static_cast<float>(y) / h;
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(180 - 30 * sf + l * 0.10F), u8(120 - 40 * sf + l * 0.08F),
-                  u8(80 + 10 * sf + l * 0.06F), false};
+  runFrames(
+      renderer,
+      w,
+      h,
+      5400,
+      [&](float /*t*/, std::vector<Rgb>& dst)
+      {
+        // Desert sky.
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x)
+          {
+            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            const float sf = static_cast<float>(y) / h;
+            dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(180 - 30 * sf + l * 0.10F),
+                                                           u8(120 - 40 * sf + l * 0.08F),
+                                                           u8(80 + 10 * sf + l * 0.06F),
+                                                           false};
+          }
+        // Sand horizon.
+        const float groundY = h * 0.85F;
+        for (int yy = static_cast<int>(groundY); yy < h; ++yy)
+          for (int xx = 0; xx < w; ++xx)
+            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{200, 170, 120, false};
+        // Data-textured pyramid behind.
+        const float cx = w * 0.5F;
+        const float pyrW = mn * 0.40F, pyrH = mn * 0.35F;
+        for (int yo = 0; yo <= static_cast<int>(pyrH); ++yo)
+        {
+          const float yf = yo / pyrH;
+          const int half = static_cast<int>(pyrW * 0.5F * (1.0F - yf));
+          for (int xo = -half; xo <= half; ++xo)
+          {
+            const int xx = static_cast<int>(cx + xo);
+            const int yy = static_cast<int>(groundY - yo);
+            if (xx < 0 || xx >= w || yy < 0 || yy >= h)
+              continue;
+            const Rgb d = sample(src, w, h, xx, yy);
+            const float dr = d.transparent ? 200.0F : d.r;
+            const bool shade = xo > 0;
+            dst[static_cast<std::size_t>(yy) * w + xx] =
+                shade ? Rgb{u8(160 + dr * 0.20F), u8(130), u8(80), false}
+                      : Rgb{u8(210 + dr * 0.15F), u8(180), u8(120), false};
+          }
         }
-      // Sand horizon.
-      const float groundY = h * 0.85F;
-      for (int yy = static_cast<int>(groundY); yy < h; ++yy)
-        for (int xx = 0; xx < w; ++xx)
-          dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{200, 170, 120, false};
-      // Data-textured pyramid behind.
-      const float cx = w * 0.5F;
-      const float pyrW = mn * 0.40F, pyrH = mn * 0.35F;
-      for (int yo = 0; yo <= static_cast<int>(pyrH); ++yo) {
-        const float yf = yo / pyrH;
-        const int half = static_cast<int>(pyrW * 0.5F * (1.0F - yf));
-        for (int xo = -half; xo <= half; ++xo) {
-          const int xx = static_cast<int>(cx + xo);
-          const int yy = static_cast<int>(groundY - yo);
-          if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-          const Rgb d = sample(src, w, h, xx, yy);
-          const float dr = d.transparent ? 200.0F : d.r;
-          const bool shade = xo > 0;
-          dst[static_cast<std::size_t>(yy) * w + xx] =
-              shade ? Rgb{u8(160 + dr * 0.20F), u8(130), u8(80), false}
-                    : Rgb{u8(210 + dr * 0.15F), u8(180), u8(120), false};
-        }
-      }
-      // Anubis silhouette in foreground.
-      const float ax = w * 0.20F;
-      const float ay = groundY - mn * 0.05F;
-      const Rgb body{20, 20, 30, false};
-      const float fh = mn * 0.30F;
-      // Torso.
-      drawSeg(dst, w, h, ax, ay - fh * 0.20F, ax, ay, fh * 0.12F, ya, body);
-      // Legs.
-      drawSeg(dst, w, h, ax, ay, ax - fh * 0.04F, ay + fh * 0.20F, fh * 0.08F, ya, body);
-      drawSeg(dst, w, h, ax, ay, ax + fh * 0.04F, ay + fh * 0.20F, fh * 0.08F, ya, body);
-      // Arms.
-      drawSeg(dst, w, h, ax, ay - fh * 0.15F, ax + fh * 0.15F, ay - fh * 0.05F, fh * 0.06F, ya, body);
-      drawSeg(dst, w, h, ax, ay - fh * 0.15F, ax - fh * 0.15F, ay - fh * 0.05F, fh * 0.06F, ya, body);
-      // Jackal head + ears.
-      plotDot(dst, w, h, ax, ay - fh * 0.30F, fh * 0.10F, ya, body);
-      drawSeg(dst, w, h, ax - fh * 0.04F, ay - fh * 0.36F, ax - fh * 0.10F, ay - fh * 0.45F,
-              std::max(1.0F, mn * 0.008F), ya, body);
-      drawSeg(dst, w, h, ax + fh * 0.04F, ay - fh * 0.36F, ax + fh * 0.10F, ay - fh * 0.45F,
-              std::max(1.0F, mn * 0.008F), ya, body);
-      // Snout pointing right.
-      drawSeg(dst, w, h, ax, ay - fh * 0.30F, ax + fh * 0.16F, ay - fh * 0.30F,
-              std::max(1.0F, mn * 0.012F), ya, body);
-      // Ankh in his right hand.
-      const float ankhX = ax + fh * 0.18F, ankhY = ay - fh * 0.05F;
-      plotDot(dst, w, h, ankhX, ankhY - fh * 0.05F, fh * 0.03F, ya, Rgb{240, 200, 80, false});
-      drawSeg(dst, w, h, ankhX, ankhY - fh * 0.02F, ankhX, ankhY + fh * 0.10F,
-              std::max(1.0F, mn * 0.004F), ya, Rgb{240, 200, 80, false});
-      drawSeg(dst, w, h, ankhX - fh * 0.04F, ankhY + fh * 0.03F, ankhX + fh * 0.04F, ankhY + fh * 0.03F,
-              std::max(1.0F, mn * 0.004F), ya, Rgb{240, 200, 80, false});
-    });
+        // Anubis silhouette in foreground.
+        const float ax = w * 0.20F;
+        const float ay = groundY - mn * 0.05F;
+        const Rgb body{20, 20, 30, false};
+        const float fh = mn * 0.30F;
+        // Torso.
+        drawSeg(dst, w, h, ax, ay - fh * 0.20F, ax, ay, fh * 0.12F, ya, body);
+        // Legs.
+        drawSeg(dst, w, h, ax, ay, ax - fh * 0.04F, ay + fh * 0.20F, fh * 0.08F, ya, body);
+        drawSeg(dst, w, h, ax, ay, ax + fh * 0.04F, ay + fh * 0.20F, fh * 0.08F, ya, body);
+        // Arms.
+        drawSeg(
+            dst, w, h, ax, ay - fh * 0.15F, ax + fh * 0.15F, ay - fh * 0.05F, fh * 0.06F, ya, body);
+        drawSeg(
+            dst, w, h, ax, ay - fh * 0.15F, ax - fh * 0.15F, ay - fh * 0.05F, fh * 0.06F, ya, body);
+        // Jackal head + ears.
+        plotDot(dst, w, h, ax, ay - fh * 0.30F, fh * 0.10F, ya, body);
+        drawSeg(dst,
+                w,
+                h,
+                ax - fh * 0.04F,
+                ay - fh * 0.36F,
+                ax - fh * 0.10F,
+                ay - fh * 0.45F,
+                std::max(1.0F, mn * 0.008F),
+                ya,
+                body);
+        drawSeg(dst,
+                w,
+                h,
+                ax + fh * 0.04F,
+                ay - fh * 0.36F,
+                ax + fh * 0.10F,
+                ay - fh * 0.45F,
+                std::max(1.0F, mn * 0.008F),
+                ya,
+                body);
+        // Snout pointing right.
+        drawSeg(dst,
+                w,
+                h,
+                ax,
+                ay - fh * 0.30F,
+                ax + fh * 0.16F,
+                ay - fh * 0.30F,
+                std::max(1.0F, mn * 0.012F),
+                ya,
+                body);
+        // Ankh in his right hand.
+        const float ankhX = ax + fh * 0.18F, ankhY = ay - fh * 0.05F;
+        plotDot(dst, w, h, ankhX, ankhY - fh * 0.05F, fh * 0.03F, ya, Rgb{240, 200, 80, false});
+        drawSeg(dst,
+                w,
+                h,
+                ankhX,
+                ankhY - fh * 0.02F,
+                ankhX,
+                ankhY + fh * 0.10F,
+                std::max(1.0F, mn * 0.004F),
+                ya,
+                Rgb{240, 200, 80, false});
+        drawSeg(dst,
+                w,
+                h,
+                ankhX - fh * 0.04F,
+                ankhY + fh * 0.03F,
+                ankhX + fh * 0.04F,
+                ankhY + fh * 0.03F,
+                std::max(1.0F, mn * 0.004F),
+                ya,
+                Rgb{240, 200, 80, false});
+      });
 }
 
 void effectChineseDragon(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)

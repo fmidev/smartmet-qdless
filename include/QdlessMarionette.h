@@ -80,8 +80,8 @@ inline double bvhReferenceHeight(const BvhAnimation& a)
     auto pos = bvhJointPositions(a, f);
     for (const auto& p : pos)
     {
-      if (p[1] < minY) minY = p[1];
-      if (p[1] > maxY) maxY = p[1];
+      minY = std::min(p[1], minY);
+      maxY = std::max(p[1], maxY);
     }
   }
   const double h = maxY - minY;
@@ -203,8 +203,8 @@ inline void fillQuad(std::vector<Rgb>& dst, int w, int h,
   double minY = ys[0], maxY = ys[0];
   for (int i = 1; i < 4; ++i)
   {
-    if (ys[i] < minY) minY = ys[i];
-    if (ys[i] > maxY) maxY = ys[i];
+    minY = std::min(ys[i], minY);
+    maxY = std::max(ys[i], maxY);
   }
   const int ymin = std::max(0, static_cast<int>(std::floor(minY)));
   const int ymax = std::min(h - 1, static_cast<int>(std::ceil(maxY)));
@@ -222,8 +222,8 @@ inline void fillQuad(std::vector<Rgb>& dst, int w, int h,
       if (static_cast<double>(y) < yLo || static_cast<double>(y) > yHi) continue;
       const double t = (static_cast<double>(y) - y0) / (y1 - y0);
       const double x = xs[e] + t * (xs[e2] - xs[e]);
-      if (x < xL) xL = x;
-      if (x > xR) xR = x;
+      xL = std::min(x, xL);
+      xR = std::max(x, xR);
     }
     if (xR < xL) continue;
     const int xa = std::max(0, static_cast<int>(std::floor(xL)));
@@ -284,7 +284,7 @@ inline void drawMarionette(std::vector<Rgb>& dst, int w, int h, float ya,
     // baseline. Re-derive per frame from the actual joint positions.
     double minY = 1e30;
     for (const auto& j : worldPos)
-      if (j[1] < minY) minY = j[1];
+      minY = std::min(j[1], minY);
     p.rootY = minY;
   }
   // Scale: map unitRefH BVH units onto figureH dst rows; the x scale

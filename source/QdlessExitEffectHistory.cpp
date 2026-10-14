@@ -602,70 +602,105 @@ void effectNapoleon(const Renderer& renderer, const std::vector<Rgb>& src, int w
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  runFrames(renderer, w, h, 5400,
-    [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(170 + l * 0.10F), u8(150 + l * 0.10F), u8(120 + l * 0.08F), false};
-        }
-      // Background tricolor bands.
-      const float xa = w * 0.18F, xb = w * 0.82F;
-      const float ya0 = h * 0.20F, ya1 = h * 0.80F;
-      const Rgb& blue = (Rgb){30, 60, 180, false};
-      const Rgb& white = (Rgb){240, 240, 240, false};
-      const Rgb& red = (Rgb){220, 30, 30, false};
-      const std::array<Rgb, 3> bands = {blue, white, red};
-      for (int yy = static_cast<int>(ya0); yy <= static_cast<int>(ya1); ++yy)
-        for (int xx = static_cast<int>(xa); xx <= static_cast<int>(xb); ++xx) {
-          const float xf = (xx - xa) / (xb - xa);
-          const int bIdx = std::clamp(static_cast<int>(xf * 3.0F), 0, 2);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = bands[bIdx];
-        }
-      // Napoleon silhouette centre.
-      const float cx = w * 0.5F, cy = h * 0.55F;
-      const Rgb fig{20, 14, 10, false};
-      // Body.
-      for (int yo = -static_cast<int>(mn * 0.08F); yo <= static_cast<int>(mn * 0.15F); ++yo) {
-        const float yf = (yo + mn * 0.08F) / (mn * 0.23F);
-        const int half = static_cast<int>(mn * (0.05F + 0.04F * yf));
-        for (int xo = -half; xo <= half; ++xo) {
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = fig;
-        }
-      }
-      // Head.
-      drawDataDisk(dst, w, h, src, cx, cy - mn * 0.12F, mn * 0.04F, ya, 0.7F, 0.0F, Rgb{210, 180, 140, false});
-      // Bicorne hat.
-      for (int xo = -static_cast<int>(mn * 0.09F); xo <= static_cast<int>(mn * 0.09F); ++xo) {
-        const float xf = std::fabs(xo) / (mn * 0.09F);
-        const int yy = static_cast<int>(cy - mn * 0.17F + xf * xf * mn * 0.02F);
-        for (int yo = 0; yo < static_cast<int>(mn * 0.020F); ++yo) {
-          const int xx = static_cast<int>(cx + xo);
-          if (xx >= 0 && xx < w && yy + yo >= 0 && yy + yo < h)
-            dst[static_cast<std::size_t>(yy + yo) * w + xx] = fig;
-        }
-      }
-      // Hand in coat (slightly offset white triangle).
-      drawSeg(dst, w, h, cx - mn * 0.03F, cy - mn * 0.06F, cx + mn * 0.02F, cy + mn * 0.02F,
-              std::max(1.0F, mn * 0.008F), ya, Rgb{240, 230, 200, false});
-      // Year label.
-      const std::string year = "1804";
-      const int sc = std::max(3, static_cast<int>(mn / 25.0F));
-      const float lineW = static_cast<float>(year.size()) * 6 * sc;
-      for (int ci = 0; ci < static_cast<int>(year.size()); ++ci) {
-        const auto g = glyph5x7(year[ci]);
-        for (int fy = 0; fy < 7; ++fy)
-          for (int fx = 0; fx < 5; ++fx)
-            if (g[fy][fx] == '1')
-              plotDot(dst, w, h, cx - lineW * 0.5F + (ci * 6 + fx) * sc, h * 0.86F + fy * sc,
-                      std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, Rgb{40, 30, 20, false});
-      }
-    });
+  runFrames(renderer,
+            w,
+            h,
+            5400,
+            [&](float /*t*/, std::vector<Rgb>& dst)
+            {
+              for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+                  const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                  dst[static_cast<std::size_t>(y) * w + x] =
+                      Rgb{u8(170 + l * 0.10F), u8(150 + l * 0.10F), u8(120 + l * 0.08F), false};
+                }
+              // Background tricolor bands.
+              const float xa = w * 0.18F, xb = w * 0.82F;
+              const float ya0 = h * 0.20F, ya1 = h * 0.80F;
+              const Rgb& blue = (Rgb){30, 60, 180, false};
+              const Rgb& white = (Rgb){240, 240, 240, false};
+              const Rgb& red = (Rgb){220, 30, 30, false};
+              const std::array<Rgb, 3> bands = {blue, white, red};
+              for (int yy = static_cast<int>(ya0); yy <= static_cast<int>(ya1); ++yy)
+                for (int xx = static_cast<int>(xa); xx <= static_cast<int>(xb); ++xx)
+                {
+                  const float xf = (xx - xa) / (xb - xa);
+                  const int bIdx = std::clamp(static_cast<int>(xf * 3.0F), 0, 2);
+                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = bands[bIdx];
+                }
+              // Napoleon silhouette centre.
+              const float cx = w * 0.5F, cy = h * 0.55F;
+              const Rgb fig{20, 14, 10, false};
+              // Body.
+              for (int yo = -static_cast<int>(mn * 0.08F); yo <= static_cast<int>(mn * 0.15F); ++yo)
+              {
+                const float yf = (yo + mn * 0.08F) / (mn * 0.23F);
+                const int half = static_cast<int>(mn * (0.05F + 0.04F * yf));
+                for (int xo = -half; xo <= half; ++xo)
+                {
+                  const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+                    dst[static_cast<std::size_t>(yy) * w + xx] = fig;
+                }
+              }
+              // Head.
+              drawDataDisk(dst,
+                           w,
+                           h,
+                           src,
+                           cx,
+                           cy - mn * 0.12F,
+                           mn * 0.04F,
+                           ya,
+                           0.7F,
+                           0.0F,
+                           Rgb{210, 180, 140, false});
+              // Bicorne hat.
+              for (int xo = -static_cast<int>(mn * 0.09F); xo <= static_cast<int>(mn * 0.09F); ++xo)
+              {
+                const float xf = std::fabs(xo) / (mn * 0.09F);
+                const int yy = static_cast<int>(cy - mn * 0.17F + xf * xf * mn * 0.02F);
+                for (int yo = 0; yo < static_cast<int>(mn * 0.020F); ++yo)
+                {
+                  const int xx = static_cast<int>(cx + xo);
+                  if (xx >= 0 && xx < w && yy + yo >= 0 && yy + yo < h)
+                    dst[static_cast<std::size_t>(yy + yo) * w + xx] = fig;
+                }
+              }
+              // Hand in coat (slightly offset white triangle).
+              drawSeg(dst,
+                      w,
+                      h,
+                      cx - mn * 0.03F,
+                      cy - mn * 0.06F,
+                      cx + mn * 0.02F,
+                      cy + mn * 0.02F,
+                      std::max(1.0F, mn * 0.008F),
+                      ya,
+                      Rgb{240, 230, 200, false});
+              // Year label.
+              const std::string year = "1804";
+              const int sc = std::max(3, static_cast<int>(mn / 25.0F));
+              const float lineW = static_cast<float>(year.size()) * 6 * sc;
+              for (int ci = 0; ci < static_cast<int>(year.size()); ++ci)
+              {
+                const auto g = glyph5x7(year[ci]);
+                for (int fy = 0; fy < 7; ++fy)
+                  for (int fx = 0; fx < 5; ++fx)
+                    if (g[fy][fx] == '1')
+                      plotDot(dst,
+                              w,
+                              h,
+                              cx - lineW * 0.5F + (ci * 6 + fx) * sc,
+                              h * 0.86F + fy * sc,
+                              std::max(1.0F, static_cast<float>(sc) * 0.5F),
+                              ya,
+                              Rgb{40, 30, 20, false});
+              }
+            });
 }
 
 void effectColumbus(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
@@ -1169,7 +1204,7 @@ void effectBerlinWall(const Renderer& renderer, const std::vector<Rgb>& src, int
           const float dg = d.transparent ? 100.0F : d.g;
           const float db = d.transparent ? 100.0F : d.b;
           // Knock chunks out of the wall over time.
-          const float chunkProb = hash(static_cast<int>(xx / 6) * 13 + static_cast<int>(yy / 6) * 7);
+          const float chunkProb = hash((xx / 6) * 13 + (yy / 6) * 7);
           if (t > 0.3F && chunkProb < std::clamp((t - 0.3F) * 1.5F, 0.0F, 0.5F)) {
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(40 + 80 * (1 - static_cast<float>(yy) / h) + dr * 0.1F),
                                                               u8(60 + 90 * (1 - static_cast<float>(yy) / h) + dg * 0.1F),

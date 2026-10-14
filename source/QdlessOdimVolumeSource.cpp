@@ -277,7 +277,7 @@ float OdimVolumeSource::sampleSweep(const Sweep& s, double x, double y) const
   if (az < 0) az += 360.0;
   const double rayWidth = 360.0 / static_cast<double>(s.nrays);
   long ray = static_cast<long>(az / rayWidth);
-  if (ray < 0) ray = 0;
+  ray = std::max<long>(ray, 0);
   if (ray >= static_cast<long>(s.nrays)) ray = static_cast<long>(s.nrays) - 1;
 
   const float v = s.raw[static_cast<std::size_t>(ray) * s.nbins +

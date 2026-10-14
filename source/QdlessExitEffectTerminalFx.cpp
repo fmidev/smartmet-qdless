@@ -977,7 +977,7 @@ void effectGotcha(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
 }
 
 void effectTestCard(
-    const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
+    const Renderer& renderer, const std::vector<Rgb>& /*src*/, int w, int h, std::mt19937& rng)
 {
   static const std::array<Rgb, 7> kTop = {Rgb{191, 191, 191, false},
                                           Rgb{191, 191, 0, false},

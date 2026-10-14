@@ -197,7 +197,7 @@ std::vector<Feature> findExtrema(const VolumeGrid& grid,
     // Distinct roots among already-processed neighbours.
     std::uint32_t roots[6];
     int nroots = 0;
-    const int nn = static_cast<int>(neighboursOf(c, grid.nx, grid.ny, grid.nz, neigh));
+    const int nn = neighboursOf(c, grid.nx, grid.ny, grid.nz, neigh);
     for (int t = 0; t < nn; ++t)
     {
       const std::size_t m = neigh[t];
@@ -310,7 +310,7 @@ std::vector<Feature> findExtrema(const VolumeGrid& grid,
         f.blobTruncated = true;
         break;
       }
-      const int nn = static_cast<int>(neighboursOf(c, grid.nx, grid.ny, grid.nz, neigh));
+      const int nn = neighboursOf(c, grid.nx, grid.ny, grid.nz, neigh);
       for (int t = 0; t < nn; ++t)
       {
         const std::size_t m = neigh[t];

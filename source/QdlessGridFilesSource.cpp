@@ -5,6 +5,7 @@
 #include <grid-files/grid/Message.h>
 #include <grid-files/grid/Typedefs.h>
 #include <grid-files/identification/GridDef.h>
+#include <algorithm>
 #include <cstdlib>
 
 #include <newbase/NFmiEnumConverter.h>
@@ -448,8 +449,7 @@ void GridFilesSource::selectLevelGroup(int paramId, int groupIdx)
   const auto it = itsLevelGroups.find(paramId);
   if (it == itsLevelGroups.end() || it->second.empty())
     return;
-  if (groupIdx < 0)
-    groupIdx = 0;
+  groupIdx = std::max(groupIdx, 0);
   if (groupIdx >= static_cast<int>(it->second.size()))
     groupIdx = static_cast<int>(it->second.size()) - 1;
   itsActiveGroup[paramId] = groupIdx;

@@ -180,6 +180,8 @@ const std::vector<S3fsMount>& s3fsMounts()
 }
 }  // namespace
 
+namespace
+{
 // GDAL/OGR last-resort probe. The fast magic-byte checks above route
 // every format with a fixed signature (GRIB, NetCDF, TIFF, PNG, ...) to
 // its specialised backend. Anything that didn't match gets one more
@@ -210,6 +212,7 @@ std::unique_ptr<DataSource> tryGdalOpen(const std::string& filename)
   }
   return nullptr;
 }
+}  // namespace
 
 std::string DataSource::localCachePath(const std::string& path)
 {

@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include "QdlessExitEffectCommon.h"
 
 namespace Qdless
@@ -623,13 +625,17 @@ void effectSnowTree(const Renderer& renderer, const std::vector<Rgb>& src, int w
         rx = pivotX + dx * cs - dy * sn;
         ry = pivotY + dx * sn + dy * cs;
       };
-      auto drawRotSeg = [&](float x0, float y0, float x1, float y1, float thk, Rgb col) {
-        float rx0, ry0, rx1, ry1;
-        rot(x0, y0, rx0, ry0); rot(x1, y1, rx1, ry1);
+      auto drawRotSeg = [&](float x0, float y0, float x1, float y1, float thk, Rgb col)
+      {
+        float rx0 = NAN, ry0 = NAN, rx1 = NAN, ry1 = NAN;
+        rot(x0, y0, rx0, ry0);
+        rot(x1, y1, rx1, ry1);
         drawSeg(dst, w, h, rx0, ry0, rx1, ry1, std::max(1.0F, thk), ya, col);
       };
-      auto rotPlot = [&](float x, float y, float r, Rgb col) {
-        float rx, ry; rot(x, y, rx, ry);
+      auto rotPlot = [&](float x, float y, float r, Rgb col)
+      {
+        float rx = NAN, ry = NAN;
+        rot(x, y, rx, ry);
         plotDot(dst, w, h, rx, ry, r, ya, col);
       };
       // Trunk + branches.

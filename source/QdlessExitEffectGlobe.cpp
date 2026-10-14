@@ -557,7 +557,7 @@ void effectElNino(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
             src,
             g,
             look,
-            [&](float lat, float lon, const V3& p, Surface& s)
+            [&](float lat, float lon, const V3& /*p*/, Surface& s)
             {
               if (s.land || std::fabs(lat) > 30.0F)
                 return;

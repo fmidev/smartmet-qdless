@@ -308,9 +308,9 @@ PhenomenonHint detectCyclone(const Grid& g)
       // Sector index: angle from centre, 0 = +x (East), counter-clockwise.
       const double ang = std::atan2(static_cast<double>(-dy), static_cast<double>(dx));
       int s = static_cast<int>(std::floor((ang + M_PI) * 4.0 / M_PI));
-      if (s < 0) s = 0;
-      if (s > 7) s = 7;
-      if (p > sectorMax[s]) sectorMax[s] = p;
+      s = std::max(s, 0);
+      s = std::min(s, 7);
+      sectorMax[s] = std::max(p, sectorMax[s]);
       ++sectorCount[s];
     }
 
@@ -331,7 +331,7 @@ PhenomenonHint detectCyclone(const Grid& g)
   {
     if (sectorCount[s] == 0) continue;
     const float delta = sectorMax[s] - refinedMin;
-    if (delta < minDelta) minDelta = delta;
+    minDelta = std::min(delta, minDelta);
     sumDelta += delta;
     ++validDeltas;
   }

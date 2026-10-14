@@ -598,8 +598,7 @@ bool QueryDataSource::sampleVolumeGrid(std::size_t& nx,
     const double full = static_cast<double>(fullNx) * fullNy * nLevels;
     if (full > static_cast<double>(targetMaxCells))
       stride = static_cast<std::size_t>(std::ceil(std::sqrt(full / targetMaxCells)));
-    if (stride < 1)
-      stride = 1;
+    stride = std::max<std::size_t>(stride, 1);
   }
   nx = (fullNx + stride - 1) / stride;
   ny = (fullNy + stride - 1) / stride;

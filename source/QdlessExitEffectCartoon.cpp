@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include "QdlessExitEffectCommon.h"
 #include "QdlessMarionette.h"
 
@@ -312,7 +314,7 @@ void effectMontyPython(const Renderer& renderer, const std::vector<Rgb>& src, in
             { stompFrame(dst, src, w, h, std::min(1.0F, t / 0.33F), footPixel); });
 }
 
-void effectPythonWars(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+void effectPythonWars(const Renderer& renderer, const std::vector<Rgb>& /*src*/, int w, int h)
 {
   int bw = 0;
   int bh = 0;
@@ -748,7 +750,7 @@ void effectAcmeAnvil(const Renderer& renderer, const std::vector<Rgb>& src, int 
                 const int yy = static_cast<int>(anvilCy + yo);
                 if (yy < 0 || yy >= h) continue;
                 const float yf = static_cast<float>(yo) / (aHf * 0.5F);
-                float scale;
+                float scale = NAN;
                 if (yf < -0.6F) scale = 1.05F + 0.15F * (-yf - 0.6F);  // top crown
                 else if (yf < 0.1F) scale = 0.55F + 0.3F * (yf + 0.6F);  // narrow waist
                 else scale = 0.85F + 0.20F * yf;  // base

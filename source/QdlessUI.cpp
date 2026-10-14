@@ -198,7 +198,7 @@ void UI::drawTimeline(const std::string& label, int idx, int total)
   if (total > 1)
   {
     int barWidth = itsLayout.time.width - 4;
-    if (barWidth < 4) barWidth = 4;
+    barWidth = std::max(barWidth, 4);
     int pos = idx * (barWidth - 1) / (total - 1);
     wattron(itsTimeWin, itsBoxAttr);
     mvwaddstr(itsTimeWin, 1, 1, "├");
@@ -304,7 +304,7 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
 
   while (true)
   {
-    if (sel < scroll) scroll = sel;
+    scroll = std::min(sel, scroll);
     if (sel >= scroll + innerH) scroll = sel - innerH + 1;
 
     std::ostringstream os;
@@ -439,7 +439,7 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
       if (onSelect)
       {
         wtimeout(itsStatusWin, 0);
-        int next;
+        int next = 0;
         while ((next = wgetch(itsStatusWin)) != ERR)
         {
           if (!applyMove(next))
@@ -520,7 +520,7 @@ int UI::popupMenuSections(const std::string& title, const std::vector<MenuRow>& 
 
   while (true)
   {
-    if (sel < scroll) scroll = sel;
+    scroll = std::min(sel, scroll);
     if (sel >= scroll + innerH) scroll = sel - innerH + 1;
 
     std::ostringstream os;
@@ -651,7 +651,7 @@ int UI::popupMenuSections(const std::string& title, const std::vector<MenuRow>& 
       if (onSelect)
       {
         wtimeout(itsStatusWin, 0);
-        int next;
+        int next = 0;
         while ((next = wgetch(itsStatusWin)) != ERR)
         {
           if (!applyMove(next))
@@ -773,7 +773,7 @@ int UI::popupSearch(const std::string& title,
     const int bodyRows = height - 4 - kFooterRows - headerRows;
     // Keep the selected row inside the visible window. When the user
     // arrows past the bottom, scroll down by one; same on the way up.
-    if (sel < scroll) scroll = sel;
+    scroll = std::min(sel, scroll);
     if (sel >= scroll + bodyRows) scroll = sel - bodyRows + 1;
     if (matches.empty()) scroll = 0;
     // When the query filters everything away, leaving the body
@@ -1537,9 +1537,9 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
   int scroll = 0;
   while (true)
   {
-    if (scroll < 0) scroll = 0;
+    scroll = std::max(scroll, 0);
     const int maxScroll = std::max(0, static_cast<int>(rows.size()) - n);
-    if (scroll > maxScroll) scroll = maxScroll;
+    scroll = std::min(scroll, maxScroll);
 
     std::ostringstream os;
 
@@ -1568,7 +1568,7 @@ void UI::popupLegend(const std::string& paramName, const std::string& paletteNam
     // shown in the body, counting from the top of the list.
     for (int i = 0; i < n; ++i)
     {
-      int rowIdx;
+      int rowIdx = 0;
       if (hasLabels)
         rowIdx = scroll + i;
       else
@@ -1686,15 +1686,22 @@ bool finiteValue(float v)
 }
 }  // namespace
 
-int UI::popupTimeseries(const std::string& paramName, double lat, double lon,
+int UI::popupTimeseries(const std::string& paramName,
+                        double lat,
+                        double lon,
                         const std::vector<float>& series,
-                        const std::vector<std::string>& timeLabels, int currentIndex,
-                        const Renderer& renderer, const Palette& palette,
+                        const std::vector<std::string>& timeLabels,
+                        int currentIndex,
+                        const Renderer& /*renderer*/,
+                        const Palette& palette,
                         std::function<void(int)> onTimeChange,
                         std::function<StatsSeries()> computeStats,
-                        const std::string& units, int* animationDelayMs,
-                        int avoidCellRow, int avoidCellCol,
-                        int* outClickRow, int* outClickCol)
+                        const std::string& units,
+                        int* animationDelayMs,
+                        int avoidCellRow,
+                        int avoidCellCol,
+                        int* outClickRow,
+                        int* outClickCol)
 {
   (void)palette;  // reserved for future colour-by-band line rendering
   if (outClickRow) *outClickRow = -1;

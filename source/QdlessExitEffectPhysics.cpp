@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include "QdlessExitEffectCommon.h"
 
 namespace Qdless
@@ -1026,7 +1028,7 @@ void effectSchrodinger(const Renderer& renderer, const std::vector<Rgb>& src, in
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n)
   { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
-  const bool alive = hash(static_cast<int>(w * 31 + h * 17)) > 0.5F;
+  const bool alive = hash((w * 31 + h * 17)) > 0.5F;
   runFrames(
       renderer, w, h, 5400,
       [&](float t, std::vector<Rgb>& dst)
@@ -1182,7 +1184,7 @@ void effectDodecahedron(const Renderer& renderer, const std::vector<Rgb>& src, i
         };
         for (const auto& e : edges)
         {
-          float x0, y0, x1, y1;
+          float x0 = NAN, y0 = NAN, x1 = NAN, y1 = NAN;
           const float z0 = project(e.first, x0, y0);
           const float z1 = project(e.second, x1, y1);
           const float zAvg = (z0 + z1) * 0.5F;
@@ -1481,7 +1483,7 @@ void effectFourier(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       });
 }
 
-void effectPi(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+void effectPi(const Renderer& renderer, const std::vector<Rgb>& /*src*/, int w, int h)
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
@@ -1609,10 +1611,10 @@ void effectGoldenSpiral(const Renderer& renderer, const std::vector<Rgb>& src, i
           // Arc — quarter circle inside the rectangle.
           for (float a = 0; a <= 1.5708F; a += 0.04F)
           {
-            float ax, ay;
+            float ax = NAN, ay = NAN;
             // Centre of arc depends on which direction.
-            float ccx, ccy;
-            float startAng;
+            float ccx = NAN, ccy = NAN;
+            float startAng = NAN;
             if (dir == 0) { ccx = x1; ccy = y0 + L; startAng = -1.5708F; }
             else if (dir == 1) { ccx = x1 - L; ccy = y1; startAng = 0; }
             else if (dir == 2) { ccx = x1; ccy = y0 - L; startAng = 1.5708F; }
@@ -1629,7 +1631,7 @@ void effectGoldenSpiral(const Renderer& renderer, const std::vector<Rgb>& src, i
       });
 }
 
-void effectDoubleSlit(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+void effectDoubleSlit(const Renderer& renderer, const std::vector<Rgb>& /*src*/, int w, int h)
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
@@ -1742,7 +1744,7 @@ void effectSierpinski(const Renderer& renderer, const std::vector<Rgb>& src, int
         for (int i = 0; i < nPts; ++i)
         {
           const int k = static_cast<int>(hash(i * 7) * 3) % 3;
-          float tx, tyv;
+          float tx = NAN, tyv = NAN;
           if (k == 0) { tx = v0x; tyv = v0y; }
           else if (k == 1) { tx = v1x; tyv = v1y; }
           else { tx = v2x; tyv = v2y; }
@@ -1822,7 +1824,7 @@ void effectBrachistochrone(const Renderer& renderer, const std::vector<Rgb>& src
       });
 }
 
-void effectChladni(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
+void effectChladni(const Renderer& renderer, const std::vector<Rgb>& /*src*/, int w, int h)
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
@@ -1845,7 +1847,7 @@ void effectChladni(const Renderer& renderer, const std::vector<Rgb>& src, int w,
           }
         // Mode (n, m) cycles over time.
         const int stage = static_cast<int>(t * 4.0F);
-        int n, m;
+        int n = 0, m = 0;
         switch (stage % 4)
         {
           case 0: n = 3; m = 2; break;
@@ -3052,7 +3054,7 @@ void effectDayTerminator(const Renderer& renderer, const std::vector<Rgb>& src, 
       const float sunDz3 = std::cos(slatR) * std::cos(slonR);
       for (int yy = 0; yy < h; ++yy)
         for (int xx = 0; xx < w; ++xx) {
-          float lat, lon;
+          float lat = NAN, lon = NAN;
           if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
           const float latR = lat * 3.14159F / 180.0F;
           const float lonR = lon * 3.14159F / 180.0F;
@@ -3094,7 +3096,7 @@ void effectIssTrack(const Renderer& renderer, const std::vector<Rgb>& src, int w
       const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
       for (int yy = 0; yy < h; ++yy)
         for (int xx = 0; xx < w; ++xx) {
-          float lat, lon;
+          float lat = NAN, lon = NAN;
           if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
@@ -3109,7 +3111,7 @@ void effectIssTrack(const Renderer& renderer, const std::vector<Rgb>& src, int w
           const float ph = k / 200.0F;
           const float lat = inc * std::sin(ph * 6.2832F);
           const float lon = std::fmod(ph * 360.0F - 22.5F * orbit + 540.0F, 360.0F) - 180.0F;
-          float px, py;
+          float px = NAN, py = NAN;
           if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py))
             plotDot(dst, w, h, px, py, std::max(1.0F, mn * 0.003F), ya,
                     Rgb{u8(180 - orbit * 50), u8(180 - orbit * 50), u8(220 - orbit * 30), false});
@@ -3119,7 +3121,7 @@ void effectIssTrack(const Renderer& renderer, const std::vector<Rgb>& src, int w
       const float ph = std::fmod(t * 2.0F, 1.0F);
       const float lat = inc * std::sin(ph * 6.2832F);
       const float lon = std::fmod(ph * 360.0F + 540.0F, 360.0F) - 180.0F;
-      float px, py;
+      float px = NAN, py = NAN;
       if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py)) {
         plotDot(dst, w, h, px, py, mn * 0.012F, ya, Rgb{255, 240, 160, false});
         // Glint trail.
@@ -3127,7 +3129,7 @@ void effectIssTrack(const Renderer& renderer, const std::vector<Rgb>& src, int w
           const float ph2 = ph - k * 0.005F;
           const float la2 = inc * std::sin(ph2 * 6.2832F);
           const float lo2 = std::fmod(ph2 * 360.0F + 540.0F, 360.0F) - 180.0F;
-          float px2, py2;
+          float px2 = NAN, py2 = NAN;
           if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, la2, lo2, px2, py2))
             plotDot(dst, w, h, px2, py2, mn * 0.006F * (1 - k * 0.12F), ya, Rgb{220, 200, 100, false});
         }
@@ -3209,7 +3211,7 @@ void effectPangaea(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       // Ocean fill.
       for (int yy = 0; yy < h; ++yy)
         for (int xx = 0; xx < w; ++xx) {
-          float lat, lon;
+          float lat = NAN, lon = NAN;
           if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
@@ -3232,7 +3234,7 @@ void effectPangaea(const Renderer& renderer, const std::vector<Rgb>& src, int w,
         // Start: clumped near 0, 0 (Pangaea). End: at modern location.
         const float curLat = drift * c.driftLat;
         const float curLon = drift * c.driftLon;
-        float px, py;
+        float px = NAN, py = NAN;
         if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, curLat, curLon, px, py))
           drawDataDisk(dst, w, h, src, px, py, c.r, ya, 0.75F, 0.0F,
                        Rgb{140, 120, 70, false});
@@ -3269,7 +3271,7 @@ void effectRingOfFire(const Renderer& renderer, const std::vector<Rgb>& src, int
       const float cLat = 1.0F, sLat = 0.0F;
       for (int yy = 0; yy < h; ++yy)
         for (int xx = 0; xx < w; ++xx) {
-          float lat, lon;
+          float lat = NAN, lon = NAN;
           if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
@@ -3282,7 +3284,7 @@ void effectRingOfFire(const Renderer& renderer, const std::vector<Rgb>& src, int
           {-5,-80},{-20,-72},{-35,-72},{-45,-75},
           {-40,170},{-20,165},{0,150},{10,140},{20,140},{30,135},{40,140},{50,155},{55,160}};
       for (size_t i = 0; i < vol.size(); ++i) {
-        float px, py;
+        float px = NAN, py = NAN;
         if (!globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, vol[i].first, vol[i].second, px, py)) continue;
         // Steady volcano marker.
         plotDot(dst, w, h, px, py, mn * 0.008F, ya, Rgb{180, 80, 40, false});

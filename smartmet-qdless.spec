@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.10.1
-Release: 2%{?dist}.fmi
+Version: 26.10.14
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -39,12 +39,12 @@ BuildRequires: ncurses-devel
 BuildRequires: netcdf-cxx4-devel
 BuildRequires: netcdf-devel >= 4.3.3.1
 BuildRequires: rpm-build
-BuildRequires: smartmet-library-calculator-devel >= 26.4.13
+BuildRequires: smartmet-library-calculator-devel >= 26.10.13
 BuildRequires: smartmet-library-gis-devel >= 26.9.26
-BuildRequires: smartmet-library-grid-files-devel >= 26.9.26
+BuildRequires: smartmet-library-grid-files-devel >= 26.10.13
 BuildRequires: smartmet-library-macgyver-devel >= 26.9.26-2
-BuildRequires: smartmet-library-newbase-devel >= 26.2.4
-BuildRequires: smartmet-library-smarttools-devel >= 26.4.13
+BuildRequires: smartmet-library-newbase-devel >= 26.10.13
+BuildRequires: smartmet-library-smarttools-devel >= 26.10.13
 BuildRequires: smartmet-timezones
 BuildRequires: zlib-devel
 
@@ -69,12 +69,12 @@ Requires: libstdc++
 Requires: ncurses-libs
 Requires: netcdf >= 4.3.3.1
 Requires: netcdf-cxx4
-Requires: smartmet-library-calculator >= 26.4.13
+Requires: smartmet-library-calculator >= 26.10.13
 Requires: smartmet-library-gis >= 26.9.26
-Requires: smartmet-library-grid-files >= 26.9.26
+Requires: smartmet-library-grid-files >= 26.10.13
 Requires: smartmet-library-macgyver >= 26.9.26-2
-Requires: smartmet-library-newbase >= 26.2.4
-Requires: smartmet-library-smarttools >= 26.4.13
+Requires: smartmet-library-newbase >= 26.10.13
+Requires: smartmet-library-smarttools >= 26.10.13
 Requires: smartmet-timezones >= 26.9.26
 Requires: zlib
 
@@ -115,6 +115,10 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Wed Oct 14 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.14-1.fmi
+- Fixed mechanical clang-tidy findings (internal linkage, unused parameters, initialization, redundant code), no functional changes
+- Requires 26.10.13 versions of newbase, calculator, smarttools, grid-files due to their ABI changes
+
 * Thu Oct 1 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.1-2.fmi
 - The 14 globe weather exit effects (El Nino, Monsoon, ITCZ, MJO, Walker Cell, AMOC, Saharan Dust, Wildfire Smoke, Krakatoa, Hurricane Tracks, Sea Ice, Ozone Hole, Auroral Oval, Jet Stream) are rewritten on a lit orthographic Earth with real coastlines: the crude GSHHS file is rasterised through LandSea on first use (~40 ms, threaded) and coloured by a coarse biome model, with seamless noise fields for clouds and plumes, a day/night terminator, ocean glint and atmospheric rim. Each effect animates its phenomenon in latitude/longitude instead of drawing box-shaped continents
 - The exit-effect toolkit moved to QdlessExitEffectKit.h; setExitEffectCoastlineDir passes --coastline-dir to the effects

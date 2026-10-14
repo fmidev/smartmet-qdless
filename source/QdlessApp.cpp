@@ -690,7 +690,7 @@ void App::initFromSource()
   // cycling GSHHS political borders / coastlines unchanged. Drawn
   // last in the overlay stack (on top of GSHHS) since the user is
   // here to look at the shape, not the country lines.
-  if (auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()))
+  if (const auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()))
     itsShapeOutlines = shp->outlines();
 
   // Seed live overlay styles from CLI flags. After startup these are
@@ -1637,7 +1637,7 @@ void App::loadPalette()
   // palette directly. The qdless.conf parameter→palette table doesn't
   // apply (the "parameter" is a feature ID, not a meteorological
   // quantity) and the unit-guess machinery would just no-op.
-  if (auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()); shp != nullptr)
+  if (const auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()); shp != nullptr)
   {
     panel.valueScale = 1.0F;
     panel.valueOffset = 0.0F;
@@ -3801,7 +3801,7 @@ std::string App::buildCityLabels(int cellW, int cellH, int originRow, int origin
     for (const auto& [dx, dy] : kOffsets)
     {
       const int rowY = cellY + dy;
-      int startX;
+      int startX = 0;
       if (dx >= 0)
         startX = cellX + dx;
       else
@@ -4436,7 +4436,7 @@ void App::openProbe(int cellX, int cellY, UI& ui)
   // Shapefile sources don't have a scalar time axis either — every
   // burn id is a feature index, not a measurement. Repurpose the
   // click as "show this polygon's .dbf attributes".
-  if (auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()))
+  if (const auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get()))
   {
     auto attrs = shp->attributesAt(lat, lon);
     if (attrs.empty())
@@ -5432,7 +5432,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       // search query as a substring match against the whole row.
       // On Enter we drop the marker on the picked feature's centroid
       // and pop up its full attribute table (popupMetadata).
-      auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get());
+      const auto* shp = dynamic_cast<const ShapeSource*>(itsSource.get());
       if (shp == nullptr)
       {
         itsLastMessage = "Attributes table is only available for shapefiles";
@@ -5682,7 +5682,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case KEY_NPAGE:
     {
       // Denser: step N up.
-      auto it = std::upper_bound(kCityNSteps.begin(), kCityNSteps.end(), itsCityOverlayN);
+      const auto* it = std::upper_bound(kCityNSteps.begin(), kCityNSteps.end(), itsCityOverlayN);
       if (it != kCityNSteps.end())
         itsCityOverlayN = *it;
       itsShowCities = true;
@@ -5692,7 +5692,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
     case KEY_PPAGE:
     {
       // Sparser: step N down.
-      auto it = std::lower_bound(kCityNSteps.begin(), kCityNSteps.end(), itsCityOverlayN);
+      const auto* it = std::lower_bound(kCityNSteps.begin(), kCityNSteps.end(), itsCityOverlayN);
       if (it != kCityNSteps.begin())
       {
         --it;

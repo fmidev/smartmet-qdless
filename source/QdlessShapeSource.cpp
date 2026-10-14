@@ -314,7 +314,7 @@ void collectLeavesForRaster(OGRLayer* layer, OGRSpatialReference* dst,
 {
   if (layer == nullptr) return;
   std::unique_ptr<OGRCoordinateTransformation> ct;
-  if (auto* src = layer->GetSpatialRef(); src != nullptr && !src->IsSame(dst))
+  if (const auto* src = layer->GetSpatialRef(); src != nullptr && !src->IsSame(dst))
   {
     auto* clone = src->Clone();
     clone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
@@ -732,8 +732,8 @@ Palette ShapeSource::rainbowPalette() const
       if (v.empty()) continue;
       bool numeric = true;
       for (char c : v)
-        if (!(std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == ',' ||
-              c == '-' || c == ' '))
+        if (!std::isdigit(static_cast<unsigned char>(c)) && c != '.' && c != ',' && c != '-' &&
+            c != ' ')
         {
           numeric = false;
           break;
