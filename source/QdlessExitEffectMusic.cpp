@@ -288,8 +288,11 @@ void effectBassSpiral(const Renderer& renderer, const std::vector<Rgb>& src, int
 {
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   const float ya = yAspectFor(renderer);
-  const float cx = w * 0.5F, cy = h * 0.5F, mn = std::min(static_cast<float>(w), h * ya);
-  const float eyeR = mn * 0.48F, irisR = mn * 0.27F;
+  const float cx = w * 0.5F;
+  const float cy = h * 0.5F;
+  const float mn = std::min(static_cast<float>(w), h * ya);
+  const float eyeR = mn * 0.48F;
+  const float irisR = mn * 0.27F;
   runFrames(renderer,
             w,
             h,
@@ -300,7 +303,9 @@ void effectBassSpiral(const Renderer& renderer, const std::vector<Rgb>& src, int
               for (int y = 0; y < h; ++y)
                 for (int x = 0; x < w; ++x)
                 {
-                  const float dx = x - cx, dy = (y - cy) * ya, r = std::hypot(dx, dy);
+                  const float dx = x - cx;
+                  const float dy = (y - cy) * ya;
+                  const float r = std::hypot(dx, dy);
                   Rgb base;
                   if (r < irisR)
                   {
@@ -343,7 +348,8 @@ void effectSinginRain(const Renderer& renderer, const std::vector<Rgb>& src, int
             5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              const float lantX = postX, lantY = h * 0.22F;
+              const float lantX = postX;
+              const float lantY = h * 0.22F;
               for (int y = 0; y < h; ++y)
                 for (int x = 0; x < w; ++x)
                 {
@@ -367,7 +373,8 @@ void effectSinginRain(const Renderer& renderer, const std::vector<Rgb>& src, int
                       ya,
                       Rgb{18, 16, 18, false});
               plotDot(dst, w, h, lantX, lantY, mn * 0.06F, ya, Rgb{255, 230, 150, false});
-              const float barX = postX - mn * 0.16F, barY = h * 0.26F;
+              const float barX = postX - mn * 0.16F;
+              const float barY = h * 0.26F;
               drawSeg(dst,
                       w,
                       h,
@@ -380,7 +387,8 @@ void effectSinginRain(const Renderer& renderer, const std::vector<Rgb>& src, int
                       Rgb{18, 16, 18, false});
               const float swing = std::sin(t * 2.2F) * 0.45F;
               const float L = mn * 0.20F;
-              const float bodyX = barX + std::sin(swing) * L, bodyY = barY + std::cos(swing) * L;
+              const float bodyX = barX + std::sin(swing) * L;
+              const float bodyY = barY + std::cos(swing) * L;
               const Rgb suit{30, 26, 32, false};
               drawSeg(dst, w, h, barX, barY, bodyX, bodyY, std::max(1.0F, mn * 0.020F), ya, suit);
               plotDot(dst,
@@ -414,7 +422,8 @@ void effectSinginRain(const Renderer& renderer, const std::vector<Rgb>& src, int
                       std::max(1.0F, mn * 0.014F),
                       ya,
                       suit);
-              const float uHand = bodyX - mn * 0.10F, uHandY = bodyY - mn * 0.05F;
+              const float uHand = bodyX - mn * 0.10F;
+              const float uHandY = bodyY - mn * 0.05F;
               drawSeg(dst,
                       w,
                       h,
@@ -457,7 +466,8 @@ void effectSoundOfMusic(const Renderer& renderer, const std::vector<Rgb>& src, i
   const float ya = yAspectFor(renderer);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   const float mn = std::min(static_cast<float>(w), h * ya);
-  const float cx = w * 0.5F, cy = h * 0.55F;
+  const float cx = w * 0.5F;
+  const float cy = h * 0.55F;
   runFrames(
       renderer,
       w,
@@ -466,12 +476,15 @@ void effectSoundOfMusic(const Renderer& renderer, const std::vector<Rgb>& src, i
       [&](float t, std::vector<Rgb>& dst)
       {
         const float rot = t * 4.0F;
-        const float ca = std::cos(rot), sa = std::sin(rot);
+        const float ca = std::cos(rot);
+        const float sa = std::sin(rot);
         for (int y = 0; y < h; ++y)
           for (int x = 0; x < w; ++x)
           {
-            const float dx = x - cx, dy = (y - cy) * ya;
-            const float rx = dx * ca - dy * sa, ry = dx * sa + dy * ca;
+            const float dx = x - cx;
+            const float dy = (y - cy) * ya;
+            const float rx = dx * ca - dy * sa;
+            const float ry = dx * sa + dy * ca;
             const Rgb s = sample(src, w, h, cx + rx, cy + ry / ya);
             const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
             const float sf = std::clamp(0.5F + (cy + ry / ya) / h * 0.5F, 0.0F, 1.0F);
@@ -490,7 +503,8 @@ void effectSoundOfMusic(const Renderer& renderer, const std::vector<Rgb>& src, i
           }
         // the figure: a small spinning silhouette at centre, arms outstretched
         const float ht = mn * 0.14F;
-        const Rgb maria{18, 14, 18, false}, dress{40, 70, 130, false};
+        const Rgb maria{18, 14, 18, false};
+        const Rgb dress{40, 70, 130, false};
         const float armSpin = std::sin(t * 6.0F) * 0.06F;  // little wobble
         const float fy = cy + ht * 0.4F;
         plotDot(dst, w, h, cx, fy - ht * 1.0F, ht * 0.13F, ya, maria);  // head
@@ -585,9 +599,11 @@ void effectConductorBaton(const Renderer& renderer, const std::vector<Rgb>& src,
         }
       // 4/4 pattern path: down-right-left-up.
       const float beat = std::fmod(t * 4.0F, 4.0F);
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.25F;
-      float bx = cx, by = cy;
+      float bx = cx;
+      float by = cy;
       if (beat < 1) { by = cy - R + beat * 2 * R; }                                   // down
       else if (beat < 2) { by = cy + R; bx = cx + (beat - 1) * R; }                   // right
       else if (beat < 3) { by = cy + R - (beat - 2) * 2 * R; bx = cx + R; }           // up-right
@@ -618,15 +634,18 @@ void effectHendrixGuitar(const Renderer& renderer, const std::vector<Rgb>& src, 
               Rgb{u8(30 + l * 0.10F), u8(20 + l * 0.05F), u8(20 + l * 0.05F), false};
         }
       // Guitar body (Strat-shape, simplified).
-      const float cx = w * 0.5F, cy = h * 0.55F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.55F;
       const Rgb body{180, 80, 40, false};
       const float bL = mn * 0.30F;
       // Body oval.
       for (int yo = -static_cast<int>(bL * 0.18F); yo <= static_cast<int>(bL * 0.18F); ++yo)
         for (int xo = -static_cast<int>(bL * 0.30F); xo <= static_cast<int>(bL * 0.30F); ++xo) {
-          const float nx = xo / (bL * 0.30F), nyN = yo / (bL * 0.18F);
+          const float nx = xo / (bL * 0.30F);
+          const float nyN = yo / (bL * 0.18F);
           if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = body;
         }
@@ -801,15 +820,18 @@ void effectStradivarius(const Renderer& renderer, const std::vector<Rgb>& src, i
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(20 + l * 0.10F), u8(15 + l * 0.05F), u8(10 + l * 0.03F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.55F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.55F;
       const float vL = mn * 0.30F;
       // Violin body — two ovals (upper bout, lower bout) + waist.
       auto drawBout = [&](float yc, float rx, float ry) {
         for (int yo = -static_cast<int>(ry); yo <= static_cast<int>(ry); ++yo)
           for (int xo = -static_cast<int>(rx); xo <= static_cast<int>(rx); ++xo) {
-            const float nx = xo / rx, nyN = yo / ry;
+            const float nx = xo / rx;
+            const float nyN = yo / ry;
             if (nx * nx + nyN * nyN > 1.0F) continue;
-            const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(yc + yo);
+            const int xx = static_cast<int>(cx + xo);
+            const int yy = static_cast<int>(yc + yo);
             if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
             const Rgb d = sample(src, w, h, xx, yy);
             const float dr = d.transparent ? 180.0F : d.r;
@@ -861,7 +883,8 @@ void effectTheremin(const Renderer& renderer, const std::vector<Rgb>& src, int w
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(30 + l * 0.05F), u8(20 + l * 0.10F), u8(40 + l * 0.15F), false};
         }
-      const float boxX = w * 0.50F, boxY = h * 0.70F;
+      const float boxX = w * 0.50F;
+      const float boxY = h * 0.70F;
       // Box (data-textured).
       for (int yo = -static_cast<int>(mn * 0.06F); yo <= 0; ++yo)
         for (int xo = -static_cast<int>(mn * 0.12F); xo <= static_cast<int>(mn * 0.12F); ++xo) {
@@ -934,9 +957,11 @@ void effectValkyrieRide(const Renderer& renderer, const std::vector<Rgb>& src, i
       // Horse body.
       for (int yo = -static_cast<int>(bL * 0.15F); yo <= static_cast<int>(bL * 0.15F); ++yo)
         for (int xo = -static_cast<int>(bL * 0.45F); xo <= static_cast<int>(bL * 0.30F); ++xo) {
-          const float nx = xo / (bL * 0.45F), nyN = yo / (bL * 0.15F);
+          const float nx = xo / (bL * 0.45F);
+          const float nyN = yo / (bL * 0.15F);
           if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = body;
         }
@@ -980,12 +1005,14 @@ void effectVinylSpin(const Renderer& renderer, const std::vector<Rgb>& src, int 
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(30 + l * 0.10F), u8(20 + l * 0.08F), u8(40 + l * 0.10F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.35F;
       // LP disk.
       for (int yy = static_cast<int>(cy - R / ya); yy <= static_cast<int>(cy + R / ya); ++yy)
         for (int xx = static_cast<int>(cx - R); xx <= static_cast<int>(cx + R); ++xx) {
-          const float dx = xx - cx, dy = (yy - cy) * ya;
+          const float dx = xx - cx;
+          const float dy = (yy - cy) * ya;
           const float r = std::sqrt(dx * dx + dy * dy);
           if (r > R) continue;
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;

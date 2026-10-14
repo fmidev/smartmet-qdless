@@ -125,7 +125,8 @@ void effectTreeOfLife(const Renderer& renderer, const std::vector<Rgb>& src, int
                   dst[static_cast<std::size_t>(y) * w + x] =
                       Rgb{u8(20 + l * 0.10F), u8(22 + l * 0.10F), u8(20 + l * 0.06F), false};
                 }
-              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.5F;
               const float maxR = std::min(w, h) * 0.40F;
               // Recursive-ish branching: start at centre, fan out.
               const Rgb branch{220, 200, 140, false};
@@ -188,7 +189,8 @@ void effectFinches(const Renderer& renderer, const std::vector<Rgb>& src, int w,
                     u8(240 + l * 0.10F * dim), false};
           }
         // Common ancestor at centre.
-        const float cx = w * 0.5F, cy = h * 0.5F;
+        const float cx = w * 0.5F;
+        const float cy = h * 0.5F;
         drawDataDisk(dst, w, h, src, cx, cy, mn * 0.05F, ya, 0.7F, 0.0F,
                      Rgb{120, 80, 60, false});
         // Four offspring at corners.
@@ -356,7 +358,8 @@ void effectOutOfAfrica(const Renderer& renderer, const std::vector<Rgb>& src, in
               for (int y = 0; y < h; ++y)
                 for (int x = 0; x < w; ++x)
                   dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 10, 22, false};
-              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.5F;
               const float R = std::min(w, h) * 0.40F;
               // Earth globe — data-textured.
               drawDataDisk(dst, w, h, src, cx, cy, R, ya, 0.85F, t * 0.4F,
@@ -411,7 +414,8 @@ void effectCellDivides(const Renderer& renderer, const std::vector<Rgb>& src, in
               const int stage = std::min(5, static_cast<int>(t * 6.0F));
               const int nCells = 1 << stage;  // 1, 2, 4, 8, 16, 32
               const float cellR = mn * (0.30F / std::sqrt(static_cast<float>(nCells)));
-              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.5F;
               const Rgb tint{180, 200, 220, false};
               for (int i = 0; i < nCells; ++i)
               {
@@ -459,8 +463,10 @@ void effectPunctuated(const Renderer& renderer, const std::vector<Rgb>& src, int
                     u8(32 + l * 0.10F * dim), false};
           }
         // Axes.
-        const float ax0 = w * 0.10F, ax1 = w * 0.92F;
-        const float ay0 = h * 0.85F, ay1 = h * 0.15F;
+        const float ax0 = w * 0.10F;
+        const float ax1 = w * 0.92F;
+        const float ay0 = h * 0.85F;
+        const float ay1 = h * 0.15F;
         drawSeg(dst, w, h, ax0, ay0, ax1, ay0, std::max(1.0F, mn * 0.004F), ya,
                 Rgb{220, 220, 220, false});
         drawSeg(dst, w, h, ax0, ay0, ax0, ay1, std::max(1.0F, mn * 0.004F), ya,
@@ -471,7 +477,8 @@ void effectPunctuated(const Renderer& renderer, const std::vector<Rgb>& src, int
                                                   Step{0.45F, 0.55F}, Step{0.70F, 0.75F},
                                                   Step{0.90F, 0.90F}};
         const float reveal = std::clamp(t * 1.2F, 0.0F, 1.0F);
-        float prevX = ax0, prevY = ay0 - (ay0 - ay1) * steps[0].level;
+        float prevX = ax0;
+        float prevY = ay0 - (ay0 - ay1) * steps[0].level;
         for (std::size_t i = 0; i < steps.size(); ++i)
         {
           const float sx = ax0 + (ax1 - ax0) * steps[i].fracX;
@@ -578,7 +585,8 @@ void effectDarwin(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
                           u8(95 + l * 0.10F * dim), false};
                 }
               const float fade = std::clamp(t * 1.6F, 0.0F, 1.0F);
-              const float cx = w * 0.5F, cy = h * 0.42F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.42F;
               const float S = mn * 0.30F;
               const Rgb ink{30, 20, 14, false};
               // Head (top dome).
@@ -641,7 +649,8 @@ void effectPeacock(const Renderer& renderer, const std::vector<Rgb>& src, int w,
                   dst[static_cast<std::size_t>(y) * w + x] =
                       Rgb{u8(20 + l * 0.10F), u8(28 + l * 0.10F), u8(40 + l * 0.10F), false};
                 }
-              const float cx = w * 0.5F, cy = h * 0.82F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.82F;
               const float spread = std::clamp(t * 1.2F, 0.0F, 1.0F);
               const int N = 80;
               for (int i = 0; i < N; ++i)
@@ -689,7 +698,8 @@ void effectMendel(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
                   dst[static_cast<std::size_t>(y) * w + x] =
                       Rgb{u8(220 + l * 0.08F), u8(212 + l * 0.08F), u8(186 + l * 0.06F), false};
                 }
-              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.5F;
               const float S = std::min(w, h) * 0.30F;
               // 2x2 grid.
               const Rgb ink{40, 30, 20, false};
@@ -909,7 +919,8 @@ void effectEndosymbiosis(const Renderer& renderer, const std::vector<Rgb>& src, 
                       Rgb{u8(40 + l * 0.10F * dim), u8(60 + l * 0.10F * dim),
                           u8(50 + l * 0.10F * dim), false};
                 }
-              const float hostCx = w * 0.45F, hostCy = h * 0.5F;
+              const float hostCx = w * 0.45F;
+              const float hostCy = h * 0.5F;
               const float hostR = mn * 0.22F;
               // Host cell (data-textured).
               drawDataDisk(dst, w, h, src, hostCx, hostCy, hostR, ya, 0.70F, t * 0.3F,
@@ -954,7 +965,8 @@ void effectLucy(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
                   dst[static_cast<std::size_t>(y) * w + x] =
                       Rgb{u8(170 + l * 0.10F), u8(140 + l * 0.10F), u8(90 + l * 0.08F), false};
                 }
-              const float cx = w * 0.5F, baseY = h * 0.92F;
+              const float cx = w * 0.5F;
+              const float baseY = h * 0.92F;
               const float H = mn * 0.50F;
               const Rgb bone{220, 215, 195, false};
               // Skull.
@@ -996,7 +1008,8 @@ void effectLucy(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
                 const std::string line = "3.2 MA";
                 const int sc = std::max(3, static_cast<int>(mn / 25.0F));
                 const float lineW = static_cast<float>(line.size()) * 6 * sc;
-                const float bx = cx + H * 0.20F, by = baseY - H * 0.90F;
+                const float bx = cx + H * 0.20F;
+                const float by = baseY - H * 0.90F;
                 for (int xo = -static_cast<int>(lineW * 0.55F);
                      xo <= static_cast<int>(lineW * 0.55F); ++xo)
                   for (int yo = -static_cast<int>(sc * 5); yo <= static_cast<int>(sc * 5); ++yo)
@@ -1040,7 +1053,8 @@ void effectMitochondrialEve(const Renderer& renderer, const std::vector<Rgb>& sr
             dst[static_cast<std::size_t>(y) * w + x] =
                 Rgb{u8(20 + l * 0.10F), u8(20 + l * 0.10F), u8(28 + l * 0.10F), false};
           }
-        const float cx = w * 0.5F, cy = h * 0.5F;
+        const float cx = w * 0.5F;
+        const float cy = h * 0.5F;
         const int N = 24;
         for (int i = 0; i < N; ++i)
         {
@@ -1216,7 +1230,8 @@ void effectCetacean(const Renderer& renderer, const std::vector<Rgb>& src, int w
           for (int yo = -static_cast<int>(mn * 0.03F); yo <= static_cast<int>(mn * 0.03F); ++yo)
             for (int xo = -static_cast<int>(bodyL); xo <= static_cast<int>(bodyL); ++xo)
             {
-              const float nx = xo / bodyL, ny = yo / (mn * 0.03F);
+              const float nx = xo / bodyL;
+              const float ny = yo / (mn * 0.03F);
               if (nx * nx + ny * ny > 1.0F) continue;
               const int xx = static_cast<int>(cx + xo);
               const int yy = static_cast<int>(cy + yo);

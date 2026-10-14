@@ -155,7 +155,10 @@ const std::vector<S3fsMount>& s3fsMounts()
       const std::size_t first = line.find_first_not_of(" \t");
       if (first == std::string::npos || line[first] == '#') continue;
       std::istringstream ls(line);
-      std::string device, mountpoint, fstype, options;
+      std::string device;
+      std::string mountpoint;
+      std::string fstype;
+      std::string options;
       if (!(ls >> device >> mountpoint >> fstype >> options)) continue;
       if (device.rfind("s3fs", 0) != 0) continue;  // not an s3fs entry
       S3fsMount m;

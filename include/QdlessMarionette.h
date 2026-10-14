@@ -73,7 +73,8 @@ struct MarionettePose
 inline double bvhReferenceHeight(const BvhAnimation& a)
 {
   if (a.frameCount == 0) return 1.0;
-  double minY = 1e30, maxY = -1e30;
+  double minY = 1e30;
+  double maxY = -1e30;
   const int sample = std::min(a.frameCount, 30);  // first ~0.5 s
   for (int f = 0; f < sample; ++f)
   {
@@ -200,7 +201,8 @@ inline void fillQuad(std::vector<Rgb>& dst, int w, int h,
 {
   const double xs[4] = {v0x, v1x, v2x, v3x};
   const double ys[4] = {v0y, v1y, v2y, v3y};
-  double minY = ys[0], maxY = ys[0];
+  double minY = ys[0];
+  double maxY = ys[0];
   for (int i = 1; i < 4; ++i)
   {
     minY = std::min(ys[i], minY);
@@ -210,7 +212,8 @@ inline void fillQuad(std::vector<Rgb>& dst, int w, int h,
   const int ymax = std::min(h - 1, static_cast<int>(std::ceil(maxY)));
   for (int y = ymin; y <= ymax; ++y)
   {
-    double xL = 1e30, xR = -1e30;
+    double xL = 1e30;
+    double xR = -1e30;
     for (int e = 0; e < 4; ++e)
     {
       const int e2 = (e + 1) % 4;

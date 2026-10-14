@@ -266,8 +266,12 @@ std::vector<DataSource::LevelGroup> MasalaSource::levelGroupsForParam(int paramI
   {
     LevelGroup g;
     g.typeId = ax.typeId;
-    g.typeName = ax.typeId != 0 ? DataSource::levelTypeName(ax.typeId)
-                                : (ax.typeToken.empty() ? "Levels" : ax.typeToken);
+    if (ax.typeId != 0)
+      g.typeName = DataSource::levelTypeName(ax.typeId);
+    else if (ax.typeToken.empty())
+      g.typeName = "Levels";
+    else
+      g.typeName = ax.typeToken;
     g.values.assign(ax.levelVals.begin(), ax.levelVals.end());
     g.ascendsWithValue = ax.ascends;
     out.push_back(std::move(g));

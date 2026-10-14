@@ -783,8 +783,11 @@ void App::initFromSource()
   else if (overrideIdx.size() >= 3)
     targetLayout = PanelLayout::Quad;
 
-  const std::size_t want =
-      (targetLayout == PanelLayout::Quad) ? 4 : (targetLayout == PanelLayout::Side ? 2 : 1);
+  std::size_t want = 1;
+  if (targetLayout == PanelLayout::Quad)
+    want = 4;
+  else if (targetLayout == PanelLayout::Side)
+    want = 2;
   if (overrideIdx.size() > want)
     throw std::runtime_error("qdless: --layout " + itsOpts.layoutOverride + " holds " +
                              std::to_string(want) + " panel(s), but " +
@@ -1291,7 +1294,8 @@ bool App::openCatalogPicker(UI& ui, const std::string& rootArg)
     // Build the dir-name column, then annotate any entry whose full path maps
     // to a known model with the model name in a second, aligned column
     // (e.g. "131/   ECG").
-    std::vector<std::string> dirCol, modelCol;
+    std::vector<std::string> dirCol;
+    std::vector<std::string> modelCol;
     dirCol.reserve(subs.size());
     modelCol.reserve(subs.size());
     std::size_t dirW = 0;
@@ -2621,9 +2625,14 @@ std::string App::exportPng(std::string& err) const
   if (input.empty() && !itsOpts.filenames.empty())
     input = itsOpts.filenames.front();
   if (input.empty())
-    input = !itsOpts.catalogRoot.empty()  ? itsOpts.catalogRoot
-            : !itsOpts.browseRoot.empty() ? itsOpts.browseRoot
-                                          : itsOpts.pgTable;
+  {
+    if (!itsOpts.catalogRoot.empty())
+      input = itsOpts.catalogRoot;
+    else if (!itsOpts.browseRoot.empty())
+      input = itsOpts.browseRoot;
+    else
+      input = itsOpts.pgTable;
+  }
   while (input.size() > 1 && input.back() == '/')
     input.pop_back();  // "cube/" -> stem "cube", not ""
   std::string base = std::filesystem::path(input).stem().string();
@@ -4144,7 +4153,8 @@ void App::overlayPhenomenonMarker(std::vector<Rgb>& pixels,
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
   if (spanU <= 0 || spanV <= 0) return;
-  double u = 0, v = 0;
+  double u = 0;
+  double v = 0;
   itsSource->latLonToUV(itsPhenomenonAnchorLat, itsPhenomenonAnchorLon, u, v);
   const double u01 = (u - itsViewport.uMin) / spanU;
   const double v01 = (v - itsViewport.vMin) / spanV;
@@ -4163,16 +4173,29 @@ void App::overlayPhenomenonMarker(std::vector<Rgb>& pixels,
   // Rasterise two circles at integer radii.
   auto ring = [&](int r, Rgb c)
   {
-    int x = r, y = 0, err = 0;
+    int x = r;
+    int y = 0;
+    int err = 0;
     while (x >= y)
     {
-      plot(cx + x, cy + y, c);  plot(cx + y, cy + x, c);
-      plot(cx - y, cy + x, c);  plot(cx - x, cy + y, c);
-      plot(cx - x, cy - y, c);  plot(cx - y, cy - x, c);
-      plot(cx + y, cy - x, c);  plot(cx + x, cy - y, c);
+      plot(cx + x, cy + y, c);
+      plot(cx + y, cy + x, c);
+      plot(cx - y, cy + x, c);
+      plot(cx - x, cy + y, c);
+      plot(cx - x, cy - y, c);
+      plot(cx - y, cy - x, c);
+      plot(cx + y, cy - x, c);
+      plot(cx + x, cy - y, c);
       ++y;
-      if (err <= 0) { err += 2 * y + 1; }
-      else          { --x; err += 2 * (y - x) + 1; }
+      if (err <= 0)
+      {
+        err += 2 * y + 1;
+      }
+      else
+      {
+        --x;
+        err += 2 * (y - x) + 1;
+      }
     }
   };
   ring(7, bg);
@@ -5351,10 +5374,14 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       ctx.hasNativeHeight = itsSource->hasNativeHeight();
       ctx.has3DVolume = sourceSupports3D();
       ctx.hasGlobe = sourceSupportsGlobe();
-      ctx.view = itsModeGlobe       ? UI::HelpView::Globe
-                 : itsMode3DCurtain ? UI::HelpView::Curtain
-                 : itsMode3D        ? UI::HelpView::View3D
-                                    : UI::HelpView::Main;
+      if (itsModeGlobe)
+        ctx.view = UI::HelpView::Globe;
+      else if (itsMode3DCurtain)
+        ctx.view = UI::HelpView::Curtain;
+      else if (itsMode3D)
+        ctx.view = UI::HelpView::View3D;
+      else
+        ctx.view = UI::HelpView::Main;
       ui.popupHelp(ctx);
     }
       return true;
@@ -5397,10 +5424,15 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       auto saved = std::move(itsSource);
       try
       {
-        const bool ok = inPgMode        ? openPgPicker(ui)
-                        : inCatalogMode ? openCatalogPicker(ui)
-                        : inBrowseMode  ? openBrowsePicker(ui)
-                                        : openCatalogRootPicker(ui);
+        bool ok = false;
+        if (inPgMode)
+          ok = openPgPicker(ui);
+        else if (inCatalogMode)
+          ok = openCatalogPicker(ui);
+        else if (inBrowseMode)
+          ok = openBrowsePicker(ui);
+        else
+          ok = openCatalogRootPicker(ui);
         if (!ok)
         {
           itsSource = std::move(saved);
@@ -5638,17 +5670,18 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       // Kitty wins ties because it's RGBA (no quantisation) and cheaper to encode.
       auto next = [&](GraphicsMode m)
       {
-        if (m == GraphicsMode::Block)
-          return itsCaps.kitty ? GraphicsMode::Kitty
-                               : (itsCaps.sixel ? GraphicsMode::Sixel : GraphicsMode::Block);
-        if (m == GraphicsMode::Kitty)
+        if (m == GraphicsMode::Block && itsCaps.kitty)
+          return GraphicsMode::Kitty;
+        if (m == GraphicsMode::Block || m == GraphicsMode::Kitty)
           return itsCaps.sixel ? GraphicsMode::Sixel : GraphicsMode::Block;
         return GraphicsMode::Block;  // from Sixel back to off
       };
       itsGraphicsMode = next(itsGraphicsMode);
-      const char* label = itsGraphicsMode == GraphicsMode::Kitty   ? "Kitty"
-                          : itsGraphicsMode == GraphicsMode::Sixel ? "Sixel"
-                                                                   : "OFF";
+      const char* label = "OFF";
+      if (itsGraphicsMode == GraphicsMode::Kitty)
+        label = "Kitty";
+      else if (itsGraphicsMode == GraphicsMode::Sixel)
+        label = "Sixel";
       if (itsGraphicsMode == GraphicsMode::Block)
         itsLastMessage = "Graphics: OFF";
       else
@@ -5755,9 +5788,12 @@ bool App::handleKey(int key, UI& ui, bool& quit)
         itsCrossHeightAxis = !itsCrossHeightAxis;
         itsCrossTimeAxis = false;  // mutually exclusive with Hovmöller
         const bool radar = dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr;
-        itsLastMessage = itsCrossHeightAxis ? "Cross-section: Y-axis = height (km)"
-                         : radar            ? "Cross-section: Y-axis = elevation angle"
-                                            : "Cross-section: Y-axis = levels";
+        if (itsCrossHeightAxis)
+          itsLastMessage = "Cross-section: Y-axis = height (km)";
+        else if (radar)
+          itsLastMessage = "Cross-section: Y-axis = elevation angle";
+        else
+          itsLastMessage = "Cross-section: Y-axis = levels";
       }
       else if (itsCrossActive)
       {
@@ -6435,9 +6471,15 @@ void App::draw3D(const Layout& layout)
   const double sy_ = std::sin(itsCamYaw);
   const double cp = std::cos(itsCamPitch);
   const double sp = std::sin(itsCamPitch);
-  const double rightX = cy, rightY = sy_, rightZ = 0;
-  const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
-  const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
+  const double rightX = cy;
+  const double rightY = sy_;
+  const double rightZ = 0;
+  const double upX = -sy_ * sp;
+  const double upY = cy * sp;
+  const double upZ = cp;
+  const double fwdX = -sy_ * cp;
+  const double fwdY = cy * cp;
+  const double fwdZ = -sp;
 
   // Fit the radar's horizontal extent in the viewport at zoom=1.
   const double extent = pvol->maxRangeMeters();  // metres
@@ -6478,8 +6520,12 @@ void App::draw3D(const Layout& layout)
   auto drawLine =
       [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
   {
-    double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
-    float d0 = 0, d1 = 0;
+    double c0 = 0;
+    double r0 = 0;
+    double c1 = 0;
+    double r1 = 0;
+    float d0 = 0;
+    float d1 = 0;
     project(wx0, wy0, wz0, c0, r0, d0);
     project(wx1, wy1, wz1, c1, r1, d1);
     const double dc = c1 - c0;
@@ -6523,11 +6569,13 @@ void App::draw3D(const Layout& layout)
     {
       if (p.lats.size() < 2)
         continue;
-      double x0 = 0, y0 = 0;
+      double x0 = 0;
+      double y0 = 0;
       latLonToXY(p.lats[0], p.lons[0], x0, y0);
       for (std::size_t i = 1; i < p.lats.size(); ++i)
       {
-        double x1 = 0, y1 = 0;
+        double x1 = 0;
+        double y1 = 0;
         latLonToXY(p.lats[i], p.lons[i], x1, y1);
         drawLine(x0, y0, -1, x1, y1, -1, color);
         x0 = x1;
@@ -6549,7 +6597,8 @@ void App::draw3D(const Layout& layout)
       const double r_m = r_km * 1000.0;
       if (r_m > extent)
         continue;
-      double prevX = r_m, prevY = 0;
+      double prevX = r_m;
+      double prevY = 0;
       for (int i = 1; i <= kSegs; ++i)
       {
         const double a = 2.0 * M_PI * i / kSegs;
@@ -6604,7 +6653,8 @@ void App::draw3D(const Layout& layout)
         // is legible without changing horizontal positions.
         const double wz = (R * sinE + R * R / (2.0 * R_eff)) * itsVexagger3D;
 
-        double col = 0, rowSx = 0;
+        double col = 0;
+        double rowSx = 0;
         float depth = 0;
         project(wx, wy, wz, col, rowSx, depth);
         // Splat each bin to a 2×2 sub-pixel block: a single sub-pixel
@@ -6701,8 +6751,12 @@ void App::draw3D(const Layout& layout)
     auto lineB =
         [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
     {
-      int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-      float d0 = 0, d1 = 0;
+      int x0 = 0;
+      int y0 = 0;
+      int x1 = 0;
+      int y1 = 0;
+      float d0 = 0;
+      float d1 = 0;
       projectB(wx0, wy0, wz0, x0, y0, d0);
       projectB(wx1, wy1, wz1, x1, y1, d1);
       const int adx = std::abs(x1 - x0);
@@ -6729,11 +6783,13 @@ void App::draw3D(const Layout& layout)
       {
         if (p.lats.size() < 2)
           continue;
-        double x0 = 0, y0 = 0;
+        double x0 = 0;
+        double y0 = 0;
         latLonToXY(p.lats[0], p.lons[0], x0, y0);
         for (std::size_t i = 1; i < p.lats.size(); ++i)
         {
-          double x1 = 0, y1 = 0;
+          double x1 = 0;
+          double y1 = 0;
           latLonToXY(p.lats[i], p.lons[i], x1, y1);
           lineB(x0, y0, -1, x1, y1, -1, color);
           x0 = x1;
@@ -6870,9 +6926,15 @@ void App::draw3DQueryData(const Layout& layout)
   const double sy_ = std::sin(itsCamYaw);
   const double cp = std::cos(itsCamPitch);
   const double sp = std::sin(itsCamPitch);
-  const double rightX = cy, rightY = sy_, rightZ = 0;
-  const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
-  const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
+  const double rightX = cy;
+  const double rightY = sy_;
+  const double rightZ = 0;
+  const double upX = -sy_ * sp;
+  const double upY = cy * sp;
+  const double upZ = cp;
+  const double fwdX = -sy_ * cp;
+  const double fwdY = cy * cp;
+  const double fwdZ = -sp;
 
   // Bbox-centred flat-Earth frame. extent = half-width of the larger
   // axis (in metres) so the data fits the viewport at zoom=1 with the
@@ -6922,8 +6984,12 @@ void App::draw3DQueryData(const Layout& layout)
   auto drawLine =
       [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
   {
-    double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
-    float d0 = 0, d1 = 0;
+    double c0 = 0;
+    double r0 = 0;
+    double c1 = 0;
+    double r1 = 0;
+    float d0 = 0;
+    float d1 = 0;
     project(wx0, wy0, wz0, c0, r0, d0);
     project(wx1, wy1, wz1, c1, r1, d1);
     const double dc = c1 - c0;
@@ -6958,11 +7024,13 @@ void App::draw3DQueryData(const Layout& layout)
     {
       if (p.lats.size() < 2)
         continue;
-      double x0 = 0, y0 = 0;
+      double x0 = 0;
+      double y0 = 0;
       latLonToXY(p.lats[0], p.lons[0], x0, y0);
       for (std::size_t i = 1; i < p.lats.size(); ++i)
       {
-        double x1 = 0, y1 = 0;
+        double x1 = 0;
+        double y1 = 0;
         latLonToXY(p.lats[i], p.lons[i], x1, y1);
         drawLine(x0, y0, -1, x1, y1, -1, color);
         x0 = x1;
@@ -6991,10 +7059,12 @@ void App::draw3DQueryData(const Layout& layout)
         {
           if (!std::isfinite(s.value) || s.value < threshold)
             return;
-          double wx = 0, wy = 0;
+          double wx = 0;
+          double wy = 0;
           latLonToXY(s.lat, s.lon, wx, wy);
           const double wz = s.heightMeters * vexagger;
-          double col = 0, rowSx = 0;
+          double col = 0;
+          double rowSx = 0;
           float depth = 0;
           project(wx, wy, wz, col, rowSx, depth);
           const Rgb color = activePanel().palette.lookup(transform(s.value));
@@ -7030,9 +7100,12 @@ void App::draw3DQueryData(const Layout& layout)
         // value; the z-buffer makes it read as a solid body from any angle.
         for (const std::size_t flat : f.blob)
         {
-          double wx = 0, wy = 0, wz = 0;
+          double wx = 0;
+          double wy = 0;
+          double wz = 0;
           cellWorld(flat, wx, wy, wz);
-          double col = 0, row = 0;
+          double col = 0;
+          double row = 0;
           float depth = 0;
           project(wx, wy, wz, col, row, depth);
           const float v = g.values[flat];
@@ -7047,10 +7120,13 @@ void App::draw3DQueryData(const Layout& layout)
         }
         // Bright stem + marker at the peak (warm = max, cool = min).
         const Rgb tint = (f.kind == ExtremumKind::Max) ? Rgb{255, 90, 80} : Rgb{90, 170, 255};
-        double px = 0, py = 0, pz = 0;
+        double px = 0;
+        double py = 0;
+        double pz = 0;
         cellWorld(f.peakCell, px, py, pz);
         drawLine(px, py, 0.0, px, py, pz, tint);
-        double mc = 0, mr = 0;
+        double mc = 0;
+        double mr = 0;
         float md = 0;
         project(px, py, pz, mc, mr, md);
         const int cc = static_cast<int>(mc);
@@ -7130,8 +7206,12 @@ void App::draw3DQueryData(const Layout& layout)
     auto lineB =
         [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
     {
-      int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-      float d0 = 0, d1 = 0;
+      int x0 = 0;
+      int y0 = 0;
+      int x1 = 0;
+      int y1 = 0;
+      float d0 = 0;
+      float d1 = 0;
       projectB(wx0, wy0, wz0, x0, y0, d0);
       projectB(wx1, wy1, wz1, x1, y1, d1);
       const int adx = std::abs(x1 - x0);
@@ -7157,11 +7237,13 @@ void App::draw3DQueryData(const Layout& layout)
       {
         if (p.lats.size() < 2)
           continue;
-        double x0 = 0, y0 = 0;
+        double x0 = 0;
+        double y0 = 0;
         latLonToXY(p.lats[0], p.lons[0], x0, y0);
         for (std::size_t i = 1; i < p.lats.size(); ++i)
         {
-          double x1 = 0, y1 = 0;
+          double x1 = 0;
+          double y1 = 0;
           latLonToXY(p.lats[i], p.lons[i], x1, y1);
           lineB(x0, y0, -1, x1, y1, -1, color);
           x0 = x1;
@@ -7288,9 +7370,15 @@ void App::draw3DSurfaceStack(const Layout& layout)
   const double sy_ = std::sin(itsCamYaw);
   const double cp = std::cos(itsCamPitch);
   const double sp = std::sin(itsCamPitch);
-  const double rightX = cy, rightY = sy_, rightZ = 0;
-  const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
-  const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
+  const double rightX = cy;
+  const double rightY = sy_;
+  const double rightZ = 0;
+  const double upX = -sy_ * sp;
+  const double upY = cy * sp;
+  const double upZ = cp;
+  const double fwdX = -sy_ * cp;
+  const double fwdY = cy * cp;
+  const double fwdZ = -sp;
 
   const auto bb = itsSource->boundingBox();
   const double lat0 = (bb.minLat + bb.maxLat) * 0.5;
@@ -7334,11 +7422,16 @@ void App::draw3DSurfaceStack(const Layout& layout)
   auto drawLine =
       [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
   {
-    double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
-    float d0 = 0, d1 = 0;
+    double c0 = 0;
+    double r0 = 0;
+    double c1 = 0;
+    double r1 = 0;
+    float d0 = 0;
+    float d1 = 0;
     project(wx0, wy0, wz0, c0, r0, d0);
     project(wx1, wy1, wz1, c1, r1, d1);
-    const double dc = c1 - c0, dr = r1 - r0;
+    const double dc = c1 - c0;
+    const double dr = r1 - r0;
     const double dd = static_cast<double>(d1) - static_cast<double>(d0);
     const int steps = static_cast<int>(std::ceil(std::max(std::abs(dc), std::abs(dr))));
     if (steps <= 0)
@@ -7366,11 +7459,13 @@ void App::draw3DSurfaceStack(const Layout& layout)
     {
       if (p.lats.size() < 2)
         continue;
-      double x0 = 0, y0 = 0;
+      double x0 = 0;
+      double y0 = 0;
       latLonToXY(p.lats[0], p.lons[0], x0, y0);
       for (std::size_t i = 1; i < p.lats.size(); ++i)
       {
-        double x1 = 0, y1 = 0;
+        double x1 = 0;
+        double y1 = 0;
         latLonToXY(p.lats[i], p.lons[i], x1, y1);
         drawLine(x0, y0, -1, x1, y1, -1, color);
         x0 = x1;
@@ -7439,9 +7534,11 @@ void App::draw3DSurfaceStack(const Layout& layout)
                    {
                      if (!std::isfinite(v) || v < layer.threshold)
                        return;
-                     double wx = 0, wy = 0;
+                     double wx = 0;
+                     double wy = 0;
                      latLonToXY(lat, lon, wx, wy);
-                     double col = 0, rowSx = 0;
+                     double col = 0;
+                     double rowSx = 0;
                      float depth = 0;
                      project(wx, wy, wz, col, rowSx, depth);
                      const Rgb color = pal ? pal->lookup(v) : layer.fallback;
@@ -7523,11 +7620,16 @@ void App::draw3DSurfaceStack(const Layout& layout)
     auto lineB =
         [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
     {
-      int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-      float d0 = 0, d1 = 0;
+      int x0 = 0;
+      int y0 = 0;
+      int x1 = 0;
+      int y1 = 0;
+      float d0 = 0;
+      float d1 = 0;
       projectB(wx0, wy0, wz0, x0, y0, d0);
       projectB(wx1, wy1, wz1, x1, y1, d1);
-      const int adx = std::abs(x1 - x0), ady = std::abs(y1 - y0);
+      const int adx = std::abs(x1 - x0);
+      const int ady = std::abs(y1 - y0);
       const int steps = std::max(adx, ady);
       if (steps <= 0)
       {
@@ -7549,11 +7651,13 @@ void App::draw3DSurfaceStack(const Layout& layout)
       {
         if (p.lats.size() < 2)
           continue;
-        double x0 = 0, y0 = 0;
+        double x0 = 0;
+        double y0 = 0;
         latLonToXY(p.lats[0], p.lons[0], x0, y0);
         for (std::size_t i = 1; i < p.lats.size(); ++i)
         {
-          double x1 = 0, y1 = 0;
+          double x1 = 0;
+          double y1 = 0;
           latLonToXY(p.lats[i], p.lons[i], x1, y1);
           lineB(x0, y0, -1, x1, y1, -1, color);
           x0 = x1;
@@ -7715,9 +7819,15 @@ void App::draw3DCrossSection(const Layout& layout)
   const double sy_ = std::sin(itsCamYaw);
   const double cp = std::cos(itsCamPitch);
   const double sp = std::sin(itsCamPitch);
-  const double rightX = cy, rightY = sy_, rightZ = 0;
-  const double upX = -sy_ * sp, upY = cy * sp, upZ = cp;
-  const double fwdX = -sy_ * cp, fwdY = cy * cp, fwdZ = -sp;
+  const double rightX = cy;
+  const double rightY = sy_;
+  const double rightZ = 0;
+  const double upX = -sy_ * sp;
+  const double upY = cy * sp;
+  const double upZ = cp;
+  const double fwdX = -sy_ * cp;
+  const double fwdY = cy * cp;
+  const double fwdZ = -sp;
 
   // Flat-Earth frame anchored at bbox centre.
   const auto bb = itsSource->boundingBox();
@@ -7773,8 +7883,12 @@ void App::draw3DCrossSection(const Layout& layout)
   auto drawLine =
       [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
   {
-    double c0 = 0, r0 = 0, c1 = 0, r1 = 0;
-    float d0 = 0, d1 = 0;
+    double c0 = 0;
+    double r0 = 0;
+    double c1 = 0;
+    double r1 = 0;
+    float d0 = 0;
+    float d1 = 0;
     project(wx0, wy0, wz0, c0, r0, d0);
     project(wx1, wy1, wz1, c1, r1, d1);
     const double dc = c1 - c0;
@@ -7854,14 +7968,18 @@ void App::draw3DCrossSection(const Layout& layout)
   // The X-cross adds a second plane perpendicular to the first through
   // the same centre. Toggles for each animation live on x s r o T.
   tickCurtainAnimation();
-  double baseAx = 0, baseAy = 0, baseBx = 0, baseBy = 0;
+  double baseAx = 0;
+  double baseAy = 0;
+  double baseBx = 0;
+  double baseBy = 0;
   latLonToXY(itsCurtainLat1, itsCurtainLon1, baseAx, baseAy);
   latLonToXY(itsCurtainLat2, itsCurtainLon2, baseBx, baseBy);
   const double baseCx = (baseAx + baseBx) * 0.5;
   const double baseCy = (baseAy + baseBy) * 0.5;
   const double baseHx = (baseBx - baseAx) * 0.5;
   const double baseHy = (baseBy - baseAy) * 0.5;
-  double cxC = baseCx, cyC = baseCy;
+  double cxC = baseCx;
+  double cyC = baseCy;
   if (itsCurtainAutoOrbit)
   {
     const double orbitR = std::max(extent * 0.20, std::hypot(baseHx, baseHy) * 0.40);
@@ -7990,7 +8108,8 @@ void App::draw3DCrossSection(const Layout& layout)
     }
   };
 
-  Plane plane1, plane2;
+  Plane plane1;
+  Plane plane2;
   buildPlane(cxC - hxR, cyC - hyR, cxC + hxR, cyC + hyR, plane1);
   if (itsCurtainTwoPlane)
   {
@@ -8080,7 +8199,8 @@ void App::draw3DCrossSection(const Layout& layout)
       const double scy = (subH / 2.0 - sy) / yscale;
 
       bool haveGround = false;
-      double gx = 0, gy = 0;
+      double gx = 0;
+      double gy = 0;
       float gDepth = 0;
       if (std::abs(fwdZ) > 1e-9)
       {
@@ -8094,12 +8214,14 @@ void App::draw3DCrossSection(const Layout& layout)
         }
       }
 
-      double u1 = 0, z1 = 0;
+      double u1 = 0;
+      double z1 = 0;
       float d1 = 0;
       const bool hit1 = rayHitsPlane(plane1, scx, scy, u1, z1, d1);
 
       bool hit2 = false;
-      double u2 = 0, z2 = 0;
+      double u2 = 0;
+      double z2 = 0;
       float d2 = 0;
       if (itsCurtainTwoPlane)
         hit2 = rayHitsPlane(plane2, scx, scy, u2, z2, d2);
@@ -8127,7 +8249,8 @@ void App::draw3DCrossSection(const Layout& layout)
       }
       if (haveGround)
       {
-        double lat = 0, lon = 0;
+        double lat = 0;
+        double lon = 0;
         xyToLatLon(gx, gy, lat, lon);
         if (lat >= bb.minLat && lat <= bb.maxLat && lon >= bb.minLon && lon <= bb.maxLon)
         {
@@ -8151,11 +8274,13 @@ void App::draw3DCrossSection(const Layout& layout)
     {
       if (p.lats.size() < 2)
         continue;
-      double x0 = 0, y0 = 0;
+      double x0 = 0;
+      double y0 = 0;
       latLonToXY(p.lats[0], p.lons[0], x0, y0);
       for (std::size_t i = 1; i < p.lats.size(); ++i)
       {
-        double x1 = 0, y1 = 0;
+        double x1 = 0;
+        double y1 = 0;
         latLonToXY(p.lats[i], p.lons[i], x1, y1);
         drawLine(x0, y0, 0, x1, y1, 0, color);
         x0 = x1;
@@ -8286,8 +8411,12 @@ void App::draw3DCrossSection(const Layout& layout)
     auto lineB =
         [&](double wx0, double wy0, double wz0, double wx1, double wy1, double wz1, Rgb color)
     {
-      int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-      float d0 = 0, d1 = 0;
+      int x0 = 0;
+      int y0 = 0;
+      int x1 = 0;
+      int y1 = 0;
+      float d0 = 0;
+      float d1 = 0;
       projectB(wx0, wy0, wz0, x0, y0, d0);
       projectB(wx1, wy1, wz1, x1, y1, d1);
       const int adx = std::abs(x1 - x0);
@@ -8313,11 +8442,13 @@ void App::draw3DCrossSection(const Layout& layout)
       {
         if (p.lats.size() < 2)
           continue;
-        double x0 = 0, y0 = 0;
+        double x0 = 0;
+        double y0 = 0;
         latLonToXY(p.lats[0], p.lons[0], x0, y0);
         for (std::size_t i = 1; i < p.lats.size(); ++i)
         {
-          double x1 = 0, y1 = 0;
+          double x1 = 0;
+          double y1 = 0;
           latLonToXY(p.lats[i], p.lons[i], x1, y1);
           lineB(x0, y0, 0, x1, y1, 0, color);
           x0 = x1;
@@ -8455,7 +8586,9 @@ void App::drawGlobe(const Layout& layout)
     y = cl * std::sin(lon);
     z = std::sin(lat);
   };
-  double nx = 0, ny = 0, nz = 0;
+  double nx = 0;
+  double ny = 0;
+  double nz = 0;
   ecef(cLat, cLon, nx, ny, nz);  // outward normal at the centre = toward camera
   // east = normalise(Z × n) = normalise(-n.y, n.x, 0); falls back to the
   // longitude tangent at the poles (where the cross product vanishes).
@@ -8559,10 +8692,20 @@ void App::drawGlobe(const Layout& layout)
   };
   auto drawGeoLine = [&](double lat0, double lon0, double lat1, double lon1, Rgb color)
   {
-    double x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0;
+    double x0 = 0;
+    double y0 = 0;
+    double z0 = 0;
+    double x1 = 0;
+    double y1 = 0;
+    double z1 = 0;
     ecef(lat0 * M_PI / 180.0, lon0 * M_PI / 180.0, x0, y0, z0);
     ecef(lat1 * M_PI / 180.0, lon1 * M_PI / 180.0, x1, y1, z1);
-    double c0 = 0, r0 = 0, f0 = 0, c1 = 0, r1 = 0, f1 = 0;
+    double c0 = 0;
+    double r0 = 0;
+    double f0 = 0;
+    double c1 = 0;
+    double r1 = 0;
+    double f1 = 0;
     project(kLift * x0, kLift * y0, kLift * z0, c0, r0, f0);
     project(kLift * x1, kLift * y1, kLift * z1, c1, r1, f1);
     if (f0 <= 0 && f1 <= 0)
@@ -8683,11 +8826,20 @@ void App::drawGlobe(const Layout& layout)
 
       auto lineB = [&](double lat0, double lon0, double lat1, double lon1, Rgb color)
       {
-        double x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0;
+        double x0 = 0;
+        double y0 = 0;
+        double z0 = 0;
+        double x1 = 0;
+        double y1 = 0;
+        double z1 = 0;
         ecef(lat0 * M_PI / 180.0, lon0 * M_PI / 180.0, x0, y0, z0);
         ecef(lat1 * M_PI / 180.0, lon1 * M_PI / 180.0, x1, y1, z1);
-        const double X0 = kLift * x0, Y0 = kLift * y0, Z0 = kLift * z0;
-        const double X1 = kLift * x1, Y1 = kLift * y1, Z1 = kLift * z1;
+        const double X0 = kLift * x0;
+        const double Y0 = kLift * y0;
+        const double Z0 = kLift * z0;
+        const double X1 = kLift * x1;
+        const double Y1 = kLift * y1;
+        const double Z1 = kLift * z1;
         const double f0 = X0 * nx + Y0 * ny + Z0 * nz;
         const double f1 = X1 * nx + Y1 * ny + Z1 * nz;
         if (f0 <= 0 && f1 <= 0)
@@ -8793,12 +8945,14 @@ void App::drawGlobe(const Layout& layout)
           constexpr int kEdgeSteps = 64;
           auto edge = [&](double u0, double v0, double u1, double v1)
           {
-            double pLat = 0, pLon = 0;
+            double pLat = 0;
+            double pLon = 0;
             itsSource->uvToLatLon(u0, v0, pLat, pLon);
             for (int i = 1; i <= kEdgeSteps; ++i)
             {
               const double t = static_cast<double>(i) / kEdgeSteps;
-              double lat = 0, lon = 0;
+              double lat = 0;
+              double lon = 0;
               itsSource->uvToLatLon(u0 + (u1 - u0) * t, v0 + (v1 - v0) * t, lat, lon);
               lineB(pLat, pLon, lat, lon, gridCol);
               pLat = lat;
@@ -8934,7 +9088,8 @@ void App::apply3DDefaultsForSource()
     float dmin = std::numeric_limits<float>::infinity();
     if (bb.maxLat > bb.minLat && bb.maxLon > bb.minLon)
     {
-      constexpr int kNx = 40, kNy = 30;
+      constexpr int kNx = 40;
+      constexpr int kNy = 30;
       for (int j = 0; j < kNy; ++j)
         for (int i = 0; i < kNx; ++i)
         {

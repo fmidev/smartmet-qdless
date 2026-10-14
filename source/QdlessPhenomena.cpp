@@ -117,7 +117,8 @@ Grid sampleGrid(DataSource& src)
   for (int iy = 0; iy < Grid::H; ++iy)
     for (int ix = 0; ix < Grid::W; ++ix)
     {
-      double lat = 0, lon = 0;
+      double lat = 0;
+      double lon = 0;
       src.uvToLatLon(Grid::uOf(ix), Grid::vOf(iy), lat, lon);
       const float val = src.interpolatedValue(lat, lon);
       const std::size_t k = static_cast<std::size_t>(iy) * Grid::W + ix;
@@ -137,7 +138,8 @@ PhenomenonHint detectTropicalConvection(const Grid& g, const std::string& units)
   double sum = 0;
   int n = 0;
   float maxV = -std::numeric_limits<float>::infinity();
-  int maxIx = -1, maxIy = -1;
+  int maxIx = -1;
+  int maxIy = -1;
   for (int iy = 0; iy < Grid::H; ++iy)
   {
     const double latRow = g.latAt(0, iy);
@@ -191,7 +193,8 @@ PhenomenonHint detectCyclone(const Grid& g)
   // and miss the cyclone's outer pressure rim — so we walk a haversine
   // distance instead, regardless of grid resolution.
   float globalMin = std::numeric_limits<float>::infinity();
-  int minIx = -1, minIy = -1;
+  int minIx = -1;
+  int minIy = -1;
   for (int iy = 0; iy < Grid::H; ++iy)
     for (int ix = 0; ix < Grid::W; ++ix)
     {
@@ -352,9 +355,11 @@ PhenomenonHint detectCyclone(const Grid& g)
   globalMin = refinedMin;
 
   PhenomenonHint h;
-  const char* sev = (dropHPa > 25.0F) ? "Hurricane-strength" :
-                    (dropHPa > 15.0F) ? "Strong cyclone"     :
-                                        "Cyclone";
+  const char* sev = "Cyclone";
+  if (dropHPa > 25.0F)
+    sev = "Hurricane-strength";
+  else if (dropHPa > 15.0F)
+    sev = "Strong cyclone";
   (void)meanDelta;  // available for a future "mean-vs-min" symmetry check
   char buf[160];
   std::snprintf(buf, sizeof(buf),
@@ -365,7 +370,11 @@ PhenomenonHint detectCyclone(const Grid& g)
                 static_cast<int>(dropHPa));
   h.message = buf;
   h.suggestion = "→ click the centre to time-series-probe; spacebar to animate";
-  h.score = (dropHPa > 30.0F) ? 95 : (dropHPa > 15.0F) ? 85 : 70;
+  h.score = 70;
+  if (dropHPa > 30.0F)
+    h.score = 95;
+  else if (dropHPa > 15.0F)
+    h.score = 85;
   h.anchorLat = lat;
   h.anchorLon = lon;
   h.hasAnchor = true;
@@ -381,7 +390,8 @@ PhenomenonHint detectFront(const Grid& g, const std::string& units)
   std::vector<float> mag;
   mag.reserve(Grid::W * Grid::H);
   float topMag = 0;
-  int topIx = -1, topIy = -1;
+  int topIx = -1;
+  int topIy = -1;
   for (int iy = 1; iy < Grid::H - 1; ++iy)
     for (int ix = 0; ix < Grid::W; ++ix)
     {
@@ -444,7 +454,8 @@ PhenomenonHint detectJet(DataSource& src, const Grid& g, const std::string& unit
   const float threshold = upper ? 40.0F : 60.0F;
 
   float topV = -std::numeric_limits<float>::infinity();
-  int topIx = -1, topIy = -1;
+  int topIx = -1;
+  int topIy = -1;
   double sum = 0;
   int n = 0;
   for (int iy = 0; iy < Grid::H; ++iy)
@@ -521,7 +532,8 @@ TemporalStats sampleTemporal(DataSource& src)
     ts.lon = snaps.front().lon;
   }
 
-  double gSum = 0, gSqSum = 0;
+  double gSum = 0;
+  double gSqSum = 0;
   long gCount = 0;
   for (int i = 0; i < Grid::W * Grid::H; ++i)
   {

@@ -237,7 +237,9 @@ void recomputeBox(Box& box,
 {
   box.rMin = box.gMin = box.bMin = 255;
   box.rMax = box.gMax = box.bMax = 0;
-  long sR = 0, sG = 0, sB = 0;
+  long sR = 0;
+  long sG = 0;
+  long sB = 0;
   const auto n = box.hi - box.lo;
   if (n == 0)
     return;
@@ -341,7 +343,9 @@ std::vector<Box> medianCut(const std::vector<std::uint32_t>& opaquePixels, std::
 
 inline int dist2(int r1, int g1, int b1, int r2, int g2, int b2)
 {
-  const int dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
+  const int dr = r1 - r2;
+  const int dg = g1 - g2;
+  const int db = b1 - b2;
   return dr * dr + dg * dg + db * db;
 }
 

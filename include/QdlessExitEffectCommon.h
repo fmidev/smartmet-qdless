@@ -1211,7 +1211,8 @@ inline void drawFootSprite(std::vector<Rgb>& dst, int w, int h, float ya,
   if (foot == nullptr) return;
   const float aspect = (fh > 0) ? static_cast<float>(fw) / static_cast<float>(fh) : 1.5F;
   const float scaleW = scaleH * aspect;
-  const float cs = std::cos(-ang), sn = std::sin(-ang);
+  const float cs = std::cos(-ang);
+  const float sn = std::sin(-ang);
   const float halfDiag = 0.5F * std::sqrt(scaleW * scaleW + scaleH * scaleH);
   const int x0 = static_cast<int>(std::max(0.0F, cx - halfDiag));
   const int x1 = static_cast<int>(std::min(static_cast<float>(w - 1), cx + halfDiag));
@@ -1321,7 +1322,8 @@ inline MuybridgeMotion loadMuybridgeMotion(const char* name)
   {
     char rel[128];
     std::snprintf(rel, sizeof(rel), "muybridge/%s/frame_%02d.png", name, i);
-    std::size_t fw = 0, fh = 0;
+    std::size_t fw = 0;
+    std::size_t fh = 0;
     auto img = loadDataImage(rel, fw, fh);
     if (!img)
       break;
@@ -1453,7 +1455,8 @@ inline MuybridgeMotion loadKenneyMotion(const char* name)
   {
     char rel[128];
     std::snprintf(rel, sizeof(rel), "kenney/%s/frame_%02d.png", name, i);
-    std::size_t fw = 0, fh = 0;
+    std::size_t fw = 0;
+    std::size_t fh = 0;
     auto img = loadDataImage(rel, fw, fh);
     if (!img)
       break;

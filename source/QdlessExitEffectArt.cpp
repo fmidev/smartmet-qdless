@@ -176,7 +176,8 @@ void effectCeciNestPas(const Renderer& renderer, const std::vector<Rgb>& src, in
                       Rgb{u8(218 + l * 0.10F), u8(204 + l * 0.10F), u8(168 + l * 0.08F), false};
                 }
               const Rgb ink{34, 24, 18, false};
-              const float pipeCx = w * 0.5F, pipeCy = h * 0.40F;
+              const float pipeCx = w * 0.5F;
+              const float pipeCy = h * 0.40F;
               const float bowlR = mn * 0.07F;
               const float stemLen = mn * 0.35F;
               const float draw = std::clamp(t / 0.55F, 0.0F, 1.0F);
@@ -297,7 +298,8 @@ void effectMagritteBowler(const Renderer& renderer, const std::vector<Rgb>& src,
                           u8(170 + 50 * sf + l * 0.10F * dim),
                           u8(200 + 20 * sf + l * 0.08F * dim), false};
                 }
-              const float cx = w * 0.5F, baseY = h * 0.85F;
+              const float cx = w * 0.5F;
+              const float baseY = h * 0.85F;
               const float S = mn * 0.50F;
               const Rgb coat{20, 26, 40, false};
               const Rgb face{210, 175, 140, false};
@@ -459,14 +461,18 @@ void effectMonaLisa(const Renderer& renderer, const std::vector<Rgb>& src, int w
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(80 + 50 * (1 - sf) + l * 0.10F), u8(60 + 40 * (1 - sf) + l * 0.10F), u8(40 + 30 * sf + l * 0.08F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.55F;
-      const float FW = mn * 0.30F, FH = mn * 0.45F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.55F;
+      const float FW = mn * 0.30F;
+      const float FH = mn * 0.45F;
       // Frame.
       for (int yo = static_cast<int>(-FH); yo <= static_cast<int>(FH); ++yo)
         for (int xo = -static_cast<int>(FW); xo <= static_cast<int>(FW); ++xo) {
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-          const float ax = std::fabs(xo) / FW, ay = std::fabs(yo) / FH;
+          const float ax = std::fabs(xo) / FW;
+          const float ay = std::fabs(yo) / FH;
           if (ax > 0.95F || ay > 0.95F)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{180, 130, 50, false};
         }
@@ -476,7 +482,8 @@ void effectMonaLisa(const Renderer& renderer, const std::vector<Rgb>& src, int w
           const float yf = yo / (FH * 0.95F);
           const float xf = std::fabs(xo) / (FW * 0.85F);
           if (xf > 0.40F + 0.40F * yf) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dr = d.transparent ? 60.0F : d.r;
@@ -578,12 +585,15 @@ void effectCezanneStill(const Renderer& renderer, const std::vector<Rgb>& src, i
               Rgb{u8(140 + dr * 0.20F - 30 * yf), u8(80 - 20 * yf), u8(40), false};
         }
       // Bowl: a wide brown ellipse on the table.
-      const float bowlCx = w * 0.5F, bowlCy = tableY - mn * 0.02F;
+      const float bowlCx = w * 0.5F;
+      const float bowlCy = tableY - mn * 0.02F;
       for (int yo = -static_cast<int>(mn * 0.08F); yo <= static_cast<int>(mn * 0.02F); ++yo)
         for (int xo = -static_cast<int>(mn * 0.25F); xo <= static_cast<int>(mn * 0.25F); ++xo) {
-          const float nx = xo / (mn * 0.25F), nyN = yo / (mn * 0.08F);
+          const float nx = xo / (mn * 0.25F);
+          const float nyN = yo / (mn * 0.08F);
           if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(bowlCx + xo), yy = static_cast<int>(bowlCy + yo);
+          const int xx = static_cast<int>(bowlCx + xo);
+          const int yy = static_cast<int>(bowlCy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{120, 70, 30, false};
         }

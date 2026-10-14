@@ -154,7 +154,9 @@ void effectKarmanVortex(const Renderer& renderer, const std::vector<Rgb>& src, i
             });
 
         const float fade = 1.0F - smooth01(0.86F, 1.0F, t);
-        const float lx = -0.55F, ly = -0.55F, lz = 0.63F;  // light from the upper left
+        const float lx = -0.55F;
+        const float ly = -0.55F;
+        const float lz = 0.63F;  // light from the upper left
         for (int y = 0; y < h; ++y)
           for (int x = 0; x < w; ++x)
           {
@@ -1015,7 +1017,10 @@ void effectBenardCells(const Renderer& renderer, const std::vector<Rgb>& src, in
   const float rowH = cell * 0.8660254F;
   const std::size_t n = static_cast<std::size_t>(w) * h;
   // Voronoi of a jittered hexagonal lattice: nearest centre and rim distance.
-  std::vector<float> ccx(n), ccy(n), rim(n), rad(n);
+  std::vector<float> ccx(n);
+  std::vector<float> ccy(n);
+  std::vector<float> rim(n);
+  std::vector<float> rad(n);
   const auto centre = [&](int i, int j, float& cx, float& cy)
   {
     cx = (i + ((j & 1) != 0 ? 0.5F : 0.0F)) * cell + (hash01(i, j, 5) - 0.5F) * cell * 0.3F;
@@ -1028,11 +1033,15 @@ void effectBenardCells(const Renderer& renderer, const std::vector<Rgb>& src, in
       const float Y = y * ya;
       const int j0 = static_cast<int>(std::floor(Y / rowH));
       const int i0 = static_cast<int>(std::floor(X / cell));
-      float d1 = 1e9F, d2 = 1e9F, bx = 0.0F, by = 0.0F;
+      float d1 = 1e9F;
+      float d2 = 1e9F;
+      float bx = 0.0F;
+      float by = 0.0F;
       for (int j = j0 - 1; j <= j0 + 2; ++j)
         for (int i = i0 - 1; i <= i0 + 2; ++i)
         {
-          float cx = 0.0F, cy = 0.0F;
+          float cx = 0.0F;
+          float cy = 0.0F;
           centre(i, j, cx, cy);
           const float d = std::hypot(X - cx, Y - cy);
           if (d < d1)
@@ -1104,7 +1113,11 @@ void effectRedSprites(
   const std::array<float, 6> times = {0.2F, 0.33F, 0.45F, 0.56F, 0.68F, 0.78F};
   for (std::size_t i = 0; i < times.size(); ++i)
   {
-    const int kind = i == 2 ? 2 : (i == 4 ? 1 : 0);
+    int kind = 0;
+    if (i == 2)
+      kind = 2;
+    else if (i == 4)
+      kind = 1;
     events.push_back({times[i] + 0.03F * u01(rng),
                       (0.15F + 0.7F * u01(rng)) * w,
                       kind,
@@ -1620,7 +1633,9 @@ void effectMammatus(const Renderer& renderer, const std::vector<Rgb>& src, int w
               }
           }
         const float fade = 1.0F - smooth01(0.93F, 1.0F, t);
-        const float lx = 0.75F, ly = 0.35F, lz = 0.56F;  // low sun from the lower right
+        const float lx = 0.75F;
+        const float ly = 0.35F;
+        const float lz = 0.56F;  // low sun from the lower right
         const F3 sun = mix(F3{255, 185, 120}, F3{190, 90, 120}, dusk);
         const F3 shade = mix(F3{110, 80, 120}, F3{35, 25, 55}, dusk);
         for (int y = 0; y < h; ++y)
@@ -1937,8 +1952,11 @@ void effectFogbow(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
             if (g < 3.2F)
             {
               const float hue = fract(g * 0.9F);
-              const F3 ring = hue < 0.33F ? F3{150, 190, 255}
-                                          : (hue < 0.66F ? F3{190, 255, 190} : F3{255, 180, 150});
+              F3 ring{255, 180, 150};
+              if (hue < 0.33F)
+                ring = F3{150, 190, 255};
+              else if (hue < 0.66F)
+                ring = F3{190, 255, 190};
               const float a = bow * dens * 0.5F * smooth01(3.2F, 1.0F, g) * smooth01(0.6F, 1.0F, g);
               c = mix(c, ring, a);
               if (g < 0.8F)  // the observer's shadow cast on the fog

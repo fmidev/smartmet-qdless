@@ -37,7 +37,8 @@ void effectAnubis(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{200, 170, 120, false};
         // Data-textured pyramid behind.
         const float cx = w * 0.5F;
-        const float pyrW = mn * 0.40F, pyrH = mn * 0.35F;
+        const float pyrW = mn * 0.40F;
+        const float pyrH = mn * 0.35F;
         for (int yo = 0; yo <= static_cast<int>(pyrH); ++yo)
         {
           const float yf = yo / pyrH;
@@ -105,7 +106,8 @@ void effectAnubis(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
                 ya,
                 body);
         // Ankh in his right hand.
-        const float ankhX = ax + fh * 0.18F, ankhY = ay - fh * 0.05F;
+        const float ankhX = ax + fh * 0.18F;
+        const float ankhY = ay - fh * 0.05F;
         plotDot(dst, w, h, ankhX, ankhY - fh * 0.05F, fh * 0.03F, ya, Rgb{240, 200, 80, false});
         drawSeg(dst,
                 w,
@@ -186,7 +188,8 @@ void effectGaruda(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
               Rgb{u8(220 - 40 * sf + l * 0.10F), u8(180 - 50 * sf + l * 0.08F),
                   u8(100 + 30 * sf + l * 0.06F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.55F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.55F;
       const float wing = mn * 0.30F;
       const float flap = std::sin(t * 4.0F) * 0.4F;
       // Wings — data-filled triangles.
@@ -292,8 +295,10 @@ void effectPandora(const Renderer& renderer, const std::vector<Rgb>& src, int w,
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(30 + l * 0.10F), u8(20 + l * 0.08F), u8(40 + l * 0.10F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.65F;
-      const float W = mn * 0.10F, H = mn * 0.07F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.65F;
+      const float W = mn * 0.10F;
+      const float H = mn * 0.07F;
       // Box body.
       for (int yo = 0; yo <= static_cast<int>(H); ++yo)
         for (int xo = -static_cast<int>(W); xo <= static_cast<int>(W); ++xo) {
@@ -351,9 +356,11 @@ void effectPegasus(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       // Body (oval).
       for (int yo = -static_cast<int>(bL * 0.20F); yo <= static_cast<int>(bL * 0.20F); ++yo)
         for (int xo = -static_cast<int>(bL * 0.50F); xo <= static_cast<int>(bL * 0.30F); ++xo) {
-          const float nx = xo / (bL * 0.50F), nyN = yo / (bL * 0.20F);
+          const float nx = xo / (bL * 0.50F);
+          const float nyN = yo / (bL * 0.20F);
           if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = body;
         }
@@ -395,7 +402,8 @@ void effectPhoenix(const Renderer& renderer, const std::vector<Rgb>& src, int w,
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(60 + dl * 0.20F), u8(30 + dl * 0.10F), u8(20 + dl * 0.05F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.65F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.65F;
       // Flames rising.
       for (int i = 0; i < 100; ++i) {
         const float fx = cx + (hash(i) - 0.5F) * mn * 0.30F;
@@ -455,7 +463,8 @@ void effectQuetzalcoatl(const Renderer& renderer, const std::vector<Rgb>& src, i
               Rgb{u8(120 + l * 0.10F - 60 * sf), u8(80 + l * 0.10F - 20 * sf),
                   u8(60 + l * 0.10F + 20 * sf), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       // Coil + segments.
       for (int i = 0; i < 30; ++i) {
         const float f = i / 29.0F;
@@ -615,7 +624,8 @@ void effectAtlas(const Renderer& renderer, const std::vector<Rgb>& src, int w, i
               Rgb{u8(8 + l * 0.10F + 40 * sf), u8(6 + l * 0.10F + 20 * sf),
                   u8(20 + l * 0.10F), false};
         }
-      const float cx = w * 0.5F, base = h * 0.95F;
+      const float cx = w * 0.5F;
+      const float base = h * 0.95F;
       const Rgb sil{20, 20, 30, false};
       std::vector<std::array<double, 2>> joints;
       const float figH = h * 0.70F;
@@ -627,7 +637,8 @@ void effectAtlas(const Renderer& renderer, const std::vector<Rgb>& src, int w, i
       // genuinely heavy.
       const int lH = mot.ok ? mot.anim.jointIndex("LeftHand")  : -1;
       const int rH = mot.ok ? mot.anim.jointIndex("RightHand") : -1;
-      double fx = cx, fy = h * 0.22F;
+      double fx = cx;
+      double fy = h * 0.22F;
       if (lH >= 0 && rH >= 0 && lH < static_cast<int>(joints.size())
           && rH < static_cast<int>(joints.size()))
       {
@@ -763,12 +774,15 @@ void effectExcalibur(const Renderer& renderer, const std::vector<Rgb>& src, int 
                   u8(130 + dl * 0.20F - 30 * sf), false};
         }
       // Stone — big grey blob.
-      const float stoneCx = w * 0.5F, stoneCy = h * 0.78F;
+      const float stoneCx = w * 0.5F;
+      const float stoneCy = h * 0.78F;
       for (int yo = -static_cast<int>(mn * 0.10F); yo <= static_cast<int>(mn * 0.10F); ++yo)
         for (int xo = -static_cast<int>(mn * 0.22F); xo <= static_cast<int>(mn * 0.22F); ++xo) {
-          const float nx = xo / (mn * 0.22F), nyN = yo / (mn * 0.10F);
+          const float nx = xo / (mn * 0.22F);
+          const float nyN = yo / (mn * 0.10F);
           if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(stoneCx + xo), yy = static_cast<int>(stoneCy + yo);
+          const int xx = static_cast<int>(stoneCx + xo);
+          const int yy = static_cast<int>(stoneCy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(110 + 30 * (1.0F - std::fabs(nx))), u8(110), u8(110), false};
         }
@@ -812,12 +826,15 @@ void effectPandoraFoot(const Renderer& renderer, const std::vector<Rgb>& src, in
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(30 + dl * 0.15F), u8(20 + dl * 0.10F), u8(40 + dl * 0.10F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.70F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.70F;
       // Box body.
-      const float W = mn * 0.10F, H = mn * 0.07F;
+      const float W = mn * 0.10F;
+      const float H = mn * 0.07F;
       for (int yo = 0; yo <= static_cast<int>(H); ++yo)
         for (int xo = -static_cast<int>(W); xo <= static_cast<int>(W); ++xo) {
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{120, 80, 40, false};
         }
@@ -866,13 +883,16 @@ void effectTrojanFoot(const Renderer& renderer, const std::vector<Rgb>& src, int
       for (int xx = 0; xx < w; ++xx)
         dst[static_cast<std::size_t>(groundY) * w + xx] = Rgb{80, 60, 40, false};
       // Horse silhouette.
-      const float cx = w * 0.5F, body = mn * 0.22F;
+      const float cx = w * 0.5F;
+      const float body = mn * 0.22F;
       // Body oval.
       for (int yo = -static_cast<int>(body * 0.35F); yo <= static_cast<int>(body * 0.35F); ++yo)
         for (int xo = -static_cast<int>(body * 1.1F); xo <= static_cast<int>(body * 0.7F); ++xo) {
-          const float nx = xo / (body * 1.1F), nyN = yo / (body * 0.35F);
+          const float nx = xo / (body * 1.1F);
+          const float nyN = yo / (body * 0.35F);
           if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(groundY - body * 0.5F + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(groundY - body * 0.5F + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{100, 70, 35, false};
         }
@@ -889,7 +909,8 @@ void effectTrojanFoot(const Renderer& renderer, const std::vector<Rgb>& src, int
                 Rgb{100, 70, 35, false});
       }
       // Side door + tiny feet pouring out.
-      const float doorX = cx - body * 0.10F, doorY = groundY - body * 0.45F;
+      const float doorX = cx - body * 0.10F;
+      const float doorY = groundY - body * 0.45F;
       const float opened = std::clamp(t * 1.4F, 0.0F, 1.0F);
       // Door panel.
       drawSeg(dst, w, h, doorX, doorY, doorX, doorY + body * 0.20F,

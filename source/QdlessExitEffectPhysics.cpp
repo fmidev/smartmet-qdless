@@ -696,8 +696,12 @@ void effectLorenzAttractor(const Renderer& renderer, const std::vector<Rgb>& src
   constexpr int N = 1600;
   std::vector<std::array<float, 3>> path(N);
   {
-    float x = 0.1F, y = 0.0F, z = 0.0F;
-    constexpr float sigma = 10.0F, rho = 28.0F, beta = 8.0F / 3.0F;
+    float x = 0.1F;
+    float y = 0.0F;
+    float z = 0.0F;
+    constexpr float sigma = 10.0F;
+    constexpr float rho = 28.0F;
+    constexpr float beta = 8.0F / 3.0F;
     const float dt = 0.012F;
     for (int i = 0; i < N; ++i)
     {
@@ -725,7 +729,8 @@ void effectLorenzAttractor(const Renderer& renderer, const std::vector<Rgb>& src
                           : Rgb{u8(s.r * dim), u8(s.g * dim), u8(s.b * dim + 4), false};
                 }
               const float yaw = t * 1.5F;
-              const float cyy = std::cos(yaw), syy = std::sin(yaw);
+              const float cyy = std::cos(yaw);
+              const float syy = std::sin(yaw);
               const int head = std::min(N - 1, static_cast<int>(t * N));
               const int tail = std::max(0, head - 300);
               for (int i = tail; i <= head; ++i)
@@ -766,9 +771,12 @@ void effectMandelbrot(const Renderer& renderer, const std::vector<Rgb>& src, int
                               : Rgb{u8(s.r * dim), u8(s.g * dim + 4), u8(s.b * dim + 10), false};
           }
         const float zoom = 1.0F + t * t * 6.0F;
-        const float cxR = -0.74F, cyR = 0.10F;  // sweep toward seahorse valley
-        const float xMin = cxR - 1.5F / zoom, xMax = cxR + 1.0F / zoom;
-        const float yMin = cyR - 1.0F / zoom, yMax = cyR + 1.0F / zoom;
+        const float cxR = -0.74F;
+        const float cyR = 0.10F;  // sweep toward seahorse valley
+        const float xMin = cxR - 1.5F / zoom;
+        const float xMax = cxR + 1.0F / zoom;
+        const float yMin = cyR - 1.0F / zoom;
+        const float yMax = cyR + 1.0F / zoom;
         const int sweep = std::min(w, static_cast<int>(t * w * 1.3F));
         for (int py = 0; py < h; ++py)
         {
@@ -776,7 +784,8 @@ void effectMandelbrot(const Renderer& renderer, const std::vector<Rgb>& src, int
           {
             const float a0 = xMin + (xMax - xMin) * px / static_cast<float>(w);
             const float b0 = yMin + (yMax - yMin) * py / static_cast<float>(h);
-            float a = 0, b = 0;
+            float a = 0;
+            float b = 0;
             int iter = 0;
             constexpr int kMaxIter = 64;
             while (iter < kMaxIter && a * a + b * b < 4.0F)
@@ -814,8 +823,10 @@ void effectMobius(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
           for (int x = 0; x < w; ++x)
             dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 12, false};
         const float yaw = t * 3.5F;
-        const float cyw = std::cos(yaw), syw = std::sin(yaw);
-        const float cxw = w * 0.5F, cyy = h * 0.5F;
+        const float cyw = std::cos(yaw);
+        const float syw = std::sin(yaw);
+        const float cxw = w * 0.5F;
+        const float cyy = h * 0.5F;
         const float R = mn * 0.32F;
         for (float u = 0.0F; u < 6.2832F; u += 0.005F)
         {
@@ -837,7 +848,8 @@ void effectMobius(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
             const Rgb c{u8(d.transparent ? 80 : d.r * bright),
                         u8(d.transparent ? 80 : d.g * bright),
                         u8(d.transparent ? 120 : d.b * bright), false};
-            const int ix = static_cast<int>(sx), iy = static_cast<int>(sy);
+            const int ix = static_cast<int>(sx);
+            const int iy = static_cast<int>(sy);
             if (ix >= 0 && ix < w && iy >= 0 && iy < h)
               dst[static_cast<std::size_t>(iy) * w + ix] = c;
           }
@@ -915,13 +927,15 @@ void effectPendulumWaves(const Renderer& renderer, const std::vector<Rgb>& src, 
                 }
               constexpr int kN = 15;
               const float topY = h * 0.18F;
-              const float xLeft = w * 0.12F, xRight = w * 0.88F;
+              const float xLeft = w * 0.12F;
+              const float xRight = w * 0.88F;
               const float amp = (xRight - xLeft) * 0.0F;
               (void)amp;
               for (int i = 0; i < kN; ++i)
               {
                 const float baseX = xLeft + (xRight - xLeft) * i / static_cast<float>(kN - 1);
-                const float Lmin = mn * 0.28F, Lmax = mn * 0.60F;
+                const float Lmin = mn * 0.28F;
+                const float Lmax = mn * 0.60F;
                 const float L = Lmin + (Lmax - Lmin) * (1.0F - i / static_cast<float>(kN - 1));
                 const float freq = (40.0F + i) / 30.0F;
                 const float ang = 0.7F * std::cos(t * freq * 6.2832F * 0.5F);
@@ -956,8 +970,10 @@ void effectPythagoras(const Renderer& renderer, const std::vector<Rgb>& src, int
         // 3-4-5 triangle. Right angle at origin (Cx, Cy); legs going up and
         // right; hypotenuse closes the triangle.
         const float scale = mn * 0.08F;
-        const float Cx = w * 0.42F, Cy = h * 0.65F;
-        const float a = 3.0F * scale, b = 4.0F * scale;  // sides
+        const float Cx = w * 0.42F;
+        const float Cy = h * 0.65F;
+        const float a = 3.0F * scale;
+        const float b = 4.0F * scale;  // sides
         const Rgb ink{20, 20, 30, false};
         auto fillRect = [&](float x0, float y0, float x1, float y1, Rgb c)
         {
@@ -982,10 +998,14 @@ void effectPythagoras(const Renderer& renderer, const std::vector<Rgb>& src, int
         // (b)... let me re-set: A=(Cx,Cy), B=(Cx, Cy-a), C=(Cx+b, Cy).
         // Hypotenuse BC.
         // Place hypotenuse-square outward from BC.
-        const float bx = Cx, by = Cy - a;
-        const float cx = Cx + b, cy = Cy;
-        const float vx = cx - bx, vy = cy - by;
-        const float nx = vy, ny = -vx;  // outward normal
+        const float bx = Cx;
+        const float by = Cy - a;
+        const float cx = Cx + b;
+        const float cy = Cy;
+        const float vx = cx - bx;
+        const float vy = cy - by;
+        const float nx = vy;
+        const float ny = -vx;  // outward normal
         // Square outline of hypotenuse, drawn via interpolated dots.
         const float gC2 = gC;
         for (float u = 0.0F; u <= 1.0F; u += 0.02F)
@@ -1043,14 +1063,17 @@ void effectSchrodinger(const Renderer& renderer, const std::vector<Rgb>& src, in
                 Rgb{u8(40 + l * 0.10F * dim), u8(40 + l * 0.10F * dim),
                     u8(56 + l * 0.10F * dim), false};
           }
-        const float cx = w * 0.5F, cy = h * 0.55F;
-        const float bw = mn * 0.22F, bh = mn * 0.18F;
+        const float cx = w * 0.5F;
+        const float cy = h * 0.55F;
+        const float bw = mn * 0.22F;
+        const float bh = mn * 0.18F;
         // Box outline.
         const Rgb wood{170, 110, 60, false};
         for (int yy = static_cast<int>(cy - bh); yy <= static_cast<int>(cy + bh); ++yy)
           for (int xo = -1; xo <= 1; ++xo)
           {
-            const int xa = static_cast<int>(cx - bw) + xo, xb = static_cast<int>(cx + bw) + xo;
+            const int xa = static_cast<int>(cx - bw) + xo;
+            const int xb = static_cast<int>(cx + bw) + xo;
             if (yy >= 0 && yy < h)
             {
               if (xa >= 0 && xa < w) dst[static_cast<std::size_t>(yy) * w + xa] = wood;
@@ -1060,7 +1083,8 @@ void effectSchrodinger(const Renderer& renderer, const std::vector<Rgb>& src, in
         for (int xx = static_cast<int>(cx - bw); xx <= static_cast<int>(cx + bw); ++xx)
           for (int yo = -1; yo <= 1; ++yo)
           {
-            const int ya2 = static_cast<int>(cy - bh) + yo, yb = static_cast<int>(cy + bh) + yo;
+            const int ya2 = static_cast<int>(cy - bh) + yo;
+            const int yb = static_cast<int>(cy + bh) + yo;
             if (xx >= 0 && xx < w)
             {
               if (ya2 >= 0 && ya2 < h) dst[static_cast<std::size_t>(ya2) * w + xx] = wood;
@@ -1071,7 +1095,8 @@ void effectSchrodinger(const Renderer& renderer, const std::vector<Rgb>& src, in
         const float collapse = 0.65F;
         auto drawCat = [&](float alpha, Rgb body, Rgb eye, bool x_eyes)
         {
-          const float ccx = cx, ccy = cy;
+          const float ccx = cx;
+          const float ccy = cy;
           (void)alpha;
           plotDot(dst, w, h, ccx, ccy - bh * 0.20F, bh * 0.40F, ya, body);
           plotDot(dst, w, h, ccx, ccy - bh * 0.55F, bh * 0.30F, ya, body);
@@ -1170,21 +1195,30 @@ void effectDodecahedron(const Renderer& renderer, const std::vector<Rgb>& src, i
                 Rgb{u8(4 + l * 0.04F * dim), u8(4 + l * 0.04F * dim),
                     u8(14 + l * 0.08F * dim), false};
           }
-        const float cyw = std::cos(t * 1.3F), syw = std::sin(t * 1.3F);
-        const float cp = std::cos(t * 0.9F), sp = std::sin(t * 0.9F);
+        const float cyw = std::cos(t * 1.3F);
+        const float syw = std::sin(t * 1.3F);
+        const float cp = std::cos(t * 0.9F);
+        const float sp = std::sin(t * 0.9F);
         const float scale = mn * 0.35F;
         auto project = [&](int v, float& sx, float& sy) -> float
         {
-          const float x = verts[v][0], y = verts[v][1], z = verts[v][2];
-          const float x1 = x * cyw - z * syw, z1 = x * syw + z * cyw;
-          const float y1 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
+          const float x = verts[v][0];
+          const float y = verts[v][1];
+          const float z = verts[v][2];
+          const float x1 = x * cyw - z * syw;
+          const float z1 = x * syw + z * cyw;
+          const float y1 = y * cp - z1 * sp;
+          const float z2 = y * sp + z1 * cp;
           sx = w * 0.5F + x1 * scale;
           sy = h * 0.5F + y1 * scale;
           return z2;
         };
         for (const auto& e : edges)
         {
-          float x0 = NAN, y0 = NAN, x1 = NAN, y1 = NAN;
+          float x0 = NAN;
+          float y0 = NAN;
+          float x1 = NAN;
+          float y1 = NAN;
           const float z0 = project(e.first, x0, y0);
           const float z1 = project(e.second, x1, y1);
           const float zAvg = (z0 + z1) * 0.5F;
@@ -1263,7 +1297,8 @@ void effectBohrAtom(const Renderer& renderer, const std::vector<Rgb>& src, int w
                 s.transparent ? Rgb{8, 8, 18, false}
                               : Rgb{u8(s.r * dim), u8(s.g * dim + 4), u8(s.b * dim + 10), false};
           }
-        const float cx = w * 0.5F, cy = h * 0.5F;
+        const float cx = w * 0.5F;
+        const float cy = h * 0.5F;
         // Nucleus
         plotDot(dst, w, h, cx, cy, mn * 0.045F, ya, Rgb{255, 180, 80, false});
         plotDot(dst, w, h, cx - mn * 0.015F, cy - mn * 0.012F, mn * 0.018F, ya, Rgb{255, 220, 150, false});
@@ -1273,7 +1308,8 @@ void effectBohrAtom(const Renderer& renderer, const std::vector<Rgb>& src, int w
           const float Rk = mn * (0.10F + 0.10F * k);
           const float ec = 0.55F + 0.10F * k;  // ellipticity per orbit
           const float tilt = (k * 1.05F);
-          const float ct = std::cos(tilt), st = std::sin(tilt);
+          const float ct = std::cos(tilt);
+          const float st = std::sin(tilt);
           for (float a = 0; a < 6.2832F; a += 0.04F)
           {
             const float ox = Rk * std::cos(a);
@@ -1316,8 +1352,10 @@ void effectFoucaultPendulum(const Renderer& renderer, const std::vector<Rgb>& sr
                 Rgb{u8(40 + l * 0.08F * dim), u8(36 + l * 0.08F * dim),
                     u8(50 + l * 0.10F * dim), false};
           }
-        const float topX = w * 0.5F, topY = h * 0.12F;
-        const float pivotX = w * 0.5F, pivotY = h * 0.62F;
+        const float topX = w * 0.5F;
+        const float topY = h * 0.12F;
+        const float pivotX = w * 0.5F;
+        const float pivotY = h * 0.62F;
         const float radius = mn * 0.35F;
         // Compass ring on the floor.
         const Rgb ring{200, 180, 120, false};
@@ -1522,13 +1560,15 @@ void effectPi(const Renderer& renderer, const std::vector<Rgb>& /*src*/, int w, 
         if (t > 0.45F)
         {
           const float alpha = std::clamp((t - 0.45F) / 0.30F, 0.0F, 1.0F);
-          const float pcx = w * 0.5F, pcy = h * 0.5F;
+          const float pcx = w * 0.5F;
+          const float pcy = h * 0.5F;
           const float S = mn * 0.30F;
           // Top bar
           for (int xo = -static_cast<int>(S * 0.6F); xo <= static_cast<int>(S * 0.6F); ++xo)
             for (int yo = -static_cast<int>(S * 0.42F); yo <= -static_cast<int>(S * 0.32F); ++yo)
             {
-              const int xx = static_cast<int>(pcx + xo), yy = static_cast<int>(pcy + yo);
+              const int xx = static_cast<int>(pcx + xo);
+              const int yy = static_cast<int>(pcy + yo);
               if (xx >= 0 && xx < w && yy >= 0 && yy < h)
               {
                 Rgb& c = dst[static_cast<std::size_t>(yy) * w + xx];
@@ -1540,7 +1580,8 @@ void effectPi(const Renderer& renderer, const std::vector<Rgb>& /*src*/, int w, 
           for (int xo = -static_cast<int>(S * 0.40F); xo <= -static_cast<int>(S * 0.28F); ++xo)
             for (int yo = -static_cast<int>(S * 0.32F); yo <= static_cast<int>(S * 0.5F); ++yo)
             {
-              const int xx = static_cast<int>(pcx + xo), yy = static_cast<int>(pcy + yo);
+              const int xx = static_cast<int>(pcx + xo);
+              const int yy = static_cast<int>(pcy + yo);
               if (xx >= 0 && xx < w && yy >= 0 && yy < h)
               {
                 Rgb& c = dst[static_cast<std::size_t>(yy) * w + xx];
@@ -1552,7 +1593,8 @@ void effectPi(const Renderer& renderer, const std::vector<Rgb>& /*src*/, int w, 
           for (int xo = static_cast<int>(S * 0.28F); xo <= static_cast<int>(S * 0.40F); ++xo)
             for (int yo = -static_cast<int>(S * 0.32F); yo <= static_cast<int>(S * 0.5F); ++yo)
             {
-              const int xx = static_cast<int>(pcx + xo), yy = static_cast<int>(pcy + yo);
+              const int xx = static_cast<int>(pcx + xo);
+              const int yy = static_cast<int>(pcy + yo);
               if (xx >= 0 && xx < w && yy >= 0 && yy < h)
               {
                 Rgb& c = dst[static_cast<std::size_t>(yy) * w + xx];
@@ -1585,25 +1627,30 @@ void effectGoldenSpiral(const Renderer& renderer, const std::vector<Rgb>& src, i
           }
         // Start with a unit at the centre, grow rectangles in Fibonacci sequence
         // with quarter-circle arcs forming the spiral.
-        const float cx = w * 0.5F, cy = h * 0.5F;
+        const float cx = w * 0.5F;
+        const float cy = h * 0.5F;
         const float scale = mn * 0.05F;
         const float fibs[8] = {1, 1, 2, 3, 5, 8, 13, 21};
         const int nReveal = std::min(8, static_cast<int>(t * 9.0F));
         // Walk the spiral.
-        float x0 = cx, y0 = cy;
+        float x0 = cx;
+        float y0 = cy;
         int dir = 0;  // 0=right, 1=up, 2=left, 3=down
         const Rgb gold{220, 180, 100, false};
         for (int i = 0; i < nReveal; ++i)
         {
           const float L = fibs[i] * scale;
-          float x1 = x0, y1 = y0;
+          float x1 = x0;
+          float y1 = y0;
           if (dir == 0) x1 = x0 + L;
           else if (dir == 1) y1 = y0 - L;
           else if (dir == 2) x1 = x0 - L;
           else y1 = y0 + L;
           // Rectangle outline.
-          const float rx0 = std::min(x0, x1), ry0 = std::min(y0, y1);
-          const float rx1 = std::max(x0, x1), ry1 = std::max(y0, y1);
+          const float rx0 = std::min(x0, x1);
+          const float ry0 = std::min(y0, y1);
+          const float rx1 = std::max(x0, x1);
+          const float ry1 = std::max(y0, y1);
           (void)rx0;
           (void)ry0;
           (void)rx1;
@@ -1611,9 +1658,11 @@ void effectGoldenSpiral(const Renderer& renderer, const std::vector<Rgb>& src, i
           // Arc — quarter circle inside the rectangle.
           for (float a = 0; a <= 1.5708F; a += 0.04F)
           {
-            float ax = NAN, ay = NAN;
+            float ax = NAN;
+            float ay = NAN;
             // Centre of arc depends on which direction.
-            float ccx = NAN, ccy = NAN;
+            float ccx = NAN;
+            float ccy = NAN;
             float startAng = NAN;
             if (dir == 0) { ccx = x1; ccy = y0 + L; startAng = -1.5708F; }
             else if (dir == 1) { ccx = x1 - L; ccy = y1; startAng = 0; }
@@ -1726,11 +1775,15 @@ void effectSierpinski(const Renderer& renderer, const std::vector<Rgb>& src, int
                 Rgb{u8(8 + l * 0.04F * dim), u8(8 + l * 0.04F * dim),
                     u8(18 + l * 0.06F * dim), false};
           }
-        const float cxw = w * 0.5F, midY = h * 0.55F;
+        const float cxw = w * 0.5F;
+        const float midY = h * 0.55F;
         const float S = mn * 0.42F;
-        const float v0x = cxw, v0y = midY - S * 0.9F;
-        const float v1x = cxw - S, v1y = midY + S * 0.55F;
-        const float v2x = cxw + S, v2y = midY + S * 0.55F;
+        const float v0x = cxw;
+        const float v0y = midY - S * 0.9F;
+        const float v1x = cxw - S;
+        const float v1y = midY + S * 0.55F;
+        const float v2x = cxw + S;
+        const float v2y = midY + S * 0.55F;
         // Triangle outline.
         drawSeg(dst, w, h, v0x, v0y, v1x, v1y, std::max(1.0F, mn * 0.004F), ya,
                 Rgb{200, 200, 220, false});
@@ -1740,11 +1793,13 @@ void effectSierpinski(const Renderer& renderer, const std::vector<Rgb>& src, int
                 Rgb{200, 200, 220, false});
         // Chaos game.
         const int nPts = static_cast<int>(t * 12000);
-        float px = cxw, py = midY;
+        float px = cxw;
+        float py = midY;
         for (int i = 0; i < nPts; ++i)
         {
           const int k = static_cast<int>(hash(i * 7) * 3) % 3;
-          float tx = NAN, tyv = NAN;
+          float tx = NAN;
+          float tyv = NAN;
           if (k == 0) { tx = v0x; tyv = v0y; }
           else if (k == 1) { tx = v1x; tyv = v1y; }
           else { tx = v2x; tyv = v2y; }
@@ -1752,7 +1807,8 @@ void effectSierpinski(const Renderer& renderer, const std::vector<Rgb>& src, int
           py = (py + tyv) * 0.5F;
           if (i > 5)
           {
-            const int ix = static_cast<int>(px), iy = static_cast<int>(py);
+            const int ix = static_cast<int>(px);
+            const int iy = static_cast<int>(py);
             if (ix >= 0 && ix < w && iy >= 0 && iy < h)
             {
               const Rgb c{u8(120 + (i & 0xFF) / 2), u8(255 - (i & 0xFF) / 2),
@@ -1783,8 +1839,10 @@ void effectBrachistochrone(const Renderer& renderer, const std::vector<Rgb>& src
                 Rgb{u8(40 + l * 0.10F * dim), u8(50 + l * 0.10F * dim),
                     u8(70 + l * 0.10F * dim), false};
           }
-        const float Ax = w * 0.20F, Ay = h * 0.30F;
-        const float Bx = w * 0.80F, By = h * 0.78F;
+        const float Ax = w * 0.20F;
+        const float Ay = h * 0.30F;
+        const float Bx = w * 0.80F;
+        const float By = h * 0.78F;
         // Straight ramp.
         drawSeg(dst, w, h, Ax, Ay, Bx, By, std::max(1.0F, mn * 0.005F), ya,
                 Rgb{200, 80, 80, false});
@@ -1817,7 +1875,8 @@ void effectBrachistochrone(const Renderer& renderer, const std::vector<Rgb>& src
         const float cycT = std::clamp(t * 1.6F, 0.0F, 1.0F);
         const float strT = std::clamp(t * 1.3F, 0.0F, 1.0F);
         const std::size_t cycIdx = std::min(cyc.size() - 1, static_cast<std::size_t>(cycT * cyc.size()));
-        const float strX = Ax + strT * (Bx - Ax), strY = Ay + strT * (By - Ay);
+        const float strX = Ax + strT * (Bx - Ax);
+        const float strY = Ay + strT * (By - Ay);
         plotDot(dst, w, h, cyc[cycIdx].first, cyc[cycIdx].second, mn * 0.018F, ya,
                 Rgb{120, 255, 180, false});
         plotDot(dst, w, h, strX, strY, mn * 0.018F, ya, Rgb{255, 120, 120, false});
@@ -1829,16 +1888,21 @@ void effectChladni(const Renderer& renderer, const std::vector<Rgb>& /*src*/, in
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   runFrames(
-      renderer, w, h, 5400,
+      renderer,
+      w,
+      h,
+      5400,
       [&](float t, std::vector<Rgb>& dst)
       {
-        const float cx = w * 0.5F, cy = h * 0.5F;
+        const float cx = w * 0.5F;
+        const float cy = h * 0.5F;
         const float plateR = mn * 0.40F;
         // Plate background.
         for (int y = 0; y < h; ++y)
           for (int x = 0; x < w; ++x)
           {
-            const float dx = x - cx, dy = (y - cy) * ya;
+            const float dx = x - cx;
+            const float dy = (y - cy) * ya;
             const float r = std::hypot(dx, dy);
             if (r > plateR)
               dst[static_cast<std::size_t>(y) * w + x] = Rgb{20, 18, 18, false};
@@ -1847,21 +1911,36 @@ void effectChladni(const Renderer& renderer, const std::vector<Rgb>& /*src*/, in
           }
         // Mode (n, m) cycles over time.
         const int stage = static_cast<int>(t * 4.0F);
-        int n = 0, m = 0;
+        int n = 0;
+        int m = 0;
         switch (stage % 4)
         {
-          case 0: n = 3; m = 2; break;
-          case 1: n = 4; m = 3; break;
-          case 2: n = 5; m = 4; break;
-          default: n = 6; m = 5; break;
+          case 0:
+            n = 3;
+            m = 2;
+            break;
+          case 1:
+            n = 4;
+            m = 3;
+            break;
+          case 2:
+            n = 5;
+            m = 4;
+            break;
+          default:
+            n = 6;
+            m = 5;
+            break;
         }
         // Plot sand along nodal lines: f(x,y) = cos(nπx/L)cos(mπy/L) - cos(mπx/L)cos(nπy/L) ≈ 0.
         for (int y = 0; y < h; ++y)
           for (int x = 0; x < w; ++x)
           {
-            const float dx = x - cx, dy = (y - cy) * ya;
+            const float dx = x - cx;
+            const float dy = (y - cy) * ya;
             const float r = std::hypot(dx, dy);
-            if (r > plateR) continue;
+            if (r > plateR)
+              continue;
             const float u = (dx / plateR);
             const float v = (dy / plateR);
             const float val =
@@ -1964,7 +2043,8 @@ void effectSunDogs(const Renderer& renderer, const std::vector<Rgb>& src, int w,
                   u8(240 - 10 * sf + l * 0.08F), false};
         }
       // 22° halo arc.
-      const float cx = w * 0.5F, cy = h * 0.45F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.45F;
       const float haloR = mn * 0.28F;
       for (float a = 3.14159F * 0.6F; a <= 3.14159F * 1.4F; a += 0.02F) {
         const float hx = cx + std::cos(a) * haloR;
@@ -1983,35 +2063,45 @@ void effectAccretionDisk(const Renderer& renderer, const std::vector<Rgb>& src, 
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  runFrames(renderer, w, h, 5400,
-    [&](float t, std::vector<Rgb>& dst) {
-      const float cx = w * 0.5F, cy = h * 0.5F;
-      for (int yy = 0; yy < h; ++yy)
-        for (int xx = 0; xx < w; ++xx) {
-          const float dx = xx - cx;
-          const float dy = (yy - cy) / ya;
-          const float r = std::sqrt(dx * dx + dy * dy);
-          if (r < mn * 0.05F) {
-            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{0, 0, 0, false};  // event horizon
-            continue;
+  runFrames(
+      renderer,
+      w,
+      h,
+      5400,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float cx = w * 0.5F;
+        const float cy = h * 0.5F;
+        for (int yy = 0; yy < h; ++yy)
+          for (int xx = 0; xx < w; ++xx)
+          {
+            const float dx = xx - cx;
+            const float dy = (yy - cy) / ya;
+            const float r = std::sqrt(dx * dx + dy * dy);
+            if (r < mn * 0.05F)
+            {
+              dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{0, 0, 0, false};  // event horizon
+              continue;
+            }
+            if (r > mn * 0.40F)
+            {
+              dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{4, 4, 12, false};
+              continue;
+            }
+            const float a = std::atan2(dy, dx);
+            // Kepler-ish: faster nearer in.
+            const float spiral = a + r * 0.05F - t * 12.0F / (r / mn + 0.5F);
+            const float arm = 0.5F + 0.5F * std::cos(spiral * 2.0F);
+            const Rgb d = sample(src, w, h, xx, yy);
+            const float dl = d.transparent ? 100.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+            // Inner = hot orange, outer = cooler red, modulated by data.
+            const float heat = 1.0F - (r - mn * 0.05F) / (mn * 0.35F);
+            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(80 + 170 * arm * heat + dl * 0.20F),
+                                                             u8(40 + 130 * arm * heat + dl * 0.10F),
+                                                             u8(20 + 50 * arm * heat * (1 - heat)),
+                                                             false};
           }
-          if (r > mn * 0.40F) {
-            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{4, 4, 12, false};
-            continue;
-          }
-          const float a = std::atan2(dy, dx);
-          // Kepler-ish: faster nearer in.
-          const float spiral = a + r * 0.05F - t * 12.0F / (r / mn + 0.5F);
-          const float arm = 0.5F + 0.5F * std::cos(spiral * 2.0F);
-          const Rgb d = sample(src, w, h, xx, yy);
-          const float dl = d.transparent ? 100.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-          // Inner = hot orange, outer = cooler red, modulated by data.
-          const float heat = 1.0F - (r - mn * 0.05F) / (mn * 0.35F);
-          dst[static_cast<std::size_t>(yy) * w + xx] =
-              Rgb{u8(80 + 170 * arm * heat + dl * 0.20F), u8(40 + 130 * arm * heat + dl * 0.10F),
-                  u8(20 + 50 * arm * heat * (1 - heat)), false};
-        }
-    });
+      });
 }
 
 void effectBigBang(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
@@ -2025,7 +2115,8 @@ void effectBigBang(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 12, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float expansion = std::clamp(t * 1.6F, 0.0F, 1.0F);
       // Bright core fades as expansion.
       const float coreFade = std::clamp(1.0F - t * 1.5F, 0.0F, 1.0F);
@@ -2133,9 +2224,11 @@ void effectDeepField(const Renderer& renderer, const std::vector<Rgb>& src, int 
         const float gy = hash(i * 7) * h;
         const float size = mn * 0.005F * (1.0F + 5.0F * hash(i * 13));
         const float tint = hash(i * 23);
-        const Rgb col = tint > 0.66F ? Rgb{220, 180, 140, false}
-                                      : (tint > 0.33F ? Rgb{180, 200, 230, false}
-                                                       : Rgb{200, 180, 220, false});
+        Rgb col{200, 180, 220, false};
+        if (tint > 0.66F)
+          col = Rgb{220, 180, 140, false};
+        else if (tint > 0.33F)
+          col = Rgb{180, 200, 230, false};
         drawDataDisk(dst, w, h, src, gx, gy, size, ya, 0.7F, t * 0.5F + i, col);
       }
     });
@@ -2189,7 +2282,8 @@ void effectGasGiant(const Renderer& renderer, const std::vector<Rgb>& src, int w
       for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 12, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.25F;
       // Disk fills (banded).
       for (int yy = static_cast<int>(cy - R / ya); yy <= static_cast<int>(cy + R / ya); ++yy)
@@ -2237,7 +2331,8 @@ void effectGravityLens(const Renderer& renderer, const std::vector<Rgb>& src, in
         const float sy = hash(i * 5) * h;
         plotDot(dst, w, h, sx, sy, mn * 0.005F, ya, Rgb{220, 220, 240, false});
       }
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       // Foreground massive blob.
       drawDataDisk(dst, w, h, src, cx, cy, mn * 0.06F, ya, 0.90F, t * 0.2F, Rgb{160, 130, 80, false});
       // Einstein arcs at multiple radii.
@@ -2273,10 +2368,15 @@ void effectJWST(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 14, false};
       const float open = std::clamp(t * 1.5F, 0.0F, 1.0F);
       // Hex mirror array (18 segments).
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float hexR = mn * 0.06F;
       for (int ring = 0; ring < 3; ++ring) {
-        const int n = ring == 0 ? 1 : (ring == 1 ? 6 : 11);
+        int n = 11;
+        if (ring == 0)
+          n = 1;
+        else if (ring == 1)
+          n = 6;
         for (int i = 0; i < n; ++i) {
           const float a = (ring == 0) ? 0 : (i / static_cast<float>(n)) * 6.2832F;
           const float dr = ring * hexR * 1.8F * open;
@@ -2316,7 +2416,8 @@ void effectNeutronStar(const Renderer& renderer, const std::vector<Rgb>& src, in
       for (int i = 0; i < 60; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       // Tiny dense data sphere.
       drawDataDisk(dst, w, h, src, cx, cy, mn * 0.06F, ya, 0.95F, t * 3.0F, Rgb{220, 220, 255, false});
       // Magnetic field lines.
@@ -2346,7 +2447,8 @@ void effectPulsar(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
       for (int i = 0; i < 60; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float beamA = t * 6.2832F * 2.0F;  // 2 Hz pulsar
       for (int k = 0; k < 2; ++k) {
         const float ang = beamA + k * 3.14159F;
@@ -2373,7 +2475,8 @@ void effectSupernova(const Renderer& renderer, const std::vector<Rgb>& src, int 
       for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 16, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       // Shockwave ring.
       const float ringR = mn * 0.50F * std::clamp(t * 1.5F, 0.0F, 1.0F);
       const float ringThk = mn * 0.025F * (1.0F + t);
@@ -2422,7 +2525,8 @@ void effectSolarEclipse(const Renderer& renderer, const std::vector<Rgb>& src, i
                   u8((230 - 70 * sf + l * 0.10F) * (1 - 0.50F * total)), false};
         }
       // Sun.
-      const float cx = w * 0.5F, cy = h * 0.45F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.45F;
       const float R = mn * 0.12F;
       drawDataDisk(dst, w, h, src, cx, cy, R, ya, 0.4F, t * 0.3F, Rgb{255, 230, 160, false});
       // Corona during totality: streamers radiating data.
@@ -2449,9 +2553,11 @@ void effectSolarEclipse(const Renderer& renderer, const std::vector<Rgb>& src, i
       const float Rm = R * 1.03F;
       for (int yo = -static_cast<int>(Rm / ya); yo <= static_cast<int>(Rm / ya); ++yo)
         for (int xo = -static_cast<int>(Rm); xo <= static_cast<int>(Rm); ++xo) {
-          const float u = xo / Rm, vN = yo * ya / Rm;
+          const float u = xo / Rm;
+          const float vN = yo * ya / Rm;
           if (u * u + vN * vN > 1.0F) continue;
-          const int xx = static_cast<int>(mx + xo), yy = static_cast<int>(my + yo);
+          const int xx = static_cast<int>(mx + xo);
+          const int yy = static_cast<int>(my + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{8, 8, 12, false};
         }
@@ -2476,14 +2582,17 @@ void effectLunarEclipse(const Renderer& renderer, const std::vector<Rgb>& src, i
         dst[static_cast<std::size_t>(sy) * w + sx] = Rgb{200, 200, 220, false};
       }
       // Umbra: a large faint reddish disk centred on screen.
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float Ru = mn * 0.32F;
       for (int yo = -static_cast<int>(Ru / ya); yo <= static_cast<int>(Ru / ya); ++yo)
         for (int xo = -static_cast<int>(Ru); xo <= static_cast<int>(Ru); ++xo) {
-          const float u = xo / Ru, vN = yo * ya / Ru;
+          const float u = xo / Ru;
+          const float vN = yo * ya / Ru;
           const float rN = u * u + vN * vN;
           if (rN > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h) {
             const float fade = 1.0F - rN;
             dst[static_cast<std::size_t>(yy) * w + xx] =
@@ -2515,7 +2624,8 @@ void effectSagittariusA(const Renderer& renderer, const std::vector<Rgb>& src, i
       for (int i = 0; i < 80; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       // Event-horizon shadow + photon ring.
       plotDot(dst, w, h, cx, cy, mn * 0.04F, ya, Rgb{0, 0, 0, false});
       for (float a = 0; a < 6.2832F; a += 0.01F)
@@ -2553,49 +2663,60 @@ void effectWormhole(const Renderer& renderer, const std::vector<Rgb>& src, int w
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  runFrames(renderer, w, h, 6000,
-    [&](float t, std::vector<Rgb>& dst) {
-      const float cx = w * 0.5F, cy = h * 0.5F;
-      const float Rmajor = mn * 0.30F;
-      const float Rminor = mn * 0.10F;
-      for (int yy = 0; yy < h; ++yy)
-        for (int xx = 0; xx < w; ++xx) {
-          const float dx = xx - cx;
-          const float dy = (yy - cy) * ya;
-          const float r = std::sqrt(dx * dx + dy * dy);
-          const float ang = std::atan2(dy, dx);
-          // Distance from the torus ring centre.
-          const float dRing = std::fabs(r - Rmajor);
-          if (dRing < Rminor) {
-            // Inside the torus — sample data from a swirled angle.
-            const float swirl = ang + (Rminor - dRing) / Rminor * 6.0F + t * 4.0F;
-            const float sx = cx + std::cos(swirl) * Rmajor;
-            const float syp = cy + std::sin(swirl) * Rmajor / ya;
-            const Rgb d = sample(src, w, h, static_cast<int>(sx), static_cast<int>(syp));
-            const float dr = d.transparent ? 100.0F : d.r;
-            const float dg = d.transparent ? 100.0F : d.g;
-            const float db = d.transparent ? 150.0F : d.b;
-            const float bright = 1.0F - dRing / Rminor;
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(dr * bright + 60 * (1 - bright)), u8(dg * bright + 80 * (1 - bright)),
-                    u8(db * bright + 160 * (1 - bright)), false};
-          } else if (r < Rmajor - Rminor) {
-            // Throat of the wormhole: data from the "other side".
-            const Rgb d = sample(src, w, h, w - 1 - xx, h - 1 - yy);
-            const float dr = d.transparent ? 60.0F : d.r;
-            const float dg = d.transparent ? 60.0F : d.g;
-            const float db = d.transparent ? 120.0F : d.b;
-            const float fade = r / (Rmajor - Rminor);
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(dr * fade), u8(dg * fade), u8(db * fade), false};
-          } else {
-            const Rgb d = sample(src, w, h, xx, yy);
-            const float dl = d.transparent ? 30.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(8 + dl * 0.10F), u8(8 + dl * 0.10F), u8(20 + dl * 0.10F), false};
+  runFrames(
+      renderer,
+      w,
+      h,
+      6000,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float cx = w * 0.5F;
+        const float cy = h * 0.5F;
+        const float Rmajor = mn * 0.30F;
+        const float Rminor = mn * 0.10F;
+        for (int yy = 0; yy < h; ++yy)
+          for (int xx = 0; xx < w; ++xx)
+          {
+            const float dx = xx - cx;
+            const float dy = (yy - cy) * ya;
+            const float r = std::sqrt(dx * dx + dy * dy);
+            const float ang = std::atan2(dy, dx);
+            // Distance from the torus ring centre.
+            const float dRing = std::fabs(r - Rmajor);
+            if (dRing < Rminor)
+            {
+              // Inside the torus — sample data from a swirled angle.
+              const float swirl = ang + (Rminor - dRing) / Rminor * 6.0F + t * 4.0F;
+              const float sx = cx + std::cos(swirl) * Rmajor;
+              const float syp = cy + std::sin(swirl) * Rmajor / ya;
+              const Rgb d = sample(src, w, h, static_cast<int>(sx), static_cast<int>(syp));
+              const float dr = d.transparent ? 100.0F : d.r;
+              const float dg = d.transparent ? 100.0F : d.g;
+              const float db = d.transparent ? 150.0F : d.b;
+              const float bright = 1.0F - dRing / Rminor;
+              dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(dr * bright + 60 * (1 - bright)),
+                                                               u8(dg * bright + 80 * (1 - bright)),
+                                                               u8(db * bright + 160 * (1 - bright)),
+                                                               false};
+            } else if (r < Rmajor - Rminor)
+            {
+              // Throat of the wormhole: data from the "other side".
+              const Rgb d = sample(src, w, h, w - 1 - xx, h - 1 - yy);
+              const float dr = d.transparent ? 60.0F : d.r;
+              const float dg = d.transparent ? 60.0F : d.g;
+              const float db = d.transparent ? 120.0F : d.b;
+              const float fade = r / (Rmajor - Rminor);
+              dst[static_cast<std::size_t>(yy) * w + xx] =
+                  Rgb{u8(dr * fade), u8(dg * fade), u8(db * fade), false};
+            } else
+            {
+              const Rgb d = sample(src, w, h, xx, yy);
+              const float dl = d.transparent ? 30.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+              dst[static_cast<std::size_t>(yy) * w + xx] =
+                  Rgb{u8(8 + dl * 0.10F), u8(8 + dl * 0.10F), u8(20 + dl * 0.10F), false};
+            }
           }
-        }
-    });
+      });
 }
 
 void effectMarsRover(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
@@ -2682,7 +2803,8 @@ void effectSolarFlare(const Renderer& renderer, const std::vector<Rgb>& src, int
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{8, 6, 18, false};
       // Sun fills the left half.
-      const float cx = w * 0.30F, cy = h * 0.50F;
+      const float cx = w * 0.30F;
+      const float cy = h * 0.50F;
       const float R = mn * 0.25F;
       drawDataDisk(dst, w, h, src, cx, cy, R, ya, 0.5F, t * 0.3F, Rgb{255, 180, 80, false});
       // Surface granulation: random small dots, data-tinted, on the disk.
@@ -2697,7 +2819,8 @@ void effectSolarFlare(const Renderer& renderer, const std::vector<Rgb>& src, int
       }
       // Prominence arch: a loop of fire rising from the limb.
       const float erupt = std::clamp(t * 1.8F, 0.0F, 1.0F);
-      const float pang0 = 2.6F, pang1 = 3.7F;  // limb angles in radians
+      const float pang0 = 2.6F;
+      const float pang1 = 3.7F;  // limb angles in radians
       const float pX0 = cx + std::cos(pang0) * R;
       const float pY0 = cy + std::sin(pang0) * R / ya;
       const float pX1 = cx + std::cos(pang1) * R;
@@ -2795,9 +2918,12 @@ void effectLigoChirp(const Renderer& renderer, const std::vector<Rgb>& src, int 
       const float r = mn * 0.20F * std::pow(std::max(0.05F, 1.0F - merge), 0.25F);
       const float omega = 4.0F * std::pow(std::max(0.05F, 1.0F - merge), -0.6F);  // chirp
       const float ang = omega * t * 6.2832F;
-      const float cx = w * 0.5F, cy = h * 0.35F;
-      const float sx1 = cx + std::cos(ang) * r, sy1 = cy + std::sin(ang) * r / ya;
-      const float sx2 = cx - std::cos(ang) * r, sy2 = cy - std::sin(ang) * r / ya;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.35F;
+      const float sx1 = cx + std::cos(ang) * r;
+      const float sy1 = cy + std::sin(ang) * r / ya;
+      const float sx2 = cx - std::cos(ang) * r;
+      const float sy2 = cy - std::sin(ang) * r / ya;
       if (merge < 0.95F) {
         drawDataDisk(dst, w, h, src, sx1, sy1, mn * 0.025F, ya, 0.95F, t * 2.0F, Rgb{180, 60, 20, false});
         drawDataDisk(dst, w, h, src, sx2, sy2, mn * 0.025F, ya, 0.95F, -t * 2.0F, Rgb{20, 60, 180, false});
@@ -2848,8 +2974,12 @@ void effectCosmicWeb(const Renderer& renderer, const std::vector<Rgb>& src, int 
       // Connect each node to its 2-3 nearest neighbours.
       const float fade = std::clamp(t * 1.5F, 0.0F, 1.0F);
       for (int i = 0; i < nNodes; ++i) {
-        float best1 = 1e9F, best2 = 1e9F, best3 = 1e9F;
-        int b1 = -1, b2 = -1, b3 = -1;
+        float best1 = 1e9F;
+        float best2 = 1e9F;
+        float best3 = 1e9F;
+        int b1 = -1;
+        int b2 = -1;
+        int b3 = -1;
         for (int j = 0; j < nNodes; ++j) {
           if (j == i) continue;
           const float dx = nd[i].x - nd[j].x;
@@ -2892,14 +3022,16 @@ void effectSpaghettify(const Renderer& renderer, const std::vector<Rgb>& src, in
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 16, false};
       // Black hole on the right.
-      const float bhX = w * 0.75F, bhY = h * 0.5F;
+      const float bhX = w * 0.75F;
+      const float bhY = h * 0.5F;
       plotDot(dst, w, h, bhX, bhY, mn * 0.05F, ya, Rgb{0, 0, 0, false});
       for (float a = 0; a < 6.2832F; a += 0.01F)
         plotDot(dst, w, h, bhX + std::cos(a) * mn * 0.06F, bhY + std::sin(a) * mn * 0.06F / ya,
                 std::max(1.0F, mn * 0.002F), ya, Rgb{240, 160, 60, false});
       // Star spaghettifies toward the BH.
       const float pull = std::clamp(t * 1.4F, 0.0F, 1.0F);
-      const float starX0 = w * 0.20F, starY0 = h * 0.50F;
+      const float starX0 = w * 0.20F;
+      const float starY0 = h * 0.50F;
       const float starX = starX0 + pull * (bhX - mn * 0.10F - starX0);
       // Stretch length proportional to pull.
       const float stretchLen = pull * mn * 0.45F;
@@ -2938,7 +3070,8 @@ void effectMagnetar(const Renderer& renderer, const std::vector<Rgb>& src, int w
       for (int i = 0; i < 50; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       // Magnetar (data-textured tiny sphere).
       drawDataDisk(dst, w, h, src, cx, cy, mn * 0.04F, ya, 0.95F, t * 5.0F, Rgb{200, 220, 255, false});
       // Magnetic field loops — dipole shape, twisted.
@@ -2987,7 +3120,8 @@ void effectHalley(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
       // Sun at the right focus.
-      const float sx = w * 0.70F, sy = h * 0.55F;
+      const float sx = w * 0.70F;
+      const float sy = h * 0.55F;
       drawDataDisk(dst, w, h, src, sx, sy, mn * 0.06F, ya, 0.5F, t * 0.3F, Rgb{255, 230, 160, false});
       // Comet on ellipse with high eccentricity. a = semi-major (in
       // screen units), e ≈ 0.97 for Halley.
@@ -2998,11 +3132,13 @@ void effectHalley(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
       const float cx = sx + r * std::cos(theta);
       const float cy = sy + r * std::sin(theta) / ya;
       // Tail length scales with proximity to the Sun.
-      const float dx = sx - cx, dy = sy - cy;
+      const float dx = sx - cx;
+      const float dy = sy - cy;
       const float dist = std::sqrt(dx * dx + dy * dy);
       const float tailLen = std::clamp(mn * 0.40F * (1.0F - dist / (a * 1.2F)), 0.0F, mn * 0.40F);
       // Dust tail (yellow, curved away from sun).
-      const float ux = (cx - sx) / dist, uy = (cy - sy) / dist;
+      const float ux = (cx - sx) / dist;
+      const float uy = (cy - sy) / dist;
       for (int k = 0; k < 60; ++k) {
         const float f = k / 60.0F;
         const float tx = cx + ux * tailLen * f + (hash(k) - 0.5F) * mn * 0.02F;
@@ -3038,7 +3174,8 @@ void effectDayTerminator(const Renderer& renderer, const std::vector<Rgb>& src, 
       for (int i = 0; i < 100; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.42F;
       const float centerLatDeg = 15.0F;
       const float centerLonDeg = std::fmod(t * 360.0F, 360.0F) - 180.0F;  // rotate east
@@ -3054,7 +3191,8 @@ void effectDayTerminator(const Renderer& renderer, const std::vector<Rgb>& src, 
       const float sunDz3 = std::cos(slatR) * std::cos(slonR);
       for (int yy = 0; yy < h; ++yy)
         for (int xx = 0; xx < w; ++xx) {
-          float lat = NAN, lon = NAN;
+          float lat = NAN;
+          float lon = NAN;
           if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
           const float latR = lat * 3.14159F / 180.0F;
           const float lonR = lon * 3.14159F / 180.0F;
@@ -3089,14 +3227,17 @@ void effectIssTrack(const Renderer& renderer, const std::vector<Rgb>& src, int w
       for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 14, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.42F;
-      const float centerLatDeg = 20.0F, centerLonDeg = 0.0F;
+      const float centerLatDeg = 20.0F;
+      const float centerLonDeg = 0.0F;
       const float cLat = std::cos(centerLatDeg * 3.14159F / 180.0F);
       const float sLat = std::sin(centerLatDeg * 3.14159F / 180.0F);
       for (int yy = 0; yy < h; ++yy)
         for (int xx = 0; xx < w; ++xx) {
-          float lat = NAN, lon = NAN;
+          float lat = NAN;
+          float lon = NAN;
           if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
@@ -3111,7 +3252,8 @@ void effectIssTrack(const Renderer& renderer, const std::vector<Rgb>& src, int w
           const float ph = k / 200.0F;
           const float lat = inc * std::sin(ph * 6.2832F);
           const float lon = std::fmod(ph * 360.0F - 22.5F * orbit + 540.0F, 360.0F) - 180.0F;
-          float px = NAN, py = NAN;
+          float px = NAN;
+          float py = NAN;
           if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py))
             plotDot(dst, w, h, px, py, std::max(1.0F, mn * 0.003F), ya,
                     Rgb{u8(180 - orbit * 50), u8(180 - orbit * 50), u8(220 - orbit * 30), false});
@@ -3121,7 +3263,8 @@ void effectIssTrack(const Renderer& renderer, const std::vector<Rgb>& src, int w
       const float ph = std::fmod(t * 2.0F, 1.0F);
       const float lat = inc * std::sin(ph * 6.2832F);
       const float lon = std::fmod(ph * 360.0F + 540.0F, 360.0F) - 180.0F;
-      float px = NAN, py = NAN;
+      float px = NAN;
+      float py = NAN;
       if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, lat, lon, px, py)) {
         plotDot(dst, w, h, px, py, mn * 0.012F, ya, Rgb{255, 240, 160, false});
         // Glint trail.
@@ -3129,7 +3272,8 @@ void effectIssTrack(const Renderer& renderer, const std::vector<Rgb>& src, int w
           const float ph2 = ph - k * 0.005F;
           const float la2 = inc * std::sin(ph2 * 6.2832F);
           const float lo2 = std::fmod(ph2 * 360.0F + 540.0F, 360.0F) - 180.0F;
-          float px2 = NAN, py2 = NAN;
+          float px2 = NAN;
+          float py2 = NAN;
           if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, la2, lo2, px2, py2))
             plotDot(dst, w, h, px2, py2, mn * 0.006F * (1 - k * 0.12F), ya, Rgb{220, 200, 100, false});
         }
@@ -3149,7 +3293,8 @@ void effectMagnetosphere(const Renderer& renderer, const std::vector<Rgb>& src, 
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{4, 4, 14, false};
       // Earth on the left-of-centre.
-      const float cx = w * 0.35F, cy = h * 0.5F;
+      const float cx = w * 0.35F;
+      const float cy = h * 0.5F;
       const float Re = mn * 0.08F;
       drawDataDisk(dst, w, h, src, cx, cy, Re, ya, 0.85F, t * 0.2F, Rgb{80, 120, 200, false});
       // Solar wind from the left.
@@ -3204,14 +3349,17 @@ void effectPangaea(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.42F;
       const float centerLonDeg = 0.0F;
-      const float cLat = 1.0F, sLat = 0.0F;
+      const float cLat = 1.0F;
+      const float sLat = 0.0F;
       // Ocean fill.
       for (int yy = 0; yy < h; ++yy)
         for (int xx = 0; xx < w; ++xx) {
-          float lat = NAN, lon = NAN;
+          float lat = NAN;
+          float lon = NAN;
           if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
@@ -3234,7 +3382,8 @@ void effectPangaea(const Renderer& renderer, const std::vector<Rgb>& src, int w,
         // Start: clumped near 0, 0 (Pangaea). End: at modern location.
         const float curLat = drift * c.driftLat;
         const float curLon = drift * c.driftLon;
-        float px = NAN, py = NAN;
+        float px = NAN;
+        float py = NAN;
         if (globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, curLat, curLon, px, py))
           drawDataDisk(dst, w, h, src, px, py, c.r, ya, 0.75F, 0.0F,
                        Rgb{140, 120, 70, false});
@@ -3265,13 +3414,16 @@ void effectRingOfFire(const Renderer& renderer, const std::vector<Rgb>& src, int
       for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{6, 6, 18, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.42F;
       const float centerLonDeg = -150.0F;
-      const float cLat = 1.0F, sLat = 0.0F;
+      const float cLat = 1.0F;
+      const float sLat = 0.0F;
       for (int yy = 0; yy < h; ++yy)
         for (int xx = 0; xx < w; ++xx) {
-          float lat = NAN, lon = NAN;
+          float lat = NAN;
+          float lon = NAN;
           if (!globePxToLatLon(cx, cy, R, ya, cLat, sLat, centerLonDeg, xx, yy, lat, lon)) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
@@ -3284,7 +3436,8 @@ void effectRingOfFire(const Renderer& renderer, const std::vector<Rgb>& src, int
           {-5,-80},{-20,-72},{-35,-72},{-45,-75},
           {-40,170},{-20,165},{0,150},{10,140},{20,140},{30,135},{40,140},{50,155},{55,160}};
       for (size_t i = 0; i < vol.size(); ++i) {
-        float px = NAN, py = NAN;
+        float px = NAN;
+        float py = NAN;
         if (!globeLatLonToPx(cx, cy, R, ya, cLat, sLat, centerLonDeg, vol[i].first, vol[i].second, px, py)) continue;
         // Steady volcano marker.
         plotDot(dst, w, h, px, py, mn * 0.008F, ya, Rgb{180, 80, 40, false});
@@ -3325,7 +3478,8 @@ void effectAndromeda(const Renderer& renderer, const std::vector<Rgb>& src, int 
         if (l < 80.0F) continue;
         dst[static_cast<std::size_t>(sy) * w + sx] = Rgb{220, 220, 240, false};
       }
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float grow = std::clamp(t * 1.4F, 0.0F, 1.0F);
       const float Rmax = mn * 0.45F * grow;
       const float tilt = 0.45F;
@@ -3365,14 +3519,17 @@ void effectBokGlobule(const Renderer& renderer, const std::vector<Rgb>& src, int
                   u8(140 + 40 * (-swirl) + dl * 0.20F), false};
         }
       const float collapse = std::clamp(t * 1.3F, 0.0F, 1.0F);
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.25F * (1.0F - collapse * 0.85F);
       for (int yo = -static_cast<int>(R / ya); yo <= static_cast<int>(R / ya); ++yo)
         for (int xo = -static_cast<int>(R); xo <= static_cast<int>(R); ++xo) {
-          const float nx = xo / R, nyN = yo * ya / R;
+          const float nx = xo / R;
+          const float nyN = yo * ya / R;
           const float r2 = nx * nx + nyN * nyN;
           if (r2 > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
           const float fade = 1.0F - r2;
           const Rgb& o = dst[static_cast<std::size_t>(yy) * w + xx];
@@ -3409,13 +3566,16 @@ void effectCassiniFinale(const Renderer& renderer, const std::vector<Rgb>& src, 
       for (int i = 0; i < 50; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.50F, cy = h * 0.50F;
+      const float cx = w * 0.50F;
+      const float cy = h * 0.50F;
       const float R = mn * 0.18F;
       for (int yo = -static_cast<int>(R / ya); yo <= static_cast<int>(R / ya); ++yo)
         for (int xo = -static_cast<int>(R); xo <= static_cast<int>(R); ++xo) {
-          const float nx = xo / R, nyN = yo * ya / R;
+          const float nx = xo / R;
+          const float nyN = yo * ya / R;
           if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dr = d.transparent ? 200.0F : d.r;
@@ -3501,7 +3661,8 @@ void effectCrabNebula(const Renderer& renderer, const std::vector<Rgb>& src, int
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(8 + dl * 0.10F), u8(6 + dl * 0.10F), u8(20 + dl * 0.10F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const int nFil = 40;
       const float expand = std::clamp(t * 1.4F, 0.0F, 1.0F);
       for (int i = 0; i < nFil; ++i) {
@@ -3549,7 +3710,8 @@ void effectDysonSphere(const Renderer& renderer, const std::vector<Rgb>& src, in
       for (int i = 0; i < 60; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       drawDataDisk(dst, w, h, src, cx, cy, mn * 0.06F, ya, 0.5F, t * 0.3F,
                    Rgb{255, 220, 120, false});
       const int nRings = static_cast<int>(std::clamp(t * 8.0F, 0.0F, 7.0F));
@@ -3627,7 +3789,8 @@ void effectHawkingRadiation(const Renderer& renderer, const std::vector<Rgb>& sr
       for (int i = 0; i < 60; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * (0.10F - 0.04F * t);
       plotDot(dst, w, h, cx, cy, R, ya, Rgb{0, 0, 0, false});
       for (float a = 0; a < 6.2832F; a += 0.01F)
@@ -3665,7 +3828,8 @@ void effectHelixNebula(const Renderer& renderer, const std::vector<Rgb>& src, in
       for (int i = 0; i < 80; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float grow = std::clamp(t * 1.2F, 0.0F, 1.0F);
       auto drawRing = [&](float rMin, float rMax, Rgb cold, Rgb hot) {
         for (float r = rMin; r <= rMax; r += mn * 0.004F) {
@@ -3759,7 +3923,8 @@ void effectHubbleExpansion(const Renderer& renderer, const std::vector<Rgb>& src
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(6 + dl * 0.08F), u8(6 + dl * 0.08F), u8(18 + dl * 0.08F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       for (int i = 0; i < 40; ++i) {
         const float a0 = hash(i) * 6.2832F;
         const float r0 = mn * 0.05F + hash(i * 3) * mn * 0.05F;
@@ -3793,11 +3958,14 @@ void effectHubbleTelescope(const Renderer& renderer, const std::vector<Rgb>& src
         }
       drawDataDisk(dst, w, h, src, w * 1.10F, h * 1.10F, mn * 0.50F, ya, 0.85F, 0.0F,
                    Rgb{60, 120, 180, false});
-      const float tx = w * 0.30F, tcy = h * 0.50F;
-      const float tubeL = mn * 0.30F, tubeR = mn * 0.05F;
+      const float tx = w * 0.30F;
+      const float tcy = h * 0.50F;
+      const float tubeL = mn * 0.30F;
+      const float tubeR = mn * 0.05F;
       for (int yo = -static_cast<int>(tubeR / ya); yo <= static_cast<int>(tubeR / ya); ++yo)
         for (int xo = -static_cast<int>(tubeL); xo <= static_cast<int>(tubeL); ++xo) {
-          const int xx = static_cast<int>(tx + xo), yy = static_cast<int>(tcy + yo);
+          const int xx = static_cast<int>(tx + xo);
+          const int yy = static_cast<int>(tcy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{200, 200, 220, false};
         }
@@ -3805,16 +3973,21 @@ void effectHubbleTelescope(const Renderer& renderer, const std::vector<Rgb>& src
               tcy - tubeR / ya, std::max(1.0F, mn * 0.005F), ya, Rgb{120, 120, 140, false});
       for (int yo = -static_cast<int>(mn * 0.15F); yo <= -static_cast<int>(tubeR / ya); ++yo)
         for (int xo = -static_cast<int>(mn * 0.15F); xo <= static_cast<int>(mn * 0.15F); ++xo) {
-          const int xx = static_cast<int>(tx - tubeL + xo), yy = static_cast<int>(tcy + yo);
+          const int xx = static_cast<int>(tx - tubeL + xo);
+          const int yy = static_cast<int>(tcy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{20, 40, 100, false};
         }
-      const float mvx = w * 0.78F, mvy = h * 0.45F, mvR = mn * 0.20F;
+      const float mvx = w * 0.78F;
+      const float mvy = h * 0.45F;
+      const float mvR = mn * 0.20F;
       for (int yo = -static_cast<int>(mvR / ya); yo <= static_cast<int>(mvR / ya); ++yo)
         for (int xo = -static_cast<int>(mvR); xo <= static_cast<int>(mvR); ++xo) {
-          const float nx = xo / mvR, nyN = yo * ya / mvR;
+          const float nx = xo / mvR;
+          const float nyN = yo * ya / mvR;
           if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(mvx + xo), yy = static_cast<int>(mvy + yo);
+          const int xx = static_cast<int>(mvx + xo);
+          const int yy = static_cast<int>(mvy + yo);
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dl = d.transparent ? 30.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
@@ -3849,7 +4022,8 @@ void effectLagrangePoints(const Renderer& renderer, const std::vector<Rgb>& src,
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(6 + dl * 0.10F), u8(6 + dl * 0.10F), u8(22 + dl * 0.10F), false};
         }
-      const float sunX = w * 0.30F, sunY = h * 0.50F;
+      const float sunX = w * 0.30F;
+      const float sunY = h * 0.50F;
       const float earthOrbitR = mn * 0.30F;
       const float earthAng = t * 6.2832F * 0.5F;
       const float earthX = sunX + std::cos(earthAng) * earthOrbitR;
@@ -3906,16 +4080,19 @@ void effectMoonPhases(const Renderer& renderer, const std::vector<Rgb>& src, int
       for (int i = 0; i < 50; ++i)
         dst[static_cast<std::size_t>(hash(i) * h) * w + static_cast<int>(hash(i * 3) * w)] =
             Rgb{180, 180, 220, false};
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.25F;
       drawDataDisk(dst, w, h, src, cx, cy, R, ya, 0.75F, t * 0.4F, Rgb{200, 200, 200, false});
       const float ph = std::fmod(t * 6.2832F, 6.2832F);
       for (int yo = -static_cast<int>(R / ya); yo <= static_cast<int>(R / ya); ++yo)
         for (int xo = -static_cast<int>(R); xo <= static_cast<int>(R); ++xo) {
-          const float nx = xo / R, nyN = yo * ya / R;
+          const float nx = xo / R;
+          const float nyN = yo * ya / R;
           const float r2 = nx * nx + nyN * nyN;
           if (r2 > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
           const float z = std::sqrt(std::max(0.0F, 1.0F - r2));
           const float lit = nx * std::sin(ph) + z * std::cos(ph);
@@ -3980,48 +4157,83 @@ void effectParkerProbe(const Renderer& renderer, const std::vector<Rgb>& src, in
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
-  runFrames(renderer, w, h, 5600,
-    [&](float t, std::vector<Rgb>& dst) {
-      const float sunX = w * 0.85F, sunY = h * 0.85F;
-      const float R = mn * 0.75F;
-      for (int yy = 0; yy < h; ++yy)
-        for (int xx = 0; xx < w; ++xx) {
-          const float dx = xx - sunX, dy = (yy - sunY) * ya;
-          const float r = std::sqrt(dx * dx + dy * dy);
-          const Rgb d = sample(src, w, h, xx, yy);
-          const float dl = d.transparent ? 40.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-          if (r < R) {
-            const float surf = 1.0F - r / R;
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(255 * surf + dl * 0.20F * surf), u8(180 * surf + dl * 0.20F * surf),
-                    u8(60 * surf), false};
-          } else {
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(8 + dl * 0.10F), u8(8 + dl * 0.10F), u8(22 + dl * 0.10F), false};
-          }
-        }
-      for (int i = 0; i < 60; ++i) {
-        const float a = hash(i) * 6.2832F;
-        const float rr = hash(i * 3) * R * 0.9F;
-        const float gx = sunX + std::cos(a) * rr;
-        const float gy = sunY + std::sin(a) * rr / ya;
-        plotDot(dst, w, h, gx, gy, mn * 0.012F, ya, Rgb{255, 220, 100, false});
-      }
-      const float dive = std::clamp(t * 1.2F, 0.0F, 1.0F);
-      const float px = w * 0.15F + dive * (sunX - mn * 0.20F - w * 0.15F);
-      const float py = h * 0.20F + dive * (sunY - mn * 0.50F - h * 0.20F);
-      plotDot(dst, w, h, px, py, mn * 0.035F, ya, Rgb{240, 240, 240, false});
-      for (float a = 0; a < 6.2832F; a += 0.03F) {
-        const float glow = 0.6F + 0.4F * std::sin(a * 3.0F + t * 12.0F);
-        plotDot(dst, w, h, px + std::cos(a) * mn * 0.037F,
-                py + std::sin(a) * mn * 0.037F / ya, std::max(1.0F, mn * 0.003F), ya,
-                Rgb{u8(255 * glow), u8(140 * glow), u8(40 * glow), false});
-      }
-      drawSeg(dst, w, h, px - mn * 0.04F, py - mn * 0.02F, px - mn * 0.06F, py - mn * 0.05F,
-              std::max(1.0F, mn * 0.004F), ya, Rgb{40, 60, 120, false});
-      drawSeg(dst, w, h, px - mn * 0.04F, py + mn * 0.02F, px - mn * 0.06F, py + mn * 0.05F,
-              std::max(1.0F, mn * 0.004F), ya, Rgb{40, 60, 120, false});
-    });
+  runFrames(renderer,
+            w,
+            h,
+            5600,
+            [&](float t, std::vector<Rgb>& dst)
+            {
+              const float sunX = w * 0.85F;
+              const float sunY = h * 0.85F;
+              const float R = mn * 0.75F;
+              for (int yy = 0; yy < h; ++yy)
+                for (int xx = 0; xx < w; ++xx)
+                {
+                  const float dx = xx - sunX;
+                  const float dy = (yy - sunY) * ya;
+                  const float r = std::sqrt(dx * dx + dy * dy);
+                  const Rgb d = sample(src, w, h, xx, yy);
+                  const float dl = d.transparent ? 40.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+                  if (r < R)
+                  {
+                    const float surf = 1.0F - r / R;
+                    dst[static_cast<std::size_t>(yy) * w + xx] =
+                        Rgb{u8(255 * surf + dl * 0.20F * surf),
+                            u8(180 * surf + dl * 0.20F * surf),
+                            u8(60 * surf),
+                            false};
+                  }
+                  else
+                  {
+                    dst[static_cast<std::size_t>(yy) * w + xx] =
+                        Rgb{u8(8 + dl * 0.10F), u8(8 + dl * 0.10F), u8(22 + dl * 0.10F), false};
+                  }
+                }
+              for (int i = 0; i < 60; ++i)
+              {
+                const float a = hash(i) * 6.2832F;
+                const float rr = hash(i * 3) * R * 0.9F;
+                const float gx = sunX + std::cos(a) * rr;
+                const float gy = sunY + std::sin(a) * rr / ya;
+                plotDot(dst, w, h, gx, gy, mn * 0.012F, ya, Rgb{255, 220, 100, false});
+              }
+              const float dive = std::clamp(t * 1.2F, 0.0F, 1.0F);
+              const float px = w * 0.15F + dive * (sunX - mn * 0.20F - w * 0.15F);
+              const float py = h * 0.20F + dive * (sunY - mn * 0.50F - h * 0.20F);
+              plotDot(dst, w, h, px, py, mn * 0.035F, ya, Rgb{240, 240, 240, false});
+              for (float a = 0; a < 6.2832F; a += 0.03F)
+              {
+                const float glow = 0.6F + 0.4F * std::sin(a * 3.0F + t * 12.0F);
+                plotDot(dst,
+                        w,
+                        h,
+                        px + std::cos(a) * mn * 0.037F,
+                        py + std::sin(a) * mn * 0.037F / ya,
+                        std::max(1.0F, mn * 0.003F),
+                        ya,
+                        Rgb{u8(255 * glow), u8(140 * glow), u8(40 * glow), false});
+              }
+              drawSeg(dst,
+                      w,
+                      h,
+                      px - mn * 0.04F,
+                      py - mn * 0.02F,
+                      px - mn * 0.06F,
+                      py - mn * 0.05F,
+                      std::max(1.0F, mn * 0.004F),
+                      ya,
+                      Rgb{40, 60, 120, false});
+              drawSeg(dst,
+                      w,
+                      h,
+                      px - mn * 0.04F,
+                      py + mn * 0.02F,
+                      px - mn * 0.06F,
+                      py + mn * 0.05F,
+                      std::max(1.0F, mn * 0.004F),
+                      ya,
+                      Rgb{40, 60, 120, false});
+            });
 }
 
 void effectSaturnRings(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
@@ -4038,7 +4250,8 @@ void effectSaturnRings(const Renderer& renderer, const std::vector<Rgb>& src, in
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(6 + dl * 0.10F), u8(6 + dl * 0.10F), u8(20 + dl * 0.10F), false};
         }
-      const float cx = w * 0.20F, cy = h * 0.50F;
+      const float cx = w * 0.20F;
+      const float cy = h * 0.50F;
       drawDataDisk(dst, w, h, src, cx, cy, mn * 0.20F, ya, 0.75F, t * 0.2F,
                    Rgb{220, 180, 120, false});
       for (float rr = mn * 0.24F; rr < mn * 0.95F; rr += mn * 0.005F) {
@@ -4076,7 +4289,8 @@ void effectSunspotCycle(const Renderer& renderer, const std::vector<Rgb>& src, i
           dst[static_cast<std::size_t>(y) * w + x] =
               Rgb{u8(6 + dl * 0.10F), u8(6 + dl * 0.10F), u8(22 + dl * 0.10F), false};
         }
-      const float cx = w * 0.5F, cy = h * 0.5F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.5F;
       const float R = mn * 0.40F;
       drawDataDisk(dst, w, h, src, cx, cy, R, ya, 0.5F, t * 0.2F, Rgb{255, 220, 120, false});
       for (int i = 0; i < 80; ++i) {
@@ -4096,7 +4310,8 @@ void effectSunspotCycle(const Renderer& renderer, const std::vector<Rgb>& src, i
         const float bandLat = (hash(i * 3) - 0.5F) * 0.7F;
         const float sx = cx + (drift - 0.5F) * 2.0F * R * std::cos(bandLat);
         const float sy = cy + bandLat * R / ya;
-        const float dx = sx - cx, dy = (sy - cy) * ya;
+        const float dx = sx - cx;
+        const float dy = (sy - cy) * ya;
         if (dx * dx + dy * dy > R * R) continue;
         plotDot(dst, w, h, sx, sy, mn * 0.012F, ya, Rgb{30, 20, 10, false});
         for (float a = 0; a < 6.2832F; a += 0.1F)
@@ -4112,52 +4327,75 @@ void effectVoyager(const Renderer& renderer, const std::vector<Rgb>& src, int w,
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
-  runFrames(renderer, w, h, 6000,
-    [&](float t, std::vector<Rgb>& dst) {
-      const float sunX = w * 0.10F, sunY = h * 0.50F;
-      for (int yy = 0; yy < h; ++yy)
-        for (int xx = 0; xx < w; ++xx) {
-          const Rgb d = sample(src, w, h, xx, yy);
-          const float dl = d.transparent ? 30.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-          const float dx = xx - sunX, dy = (yy - sunY) * ya;
-          const float r = std::sqrt(dx * dx + dy * dy);
-          const float helioR = mn * 0.50F;
-          const bool inside = r < helioR;
-          if (inside)
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(60 + dl * 0.15F), u8(40 + dl * 0.10F), u8(20 + dl * 0.05F), false};
-          else
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(20 + dl * 0.10F), u8(20 + dl * 0.10F), u8(50 + dl * 0.15F), false};
+  runFrames(
+      renderer,
+      w,
+      h,
+      6000,
+      [&](float t, std::vector<Rgb>& dst)
+      {
+        const float sunX = w * 0.10F;
+        const float sunY = h * 0.50F;
+        for (int yy = 0; yy < h; ++yy)
+          for (int xx = 0; xx < w; ++xx)
+          {
+            const Rgb d = sample(src, w, h, xx, yy);
+            const float dl = d.transparent ? 30.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+            const float dx = xx - sunX;
+            const float dy = (yy - sunY) * ya;
+            const float r = std::sqrt(dx * dx + dy * dy);
+            const float helioR = mn * 0.50F;
+            const bool inside = r < helioR;
+            if (inside)
+              dst[static_cast<std::size_t>(yy) * w + xx] =
+                  Rgb{u8(60 + dl * 0.15F), u8(40 + dl * 0.10F), u8(20 + dl * 0.05F), false};
+            else
+              dst[static_cast<std::size_t>(yy) * w + xx] =
+                  Rgb{u8(20 + dl * 0.10F), u8(20 + dl * 0.10F), u8(50 + dl * 0.15F), false};
+          }
+        const float helioR2 = mn * 0.50F;
+        for (float a = 0; a < 6.2832F; a += 0.005F)
+        {
+          const float bx = sunX + std::cos(a) * helioR2;
+          const float by = sunY + std::sin(a) * helioR2 / ya;
+          if (bx >= 0 && bx < w && by >= 0 && by < h)
+            plotDot(dst, w, h, bx, by, std::max(1.0F, mn * 0.002F), ya, Rgb{180, 140, 80, false});
         }
-      const float helioR2 = mn * 0.50F;
-      for (float a = 0; a < 6.2832F; a += 0.005F) {
-        const float bx = sunX + std::cos(a) * helioR2;
-        const float by = sunY + std::sin(a) * helioR2 / ya;
-        if (bx >= 0 && bx < w && by >= 0 && by < h)
-          plotDot(dst, w, h, bx, by, std::max(1.0F, mn * 0.002F), ya, Rgb{180, 140, 80, false});
-      }
-      drawDataDisk(dst, w, h, src, sunX, sunY, mn * 0.04F, ya, 0.5F, t * 0.3F,
-                   Rgb{255, 220, 120, false});
-      const float cross = std::clamp(t * 1.2F, 0.0F, 1.0F);
-      const float px = sunX + cross * mn * 0.80F;
-      const float py = sunY;
-      plotDot(dst, w, h, px, py, mn * 0.015F, ya, Rgb{220, 220, 220, false});
-      for (float a = -1.0F; a <= 1.0F; a += 0.2F)
-        plotDot(dst, w, h, px + std::cos(a) * mn * 0.025F, py + std::sin(a) * mn * 0.025F / ya,
-                std::max(1.0F, mn * 0.003F), ya, Rgb{200, 200, 220, false});
-      for (int k = 0; k < 30; ++k) {
-        const float f = k / 30.0F;
-        plotDot(dst, w, h, px - f * mn * 0.20F, py - f * f * mn * 0.02F,
-                std::max(1.0F, mn * 0.001F), ya, Rgb{120, 120, 160, false});
-      }
-      for (int i = 0; i < 40; ++i) {
-        const float sxN = static_cast<float>(w) * 0.50F + hash(i) * w * 0.50F;
-        const float syN = hash(i * 3) * h;
-        dst[static_cast<std::size_t>(static_cast<int>(syN)) * w + static_cast<int>(sxN)] =
-            Rgb{220, 220, 240, false};
-      }
-    });
+        drawDataDisk(
+            dst, w, h, src, sunX, sunY, mn * 0.04F, ya, 0.5F, t * 0.3F, Rgb{255, 220, 120, false});
+        const float cross = std::clamp(t * 1.2F, 0.0F, 1.0F);
+        const float px = sunX + cross * mn * 0.80F;
+        const float py = sunY;
+        plotDot(dst, w, h, px, py, mn * 0.015F, ya, Rgb{220, 220, 220, false});
+        for (float a = -1.0F; a <= 1.0F; a += 0.2F)
+          plotDot(dst,
+                  w,
+                  h,
+                  px + std::cos(a) * mn * 0.025F,
+                  py + std::sin(a) * mn * 0.025F / ya,
+                  std::max(1.0F, mn * 0.003F),
+                  ya,
+                  Rgb{200, 200, 220, false});
+        for (int k = 0; k < 30; ++k)
+        {
+          const float f = k / 30.0F;
+          plotDot(dst,
+                  w,
+                  h,
+                  px - f * mn * 0.20F,
+                  py - f * f * mn * 0.02F,
+                  std::max(1.0F, mn * 0.001F),
+                  ya,
+                  Rgb{120, 120, 160, false});
+        }
+        for (int i = 0; i < 40; ++i)
+        {
+          const float sxN = static_cast<float>(w) * 0.50F + hash(i) * w * 0.50F;
+          const float syN = hash(i * 3) * h;
+          dst[static_cast<std::size_t>(static_cast<int>(syN)) * w + static_cast<int>(sxN)] =
+              Rgb{220, 220, 240, false};
+        }
+      });
 }
 
 // "Rube Goldberg" — a chain of cause-and-effect mechanisms whose only purpose is
@@ -4182,7 +4420,8 @@ void effectRubeGoldberg(const Renderer& renderer, const std::vector<Rgb>& src, i
   // --- Static contraption layout (fractions of the frame, so it scales). ---
   const float floorY = h * 0.70F;  // rail the dominoes stand on
   constexpr int kN = 12;           // number of dominoes
-  const float domX0 = w * 0.24F, domX1 = w * 0.62F;
+  const float domX0 = w * 0.24F;
+  const float domX1 = w * 0.62F;
   const float domL = mn * 0.14F;                   // domino length
   const float domW = std::max(1.0F, mn * 0.016F);  // domino half-thickness
   auto domBaseX = [&](int i) { return domX0 + (domX1 - domX0) * i / static_cast<float>(kN - 1); };
@@ -4197,15 +4436,23 @@ void effectRubeGoldberg(const Renderer& renderer, const std::vector<Rgb>& src, i
 
   // See-saw lever: the last domino lands on its short (left) arm, flinging the
   // counterweight resting on the long (right) arm.
-  const float levX = w * 0.70F, levY = floorY - mn * 0.05F;
-  const float levShort = mn * 0.12F, levLong = mn * 0.20F;
+  const float levX = w * 0.70F;
+  const float levY = floorY - mn * 0.05F;
+  const float levShort = mn * 0.12F;
+  const float levLong = mn * 0.20F;
 
   // Pulley + bucket on the right; pendulum hung from top-centre over a balloon.
-  const float wheelX = w * 0.90F, wheelY = h * 0.16F, wheelR = mn * 0.05F;
-  const float bucketX = w * 0.84F, bucketY0 = h * 0.30F;
-  const float bw = mn * 0.07F, bh = mn * 0.06F;
-  const float pivX = w * 0.50F, pivY = h * 0.10F;
-  const float balloonX = w * 0.50F, balloonY = h * 0.60F;
+  const float wheelX = w * 0.90F;
+  const float wheelY = h * 0.16F;
+  const float wheelR = mn * 0.05F;
+  const float bucketX = w * 0.84F;
+  const float bucketY0 = h * 0.30F;
+  const float bw = mn * 0.07F;
+  const float bh = mn * 0.06F;
+  const float pivX = w * 0.50F;
+  const float pivY = h * 0.10F;
+  const float balloonX = w * 0.50F;
+  const float balloonY = h * 0.60F;
   const float pendL = balloonY - pivY;  // bob reaches the balloon at vertical
   const float rBalloon = mn * 0.05F;
   const float rBob = mn * 0.04F;
@@ -4297,7 +4544,8 @@ void effectRubeGoldberg(const Renderer& renderer, const std::vector<Rgb>& src, i
               // --- Counterweight: rides the long arm, then is flung into the bucket. ---
               const float bucketY = bucketY0 + smooth(seg01(t, 0.66F, 0.80F)) * h * 0.34F;
               const float bucketMouthY = bucketY0 - bh * 0.5F;
-              float cwx = lRx, cwy = lRy - rBob;
+              float cwx = lRx;
+              float cwy = lRy - rBob;
               if (t >= 0.58F)
               {
                 const float a = seg01(t, 0.58F, 0.70F);

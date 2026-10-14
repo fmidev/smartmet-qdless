@@ -1153,10 +1153,13 @@ void UI::popupHelp(HelpContext ctx)
     maxR = std::max(maxR, utf8Width(r));
   }
   const int sep = 3;  // gap between key column and action column
-  const std::string title = (ctx.view == HelpView::View3D)    ? "Help \xe2\x80\x94 3D view"
-                            : (ctx.view == HelpView::Curtain) ? "Help \xe2\x80\x94 curtain view"
-                            : (ctx.view == HelpView::Globe)   ? "Help \xe2\x80\x94 globe view"
-                                                              : "Help";
+  std::string title = "Help";
+  if (ctx.view == HelpView::View3D)
+    title = "Help \xe2\x80\x94 3D view";
+  else if (ctx.view == HelpView::Curtain)
+    title = "Help \xe2\x80\x94 curtain view";
+  else if (ctx.view == HelpView::Globe)
+    title = "Help \xe2\x80\x94 globe view";
   const int contentW = maxL + sep + maxR;
   const int width = std::min(COLS - 4, std::max({contentW + 4, utf8Width(title) + 8, 40}));
   const int interiorW = width - 2;
@@ -1334,7 +1337,11 @@ std::optional<UI::PopupClick> UI::popupMetadata(
         }
         bestHard = static_cast<int>(i + 1);
       }
-      const int cut = bestComma > 0 ? bestComma : bestSpace > 0 ? bestSpace : bestHard;
+      int cut = bestHard;
+      if (bestComma > 0)
+        cut = bestComma;
+      else if (bestSpace > 0)
+        cut = bestSpace;
       if (cut <= 0)
       {
         out.push_back(remaining);

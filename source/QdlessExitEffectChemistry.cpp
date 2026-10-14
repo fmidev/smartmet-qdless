@@ -23,7 +23,8 @@ void effectBenzene(const Renderer& renderer, const std::vector<Rgb>& src, int w,
                       Rgb{u8(16 + l * 0.08F * dim), u8(20 + l * 0.08F * dim),
                           u8(28 + l * 0.10F * dim), false};
                 }
-              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.5F;
               const float R = mn * 0.26F;
               const float aRot = t * 1.2F;
               const Rgb cTint{200, 200, 210, false};
@@ -40,9 +41,11 @@ void effectBenzene(const Renderer& renderer, const std::vector<Rgb>& src, int w,
                         Rgb{210, 210, 210, false});
                 if (i % 2 == 0)
                 {
-                  const float dx = c2x - c1x, dy = c2y - c1y;
+                  const float dx = c2x - c1x;
+                  const float dy = c2y - c1y;
                   const float nl = std::hypot(dx, dy);
-                  const float nx = -dy / nl, ny = dx / nl;
+                  const float nx = -dy / nl;
+                  const float ny = dx / nl;
                   const float oo = mn * 0.020F;
                   drawSeg(dst, w, h, c1x + nx * oo, c1y + ny * oo, c2x + nx * oo,
                           c2y + ny * oo, std::max(1.0F, mn * 0.004F), ya,
@@ -102,17 +105,24 @@ void effectBuckyball(const Renderer& renderer, const std::vector<Rgb>& src, int 
                       Rgb{u8(10 + l * 0.06F * dim), u8(14 + l * 0.06F * dim),
                           u8(24 + l * 0.10F * dim), false};
                 }
-              const float cyw = std::cos(t * 1.0F), syw = std::sin(t * 1.0F);
-              const float cp = std::cos(t * 0.7F), sp = std::sin(t * 0.7F);
+              const float cyw = std::cos(t * 1.0F);
+              const float syw = std::sin(t * 1.0F);
+              const float cp = std::cos(t * 0.7F);
+              const float sp = std::sin(t * 0.7F);
               const float scale = mn / 12.0F;
-              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.5F;
               struct Pt { float sx, sy, z; };
               std::vector<Pt> pts(verts.size());
               for (std::size_t i = 0; i < verts.size(); ++i)
               {
-                const float x = verts[i][0], yv = verts[i][1], z = verts[i][2];
-                const float x1 = x * cyw - z * syw, z1 = x * syw + z * cyw;
-                const float y2 = yv * cp - z1 * sp, z2 = yv * sp + z1 * cp;
+                const float x = verts[i][0];
+                const float yv = verts[i][1];
+                const float z = verts[i][2];
+                const float x1 = x * cyw - z * syw;
+                const float z1 = x * syw + z * cyw;
+                const float y2 = yv * cp - z1 * sp;
+                const float z2 = yv * sp + z1 * cp;
                 pts[i] = {cx + x1 * scale, cy + y2 * scale / ya, z2};
               }
               for (const auto& p : pts)
@@ -131,7 +141,8 @@ void effectPeriodicTable(const Renderer& renderer, const std::vector<Rgb>& src, 
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   // Position table (row, col) for each Z=1..118. 0 means "no cell."
   // Simplified: just lay out the standard short form for visual punch.
-  constexpr int kCols = 18, kRows = 7;
+  constexpr int kCols = 18;
+  constexpr int kRows = 7;
   static const char* const kSyms[kRows][kCols] = {
       {"H",  "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "He"},
       {"Li", "Be", "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "B",  "C",  "N",  "O",  "F",  "Ne"},
@@ -165,8 +176,10 @@ void effectPeriodicTable(const Renderer& renderer, const std::vector<Rgb>& src, 
                   if (idx >= revealed) continue;
                   const char* sym = kSyms[r][c];
                   if (sym[0] == '\0') continue;
-                  const float xa = startX + c * cellW, xb = xa + cellW * 0.94F;
-                  const float yya = startY + r * cellH, yyb = yya + cellH * 0.94F;
+                  const float xa = startX + c * cellW;
+                  const float xb = xa + cellW * 0.94F;
+                  const float yya = startY + r * cellH;
+                  const float yyb = yya + cellH * 0.94F;
                   // Tint: sample the data at the cell's anchor and blend with
                   // a per-group hue.
                   const Rgb d = sample(src, w, h, (xa + xb) * 0.5F, (yya + yyb) * 0.5F);
@@ -353,10 +366,13 @@ void effectNaClLattice(const Renderer& renderer, const std::vector<Rgb>& src, in
                           ? Rgb{12, 12, 18, false}
                           : Rgb{u8(s.r * dim), u8(s.g * dim), u8(s.b * dim + 6), false};
                 }
-              const float cyw = std::cos(t * 0.8F), syw = std::sin(t * 0.8F);
-              const float cp = std::cos(0.4F), sp = std::sin(0.4F);
+              const float cyw = std::cos(t * 0.8F);
+              const float syw = std::sin(t * 0.8F);
+              const float cp = std::cos(0.4F);
+              const float sp = std::sin(0.4F);
               const float spacing = mn * 0.06F;
-              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.5F;
               const int extent = 3;
               const float grow = std::clamp(t * 1.5F, 0.0F, 1.0F);
               for (int ix = -extent; ix <= extent; ++ix)
@@ -451,11 +467,16 @@ void effectChromatography(const Renderer& renderer, const std::vector<Rgb>& src,
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  runFrames(renderer, w, h, 5400,
+  runFrames(renderer,
+            w,
+            h,
+            5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              const float paperLeft = w * 0.30F, paperRight = w * 0.70F;
-              const float paperTop = h * 0.05F, paperBot = h * 0.92F;
+              const float paperLeft = w * 0.30F;
+              const float paperRight = w * 0.70F;
+              const float paperTop = h * 0.05F;
+              const float paperBot = h * 0.92F;
               for (int y = 0; y < h; ++y)
                 for (int x = 0; x < w; ++x)
                 {
@@ -512,7 +533,8 @@ void effectBrownian(const Renderer& renderer, const std::vector<Rgb>& src, int w
   // Pre-walk the path so it's deterministic.
   constexpr int N = 240;
   std::vector<std::pair<float, float>> path(N);
-  float px = w * 0.5F, py = h * 0.5F;
+  float px = w * 0.5F;
+  float py = h * 0.5F;
   for (int i = 0; i < N; ++i)
   {
     const float a = hash(i * 3) * 6.2832F;
@@ -655,7 +677,8 @@ void effectGlowStick(const Renderer& renderer, const std::vector<Rgb>& src, int 
                 const float bend = (u < 0) ? -snapAng : snapAng;
                 const float xx = w * 0.5F + u * L;
                 const float yy = midY + std::sin(bend) * std::fabs(u) * mn * 0.04F;
-                const float yLo = yy - tubeR, yHi = yy + tubeR;
+                const float yLo = yy - tubeR;
+                const float yHi = yy + tubeR;
                 const bool inGlow = std::fabs(xx - snapX) / L < spread;
                 for (int iy = static_cast<int>(yLo); iy <= static_cast<int>(yHi); ++iy)
                 {
@@ -835,7 +858,8 @@ void effectMendeleev(const Renderer& renderer, const std::vector<Rgb>& src, int 
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n)
   { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
-  constexpr int kCols = 18, kRows = 7;
+  constexpr int kCols = 18;
+  constexpr int kRows = 7;
   static const char* const kSyms[kRows][kCols] = {
       {"H",  "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "He"},
       {"Li", "Be", "",   "",   "",   "",   "",   "",   "",   "",   "",   "",   "B",  "C",  "N",  "O",  "F",  "Ne"},
@@ -910,14 +934,16 @@ void effectElectrolysis(const Renderer& renderer, const std::vector<Rgb>& src, i
                   dst[static_cast<std::size_t>(y) * w + x] =
                       Rgb{u8(20 + l * 0.18F), u8(40 + l * 0.20F), u8(80 + l * 0.30F), false};
                 }
-              const float cxl = w * 0.35F, cxr = w * 0.65F;
+              const float cxl = w * 0.35F;
+              const float cxr = w * 0.65F;
               const float botY = h * 0.85F;
               // Electrodes (vertical bars).
               for (int yy = static_cast<int>(h * 0.20F); yy <= static_cast<int>(botY); ++yy)
               {
                 for (int xo = -2; xo <= 2; ++xo)
                 {
-                  const int xL = static_cast<int>(cxl + xo), xR = static_cast<int>(cxr + xo);
+                  const int xL = static_cast<int>(cxl + xo);
+                  const int xR = static_cast<int>(cxr + xo);
                   if (yy >= 0 && yy < h)
                   {
                     if (xL >= 0 && xL < w) dst[static_cast<std::size_t>(yy) * w + xL] = Rgb{220, 220, 220, false};
@@ -992,7 +1018,8 @@ void effectSoapBubble(const Renderer& renderer, const std::vector<Rgb>& src, int
           for (int xx = static_cast<int>(cx - R); xx <= static_cast<int>(cx + R); ++xx)
           {
             if (xx < 0 || xx >= w) continue;
-            const float dx = xx - cx, dy = (yy - cy) * ya;
+            const float dx = xx - cx;
+            const float dy = (yy - cy) * ya;
             const float r = std::hypot(dx, dy);
             if (r > R) continue;
             const Rgb d = sample(src, w, h, xx, yy);
@@ -1024,15 +1051,20 @@ void effectLiesegang(const Renderer& renderer, const std::vector<Rgb>& src, int 
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  runFrames(renderer, w, h, 5200,
+  runFrames(renderer,
+            w,
+            h,
+            5200,
             [&](float t, std::vector<Rgb>& dst)
             {
-              const float cx = w * 0.5F, cy = h * 0.5F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.5F;
               const float maxR = std::min(w, h) * 0.42F;
               for (int y = 0; y < h; ++y)
                 for (int x = 0; x < w; ++x)
                 {
-                  const float dx = x - cx, dy = (y - cy) * ya;
+                  const float dx = x - cx;
+                  const float dy = (y - cy) * ya;
                   const float r = std::hypot(dx, dy);
                   const Rgb d = sample(src, w, h, x, y);
                   const float dr = d.transparent ? 100.0F : d.r;
@@ -1080,10 +1112,12 @@ void effectPhaseTransition(const Renderer& renderer, const std::vector<Rgb>& src
                       Rgb{u8(20 + l * 0.10F * dim), u8(20 + l * 0.10F * dim),
                           u8(30 + l * 0.10F * dim), false};
                 }
-              const float gasT = 0.35F, liqT = 0.65F;
+              const float gasT = 0.35F;
+              const float liqT = 0.65F;
               for (int i = 0; i < N; ++i)
               {
-                const int gx = i % 8, gy = i / 8;
+                const int gx = i % 8;
+                const int gy = i / 8;
                 const float latticeX = w * 0.18F + gx * w * 0.09F;
                 const float latticeY = h * 0.25F + gy * mn * 0.10F;
                 float px = latticeX + (hash(i) - 0.5F) * w * 0.6F * std::sin(t * 4.0F + i);
@@ -1103,7 +1137,11 @@ void effectPhaseTransition(const Renderer& renderer, const std::vector<Rgb>& src
                              Rgb{180, 220, 240, false});
               }
               // Phase label.
-              const char* lab = t < gasT ? "GAS" : (t < liqT ? "LIQUID" : "SOLID");
+              const char* lab = "SOLID";
+              if (t < gasT)
+                lab = "GAS";
+              else if (t < liqT)
+                lab = "LIQUID";
               const int sc = std::max(3, static_cast<int>(mn / 25.0F));
               const std::string s(lab);
               const float lineW = static_cast<float>(s.size()) * 6 * sc;

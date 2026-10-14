@@ -627,7 +627,10 @@ std::vector<WeatherRoot> discoverWeatherRoots()
     if (first == std::string::npos || line[first] == '#')
       continue;
     std::istringstream ls(line);
-    std::string device, mp, fstype, options;
+    std::string device;
+    std::string mp;
+    std::string fstype;
+    std::string options;
     if (!(ls >> device >> mp >> fstype >> options))
       continue;
 

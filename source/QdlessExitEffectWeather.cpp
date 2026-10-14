@@ -618,23 +618,31 @@ void effectSnowTree(const Renderer& renderer, const std::vector<Rgb>& src, int w
       const float fall = std::clamp((t - 0.65F) / 0.15F, 0.0F, 1.0F);
       const float crash = std::clamp((t - 0.80F) / 0.05F, 0.0F, 1.0F);
       const float angle = fall * 1.40F;  // radians
-      const float cs = std::cos(angle), sn = std::sin(angle);
-      const float pivotX = w * 0.50F, pivotY = groundY;
-      auto rot = [&](float x, float y, float& rx, float& ry) {
-        const float dx = x - pivotX, dy = y - pivotY;
+      const float cs = std::cos(angle);
+      const float sn = std::sin(angle);
+      const float pivotX = w * 0.50F;
+      const float pivotY = groundY;
+      auto rot = [&](float x, float y, float& rx, float& ry)
+      {
+        const float dx = x - pivotX;
+        const float dy = y - pivotY;
         rx = pivotX + dx * cs - dy * sn;
         ry = pivotY + dx * sn + dy * cs;
       };
       auto drawRotSeg = [&](float x0, float y0, float x1, float y1, float thk, Rgb col)
       {
-        float rx0 = NAN, ry0 = NAN, rx1 = NAN, ry1 = NAN;
+        float rx0 = NAN;
+        float ry0 = NAN;
+        float rx1 = NAN;
+        float ry1 = NAN;
         rot(x0, y0, rx0, ry0);
         rot(x1, y1, rx1, ry1);
         drawSeg(dst, w, h, rx0, ry0, rx1, ry1, std::max(1.0F, thk), ya, col);
       };
       auto rotPlot = [&](float x, float y, float r, Rgb col)
       {
-        float rx = NAN, ry = NAN;
+        float rx = NAN;
+        float ry = NAN;
         rot(x, y, rx, ry);
         plotDot(dst, w, h, rx, ry, r, ya, col);
       };

@@ -45,7 +45,8 @@ void effectPyramids(const Renderer& renderer, const std::vector<Rgb>& src, int w
       pyramid(w * 0.30F, mn * 0.24F, mn * 0.22F);
       pyramid(w * 0.72F, mn * 0.18F, mn * 0.16F);
       // Sphinx — small dome to the right of the small pyramid (data-textured body).
-      const float spX = w * 0.85F, spY = groundY - mn * 0.04F;
+      const float spX = w * 0.85F;
+      const float spY = groundY - mn * 0.04F;
       drawDataDisk(dst, w, h, src, spX, spY, mn * 0.05F, ya, 0.7F, 0.0F, Rgb{200, 160, 110, false});
       plotDot(dst, w, h, spX - mn * 0.02F, spY - mn * 0.04F, mn * 0.02F, ya, Rgb{200, 160, 110, false});
       // Sun — data-textured disk.
@@ -166,9 +167,11 @@ void effectTrojanHorse(const Renderer& renderer, const std::vector<Rgb>& src, in
       // Body: elongated oval data-textured.
       for (int yo = -static_cast<int>(HS * 0.40F); yo <= static_cast<int>(HS * 0.40F); ++yo)
         for (int xo = -static_cast<int>(HS * 1.20F); xo <= static_cast<int>(HS * 0.80F); ++xo) {
-          const float nx = xo / (HS * 1.20F), nyN = yo / (HS * 0.40F);
+          const float nx = xo / (HS * 1.20F);
+          const float nyN = yo / (HS * 0.40F);
           if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(hcx + xo), yy = static_cast<int>(hcy + yo);
+          const int xx = static_cast<int>(hcx + xo);
+          const int yy = static_cast<int>(hcy + yo);
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
           const Rgb d = sample(src, w, h, xx, yy);
           const float dr = d.transparent ? 130.0F : d.r;
@@ -187,7 +190,8 @@ void effectTrojanHorse(const Renderer& renderer, const std::vector<Rgb>& src, in
       // Door in belly.
       for (int yo = -static_cast<int>(HS * 0.10F); yo <= static_cast<int>(HS * 0.10F); ++yo)
         for (int xo = -static_cast<int>(HS * 0.15F); xo <= static_cast<int>(HS * 0.15F); ++xo) {
-          const int xx = static_cast<int>(hcx + xo), yy = static_cast<int>(hcy + HS * 0.10F + yo);
+          const int xx = static_cast<int>(hcx + xo);
+          const int yy = static_cast<int>(hcy + HS * 0.10F + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{40, 30, 20, false};
         }
@@ -214,7 +218,8 @@ void effectParthenon(const Renderer& renderer, const std::vector<Rgb>& src, int 
       for (int y = static_cast<int>(baseY); y < h; ++y)
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(y) * w + x] = Rgb{120, 100, 80, false};
-      const float left = w * 0.18F, right = w * 0.82F;
+      const float left = w * 0.18F;
+      const float right = w * 0.82F;
       const float colTop = baseY - mn * 0.30F;
       const float colBot = baseY;
       const Rgb marble{230, 220, 200, false};
@@ -282,7 +287,8 @@ void effectPompeii(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       for (int x = 0; x < w; ++x)
         dst[static_cast<std::size_t>(groundY) * w + x] = Rgb{60, 50, 40, false};
       // Vesuvius — large data-textured cone in background.
-      const float vcx = w * 0.50F, vcy = h * 0.30F;
+      const float vcx = w * 0.50F;
+      const float vcy = h * 0.30F;
       for (int yy = static_cast<int>(vcy); yy <= static_cast<int>(groundY); ++yy) {
         const float yf = (yy - vcy) / (groundY - vcy);
         const int half = static_cast<int>(mn * 0.30F * yf);
@@ -346,8 +352,10 @@ void effectMagnaCarta(const Renderer& renderer, const std::vector<Rgb>& src, int
               Rgb{u8(40 + l * 0.10F), u8(30 + l * 0.08F), u8(20 + l * 0.06F), false};
         }
       // Parchment block.
-      const float pxL = w * 0.18F, pxR = w * 0.82F;
-      const float pyT = h * 0.12F, pyB = h * 0.88F;
+      const float pxL = w * 0.18F;
+      const float pxR = w * 0.82F;
+      const float pyT = h * 0.12F;
+      const float pyB = h * 0.88F;
       for (int yy = static_cast<int>(pyT); yy <= static_cast<int>(pyB); ++yy)
         for (int xx = static_cast<int>(pxL); xx <= static_cast<int>(pxR); ++xx) {
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
@@ -455,10 +463,12 @@ void effectVikingLongboat(const Renderer& renderer, const std::vector<Rgb>& src,
         drawDataDisk(dst, w, h, src, sx, by - mn * 0.025F, mn * 0.025F, ya, 0.75F, 0.0F, stripe);
       }
       // Mast + sail.
-      const float mx = bx, mast_top = by - mn * 0.30F;
+      const float mx = bx;
+      const float mast_top = by - mn * 0.30F;
       drawSeg(dst, w, h, mx, by - mn * 0.05F, mx, mast_top, std::max(1.0F, mn * 0.006F), ya, hull);
       // Sail: striped rectangle.
-      const float sailH = mn * 0.20F, sailW = mn * 0.22F;
+      const float sailH = mn * 0.20F;
+      const float sailW = mn * 0.22F;
       for (int yo = 0; yo <= static_cast<int>(sailH); ++yo) {
         const Rgb stripe = ((yo / static_cast<int>(sailH / 5)) & 1) ? Rgb{220, 60, 60, false} : Rgb{220, 220, 200, false};
         for (int xo = -static_cast<int>(sailW * 0.5F); xo <= static_cast<int>(sailW * 0.5F); ++xo) {
@@ -573,7 +583,8 @@ void effectGuillotine(const Renderer& renderer, const std::vector<Rgb>& src, int
           const float xf = (xo + mn * 0.09F) / (mn * 0.18F);
           const float yf = yo / (mn * 0.08F);
           if (yf > 1.0F - xf) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(bladeY + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(bladeY + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = steel;
         }
@@ -617,8 +628,10 @@ void effectNapoleon(const Renderer& renderer, const std::vector<Rgb>& src, int w
                       Rgb{u8(170 + l * 0.10F), u8(150 + l * 0.10F), u8(120 + l * 0.08F), false};
                 }
               // Background tricolor bands.
-              const float xa = w * 0.18F, xb = w * 0.82F;
-              const float ya0 = h * 0.20F, ya1 = h * 0.80F;
+              const float xa = w * 0.18F;
+              const float xb = w * 0.82F;
+              const float ya0 = h * 0.20F;
+              const float ya1 = h * 0.80F;
               const Rgb& blue = (Rgb){30, 60, 180, false};
               const Rgb& white = (Rgb){240, 240, 240, false};
               const Rgb& red = (Rgb){220, 30, 30, false};
@@ -632,7 +645,8 @@ void effectNapoleon(const Renderer& renderer, const std::vector<Rgb>& src, int w
                     dst[static_cast<std::size_t>(yy) * w + xx] = bands[bIdx];
                 }
               // Napoleon silhouette centre.
-              const float cx = w * 0.5F, cy = h * 0.55F;
+              const float cx = w * 0.5F;
+              const float cy = h * 0.55F;
               const Rgb fig{20, 14, 10, false};
               // Body.
               for (int yo = -static_cast<int>(mn * 0.08F); yo <= static_cast<int>(mn * 0.15F); ++yo)
@@ -641,7 +655,8 @@ void effectNapoleon(const Renderer& renderer, const std::vector<Rgb>& src, int w
                 const int half = static_cast<int>(mn * (0.05F + 0.04F * yf));
                 for (int xo = -half; xo <= half; ++xo)
                 {
-                  const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+                  const int xx = static_cast<int>(cx + xo);
+                  const int yy = static_cast<int>(cy + yo);
                   if (xx >= 0 && xx < w && yy >= 0 && yy < h)
                     dst[static_cast<std::size_t>(yy) * w + xx] = fig;
                 }
@@ -737,7 +752,8 @@ void effectColumbus(const Renderer& renderer, const std::vector<Rgb>& src, int w
           const float yf = yo / (SS * 0.30F);
           const int half = static_cast<int>(SS * (1.0F - 0.30F * yf));
           for (int xo = -half; xo <= half; ++xo) {
-            const int xx = static_cast<int>(bx + xo), yy = static_cast<int>(by + yo);
+            const int xx = static_cast<int>(bx + xo);
+            const int yy = static_cast<int>(by + yo);
             if (xx >= 0 && xx < w && yy >= 0 && yy < h)
               dst[static_cast<std::size_t>(yy) * w + xx] = hull;
           }
@@ -751,7 +767,8 @@ void effectColumbus(const Renderer& renderer, const std::vector<Rgb>& src, int w
             const float sw = SS * 0.3F;
             for (int yo = -static_cast<int>(SS * 0.15F); yo <= 0; ++yo)
               for (int xo = -static_cast<int>(sw); xo <= static_cast<int>(sw); ++xo) {
-                const int xx = static_cast<int>(mx + xo), yy = static_cast<int>(syp + yo);
+                const int xx = static_cast<int>(mx + xo);
+                const int yy = static_cast<int>(syp + yo);
                 if (xx >= 0 && xx < w && yy >= 0 && yy < h)
                   dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{240, 230, 200, false};
               }
@@ -803,7 +820,8 @@ void effectGalileoTelescope(const Renderer& renderer, const std::vector<Rgb>& sr
       // Moon (data-textured).
       drawDataDisk(dst, w, h, src, w * 0.75F, h * 0.30F, mn * 0.15F, ya, 0.7F, t * 0.3F, Rgb{220, 210, 180, false});
       // Galileo's figure (bottom-left).
-      const float fx = w * 0.20F, fy = h * 0.75F;
+      const float fx = w * 0.20F;
+      const float fy = h * 0.75F;
       const float S = mn * 0.15F;
       const Rgb robe{40, 30, 50, false};
       const Rgb skin{210, 180, 140, false};
@@ -812,7 +830,8 @@ void effectGalileoTelescope(const Renderer& renderer, const std::vector<Rgb>& sr
         const float yf = yo / (S * 1.2F);
         const int half = static_cast<int>(S * (0.20F + 0.15F * yf));
         for (int xo = -half; xo <= half; ++xo) {
-          const int xx = static_cast<int>(fx + xo), yy = static_cast<int>(fy + yo);
+          const int xx = static_cast<int>(fx + xo);
+          const int yy = static_cast<int>(fy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = robe;
         }
@@ -822,14 +841,17 @@ void effectGalileoTelescope(const Renderer& renderer, const std::vector<Rgb>& sr
       for (int yo = 0; yo <= static_cast<int>(S * 0.15F); ++yo) {
         const int half = static_cast<int>(S * (0.10F - yo / (S * 0.15F) * 0.06F));
         for (int xo = -half; xo <= half; ++xo) {
-          const int xx = static_cast<int>(fx + xo), yy = static_cast<int>(fy - S * 0.02F + yo);
+          const int xx = static_cast<int>(fx + xo);
+          const int yy = static_cast<int>(fy - S * 0.02F + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{220, 220, 220, false};
         }
       }
       // Telescope: from figure's eye toward moon.
-      const float tx0 = fx + S * 0.10F, ty0 = fy - S * 0.08F;
-      const float tx1 = w * 0.55F, ty1 = h * 0.45F;
+      const float tx0 = fx + S * 0.10F;
+      const float ty0 = fy - S * 0.08F;
+      const float tx1 = w * 0.55F;
+      const float ty1 = h * 0.45F;
       drawSeg(dst, w, h, tx0, ty0, tx1, ty1, std::max(1.0F, mn * 0.012F), ya, Rgb{180, 140, 60, false});
       // Telescope tip (slightly larger).
       plotDot(dst, w, h, tx1, ty1, mn * 0.015F, ya, Rgb{220, 180, 80, false});
@@ -883,7 +905,8 @@ void effectEiffel(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
         const float ww = width_at(yy);
         // Left leg
         for (int yo = 0; yo < 2; ++yo) {
-          const int xL = static_cast<int>(cx - ww), xR = static_cast<int>(cx + ww);
+          const int xL = static_cast<int>(cx - ww);
+          const int xR = static_cast<int>(cx + ww);
           if (xL >= 0 && xL < w && yy + yo < h) dst[static_cast<std::size_t>(yy + yo) * w + xL] = iron;
           if (xR >= 0 && xR < w && yy + yo < h) dst[static_cast<std::size_t>(yy + yo) * w + xR] = iron;
         }
@@ -939,14 +962,16 @@ void effectStephenson(const Renderer& renderer, const std::vector<Rgb>& src, int
       // Boiler (horizontal cylinder).
       for (int yo = -static_cast<int>(mn * 0.04F); yo <= 0; ++yo)
         for (int xo = -static_cast<int>(mn * 0.10F); xo <= static_cast<int>(mn * 0.06F); ++xo) {
-          const int xx = static_cast<int>(ex + xo), yy = static_cast<int>(by + yo);
+          const int xx = static_cast<int>(ex + xo);
+          const int yy = static_cast<int>(by + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = body;
         }
       // Tall chimney.
       for (int yo = -static_cast<int>(mn * 0.12F); yo < -static_cast<int>(mn * 0.04F); ++yo)
         for (int xo = -static_cast<int>(mn * 0.018F); xo <= static_cast<int>(mn * 0.018F); ++xo) {
-          const int xx = static_cast<int>(ex - mn * 0.06F + xo), yy = static_cast<int>(by + yo);
+          const int xx = static_cast<int>(ex - mn * 0.06F + xo);
+          const int yy = static_cast<int>(by + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = black;
         }
@@ -1114,13 +1139,15 @@ void effectApollo11(const Renderer& renderer, const std::vector<Rgb>& src, int w
       // Earthrise at the horizon (data-textured).
       drawDataDisk(dst, w, h, src, w * 0.18F, h * 0.32F, mn * 0.10F, ya, 0.85F, t * 0.3F, Rgb{60, 100, 180, false});
       // Lunar module silhouette.
-      const float lcx = w * 0.65F, lcy = groundY - mn * 0.06F;
+      const float lcx = w * 0.65F;
+      const float lcy = groundY - mn * 0.06F;
       const Rgb metal{200, 200, 210, false};
       const Rgb gold{220, 180, 80, false};
       // Body — gold descent stage on top of legs.
       for (int yo = 0; yo <= static_cast<int>(mn * 0.04F); ++yo)
         for (int xo = -static_cast<int>(mn * 0.05F); xo <= static_cast<int>(mn * 0.05F); ++xo) {
-          const int xx = static_cast<int>(lcx + xo), yy = static_cast<int>(lcy + yo);
+          const int xx = static_cast<int>(lcx + xo);
+          const int yy = static_cast<int>(lcy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = gold;
         }
@@ -1129,7 +1156,8 @@ void effectApollo11(const Renderer& renderer, const std::vector<Rgb>& src, int w
         const float yf = -yo / (mn * 0.05F);
         const int half = static_cast<int>(mn * (0.04F + 0.01F * yf));
         for (int xo = -half; xo <= half; ++xo) {
-          const int xx = static_cast<int>(lcx + xo), yy = static_cast<int>(lcy + yo);
+          const int xx = static_cast<int>(lcx + xo);
+          const int yy = static_cast<int>(lcy + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = metal;
         }
@@ -1153,7 +1181,8 @@ void effectApollo11(const Renderer& renderer, const std::vector<Rgb>& src, int w
       drawSeg(dst, w, h, fpx, ay + mn * 0.05F, fpx, ay - mn * 0.10F, std::max(1.0F, mn * 0.003F), ya, suit);
       for (int yo = -static_cast<int>(mn * 0.10F); yo < -static_cast<int>(mn * 0.06F); ++yo)
         for (int xo = 0; xo <= static_cast<int>(mn * 0.045F); ++xo) {
-          const int xx = static_cast<int>(fpx + xo), yy = static_cast<int>(ay + yo);
+          const int xx = static_cast<int>(fpx + xo);
+          const int yy = static_cast<int>(ay + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h) {
             const bool stripe = ((yo + static_cast<int>(mn * 0.10F)) / 2) % 2 == 0;
             dst[static_cast<std::size_t>(yy) * w + xx] = stripe ? Rgb{220, 30, 30, false} : Rgb{240, 240, 240, false};
@@ -1261,7 +1290,8 @@ void effectCrown(const Renderer& renderer, const std::vector<Rgb>& src, int w, i
               Rgb{u8(80 + dl * 0.30F), u8(20 + dl * 0.15F), u8(60 + dl * 0.20F), false};
         }
       // Throne.
-      const float thrX = w * 0.5F, thrY = h * 0.65F;
+      const float thrX = w * 0.5F;
+      const float thrY = h * 0.65F;
       const Rgb gold{200, 160, 60, false};
       drawSeg(dst, w, h, thrX - mn * 0.12F, thrY, thrX - mn * 0.12F, h * 0.92F,
               std::max(1.0F, mn * 0.020F), ya, gold);
@@ -1315,7 +1345,8 @@ void effectLibertyTorch(const Renderer& renderer, const std::vector<Rgb>& src, i
         const float yf = yo / (h * 0.30F);
         const int half = static_cast<int>(mn * (0.04F + 0.06F * yf));
         for (int xo = -half; xo <= half; ++xo) {
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(h * 0.55F + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(h * 0.55F + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = green;
         }
@@ -1417,7 +1448,8 @@ void effectNewton(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
                   u8(160 + dl * 0.15F + 20 * sf), false};
         }
       // Tree.
-      const float trunkX = w * 0.6F, groundY = h * 0.85F;
+      const float trunkX = w * 0.6F;
+      const float groundY = h * 0.85F;
       drawSeg(dst, w, h, trunkX, groundY, trunkX, h * 0.35F, mn * 0.025F, ya,
               Rgb{80, 50, 20, false});
       // Canopy — green blobs.
@@ -1428,7 +1460,8 @@ void effectNewton(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
                 Rgb{60, 130, 50, false});
       }
       // Newton — sitting under tree.
-      const float nx = w * 0.35F, ny = groundY - mn * 0.10F;
+      const float nx = w * 0.35F;
+      const float ny = groundY - mn * 0.10F;
       drawSeg(dst, w, h, nx, ny, nx, groundY, mn * 0.030F, ya, Rgb{40, 30, 20, false});
       plotDot(dst, w, h, nx, ny - mn * 0.025F, mn * 0.030F, ya, Rgb{220, 180, 140, false});
       // Periwig (curls).

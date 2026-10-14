@@ -25,10 +25,10 @@ QueryDataSource::QueryDataSource(const std::string& filename)
 
   // Cache parameter IDs in file order.
   itsInfo->FirstParam();
-  do
+  for (bool more = true; more; more = itsInfo->NextParam(true))
   {
     itsParamIds.push_back(itsInfo->Param().GetParamIdent());
-  } while (itsInfo->NextParam(true));
+  }
   itsInfo->FirstParam();
 }
 
@@ -458,7 +458,8 @@ float QueryDataSource::interpolatedValueAtHeight(double lat, double lon, double 
 
   // Find the adjacent (level i, level i+1) pair that brackets targetM.
   // Hybrid level lists may ascend or descend with index — accept either.
-  int loIdx = -1, hiIdx = -1;
+  int loIdx = -1;
+  int hiIdx = -1;
   for (std::size_t i = 0; i + 1 < nLevels; ++i)
   {
     const float a = heights[i];

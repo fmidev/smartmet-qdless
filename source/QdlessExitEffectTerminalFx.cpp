@@ -1891,7 +1891,8 @@ void effectCountdown(const Renderer& renderer, const std::vector<Rgb>& src, int 
       {"11110", "00001", "00001", "01110", "00001", "00001", "11110"},   // 3
       {"00010", "00110", "01010", "10010", "11111", "00010", "00010"},   // 4
       {"11111", "10000", "11110", "00001", "00001", "10001", "01110"}};  // 5
-  const float cx = w * 0.5F, cy = h * 0.5F;
+  const float cx = w * 0.5F;
+  const float cy = h * 0.5F;
   const float R = 0.44F * std::min(static_cast<float>(w), h * ya);
   runFrames(
       renderer,
@@ -1911,7 +1912,8 @@ void effectCountdown(const Renderer& renderer, const std::vector<Rgb>& src, int 
             const float l = s.transparent ? 0.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
             const float grain = (hash(x * 7 + y * 131 + static_cast<int>(t * 600)) - 0.5F) * 24.0F;
             float base = 150 + l * 0.10F + grain;
-            const float dx = x - cx, dy = (y - cy) * ya;
+            const float dx = x - cx;
+            const float dy = (y - cy) * ya;
             float ang = std::atan2(dx, -dy);  // 0 at top, clockwise
             if (ang < 0)
               ang += 6.2832F;
@@ -1961,7 +1963,8 @@ void effectIrisOut(const Renderer& renderer, const std::vector<Rgb>& src, int w,
 {
   const float ya = yAspectFor(renderer);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  const float cx = w * 0.5F, cy = h * 0.5F;
+  const float cx = w * 0.5F;
+  const float cy = h * 0.5F;
   const float maxR = std::hypot(std::max(cx, w - cx), std::max(cy, h - cy) * ya) + 2.0F;
   runFrames(renderer,
             w,
@@ -1993,7 +1996,9 @@ void effectWarp(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n)
   { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
-  const float cx = w * 0.5F, cy = h * 0.5F, mn = std::min(static_cast<float>(w), h * ya);
+  const float cx = w * 0.5F;
+  const float cy = h * 0.5F;
+  const float mn = std::min(static_cast<float>(w), h * ya);
   constexpr int kStars = 150;
   runFrames(
       renderer,
@@ -2049,7 +2054,8 @@ void effectNewspaper(const Renderer& renderer, const std::vector<Rgb>& src, int 
   const float ya = yAspectFor(renderer);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   const float mn = std::min(static_cast<float>(w), h * ya);
-  const float cx = w * 0.5F, cy = h * 0.5F;
+  const float cx = w * 0.5F;
+  const float cy = h * 0.5F;
   const int scale = std::max(1, static_cast<int>(std::lround(w / 130.0F)));
   runFrames(
       renderer,
@@ -2061,7 +2067,8 @@ void effectNewspaper(const Renderer& renderer, const std::vector<Rgb>& src, int 
         const float sa = std::pow(1.0F - t, 2.0F) * 9.4F;  // spins, decaying to 0
         const float latScale = std::cos(sa);               // facing when sa->0
         const float fit = 0.20F + 0.78F * t;               // grows to fit the view
-        const float halfW = w * 0.42F * fit, halfH = h * 0.42F * fit;
+        const float halfW = w * 0.42F * fit;
+        const float halfH = h * 0.42F * fit;
         for (int y = 0; y < h; ++y)  // dim the room behind the spinning page
           for (int x = 0; x < w; ++x)
           {
@@ -2073,8 +2080,10 @@ void effectNewspaper(const Renderer& renderer, const std::vector<Rgb>& src, int 
         const float swW = std::fabs(halfW * latScale);
         if (swW < 0.6F)
           return;
-        const int x0 = static_cast<int>(cx - swW), x1 = static_cast<int>(cx + swW);
-        const int y0 = static_cast<int>(cy - halfH), y1 = static_cast<int>(cy + halfH);
+        const int x0 = static_cast<int>(cx - swW);
+        const int x1 = static_cast<int>(cx + swW);
+        const int y0 = static_cast<int>(cy - halfH);
+        const int y1 = static_cast<int>(cy + halfH);
         for (int y = std::max(0, y0); y <= std::min(h - 1, y1); ++y)
           for (int x = std::max(0, x0); x <= std::min(w - 1, x1); ++x)
           {
@@ -2084,7 +2093,9 @@ void effectNewspaper(const Renderer& renderer, const std::vector<Rgb>& src, int 
             const float ulx = lx * sgn;
             const Rgb d = sample(src, w, h, (ulx * 0.5F + 0.5F) * w, (ly * 0.5F + 0.5F) * h);
             const float l = d.transparent ? 80.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-            float r = 222 + l * 0.10F, g = 214 + l * 0.10F, b = 192 + l * 0.08F;
+            float r = 222 + l * 0.10F;
+            float g = 214 + l * 0.10F;
+            float b = 192 + l * 0.08F;
             const float col = std::fabs(std::fmod(ulx * 2.5F + 5.0F, 1.0F) - 0.5F);
             if (col < 0.04F)
             {
@@ -2104,7 +2115,9 @@ void effectNewspaper(const Renderer& renderer, const std::vector<Rgb>& src, int 
         {
           auto stamp = [&](const std::string& str, float leftX, float topY, int sc, const Rgb& c)
           {
-            constexpr int kFW = 5, kFH = 7, kGap = 1;
+            constexpr int kFW = 5;
+            constexpr int kFH = 7;
+            constexpr int kGap = 1;
             for (int ci = 0; ci < static_cast<int>(str.size()); ++ci)
             {
               const auto g =
@@ -2160,8 +2173,9 @@ void effectEndCard(const Renderer& renderer, const std::vector<Rgb>& src, int w,
           {
             const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
             const float l = s.transparent ? 0.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            const float br = s.transparent ? 0 : s.r, bg = s.transparent ? 0 : s.g,
-                        bb = s.transparent ? 0 : s.b;
+            const float br = s.transparent ? 0 : s.r;
+            const float bg = s.transparent ? 0 : s.g;
+            const float bb = s.transparent ? 0 : s.b;
             float r = br * (1 - desat) + l * 1.08F * desat;
             float g = bg * (1 - desat) + l * 0.86F * desat;
             float b = bb * (1 - desat) + l * 0.60F * desat;
@@ -2172,15 +2186,19 @@ void effectEndCard(const Renderer& renderer, const std::vector<Rgb>& src, int w,
             b *= vm;
             dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(r), u8(g), u8(b), false};
           }
-        const float cw = mn * 0.42F, ch = mn * 0.20F;
-        const float cxp = w * 0.5F, cyp = h * 0.5F;
+        const float cw = mn * 0.42F;
+        const float ch = mn * 0.20F;
+        const float cxp = w * 0.5F;
+        const float cyp = h * 0.5F;
         for (int yo = -static_cast<int>(ch); yo <= static_cast<int>(ch); ++yo)
           for (int xo = -static_cast<int>(cw); xo <= static_cast<int>(cw); ++xo)
           {
-            const int x = static_cast<int>(cxp) + xo, y = static_cast<int>(cyp) + yo;
+            const int x = static_cast<int>(cxp) + xo;
+            const int y = static_cast<int>(cyp) + yo;
             if (x < 0 || x >= w || y < 0 || y >= h)
               continue;
-            const float ax = std::fabs(xo) / cw, ay = std::fabs(yo) / ch;
+            const float ax = std::fabs(xo) / cw;
+            const float ay = std::fabs(yo) / ch;
             const bool outer = (ax > 0.96F || ay > 0.92F);
             const bool inner = (ax > 0.86F && ax < 0.90F) || (ay > 0.78F && ay < 0.84F);
             if (outer || inner)
@@ -2197,7 +2215,9 @@ void effectEndCard(const Renderer& renderer, const std::vector<Rgb>& src, int w,
         {
           auto stamp = [&](const std::string& str, float leftX, float topY, int sc, const Rgb& c)
           {
-            constexpr int kFW = 5, kFH = 7, kGap = 1;
+            constexpr int kFW = 5;
+            constexpr int kFH = 7;
+            constexpr int kGap = 1;
             for (int ci = 0; ci < static_cast<int>(str.size()); ++ci)
             {
               const auto g =

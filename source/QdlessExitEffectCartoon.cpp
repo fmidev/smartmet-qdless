@@ -30,7 +30,9 @@ void effectKenney(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
 
   auto drawText = [&](std::vector<Rgb>& dst, const char* s, float px, float py, Rgb color)
   {
-    constexpr int kFW = 5, kFH = 7, kGap = 1;
+    constexpr int kFW = 5;
+    constexpr int kFH = 7;
+    constexpr int kGap = 1;
     int x0 = static_cast<int>(std::round(px));
     const int y0 = static_cast<int>(std::round(py));
     for (const char* p = s; *p; ++p)
@@ -519,7 +521,8 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
   const float mn = std::min(static_cast<float>(w), h * ya);
   const float cutT = 0.45F;
   // Prefer the alpha-clean transfoot.png; otherwise chroma-key foot.png.
-  std::size_t fw = 0, fh = 0;
+  std::size_t fw = 0;
+  std::size_t fh = 0;
   std::unique_ptr<ImageSource> foot = loadDataImage("transfoot.png", fw, fh);
   bool needChromaKey = false;
   if (!foot)
@@ -538,7 +541,8 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
   auto drawCapsule =
       [&](std::vector<Rgb>& dst, float cx, float cy, float L, float R, float ang, const Rgb& col)
   {
-    const float dx = std::cos(ang) * L * 0.5F, dy = std::sin(ang) * L * 0.5F;
+    const float dx = std::cos(ang) * L * 0.5F;
+    const float dy = std::sin(ang) * L * 0.5F;
     drawSeg(dst, w, h, cx - dx, cy - dy, cx + dx, cy + dy, R, ya, col);
     plotDot(dst, w, h, cx - dx, cy - dy, R * 1.25F, ya, col);
     plotDot(dst, w, h, cx + dx, cy + dy, R * 1.25F, ya, col);
@@ -570,7 +574,8 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
           const float bx = w * (0.30F + 0.40F * p);
           const float by = h * 0.78F - std::sin(p * 1.5708F) * h * 0.55F;
           const float ang = p * 18.0F + 0.6F;
-          const float L = mn * 0.22F, R = mn * 0.022F;
+          const float L = mn * 0.22F;
+          const float R = mn * 0.022F;
           drawCapsule(dst, bx, by, L, R, ang, Rgb{240, 235, 222, false});
           plotDot(dst, w, h, bx + std::cos(ang) * L * 0.5F, by + std::sin(ang) * L * 0.5F,
                   R * 1.6F, ya, Rgb{240, 235, 222, false});
@@ -614,7 +619,8 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
           const float scaleH = mn * 0.45F;
           const float aspect = (fh > 0) ? static_cast<float>(fw) / static_cast<float>(fh) : 1.5F;
           const float scaleW = scaleH * aspect;
-          const float cs = std::cos(-ang), sn = std::sin(-ang);
+          const float cs = std::cos(-ang);
+          const float sn = std::sin(-ang);
           // Bounding circle of the rotated sprite (longest half-diagonal).
           const float halfDiag = 0.5F * std::sqrt(scaleW * scaleW + scaleH * scaleH);
           const int x0 = static_cast<int>(std::max(0.0F, cx - halfDiag));
@@ -969,10 +975,14 @@ void effectThatsAllFolks(const Renderer& renderer, const std::vector<Rgb>& src, 
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(
-      renderer, w, h, 5200,
+      renderer,
+      w,
+      h,
+      5200,
       [&](float t, std::vector<Rgb>& dst)
       {
-        const float cx = w * 0.5F, cy = h * 0.5F;
+        const float cx = w * 0.5F;
+        const float cy = h * 0.5F;
         const float maxR =
             std::hypot(std::max(cx, w - cx), std::max(cy * ya, (h - cy) * ya));
         const float irisR = std::max(0.0F, (1.0F - t * 1.05F) * maxR);
@@ -1000,7 +1010,8 @@ void effectThatsAllFolks(const Renderer& renderer, const std::vector<Rgb>& src, 
         for (int ci = 0; ci < static_cast<int>(text.size()); ++ci)
         {
           const char ch = text[ci];
-          if (ch == ' ') continue;
+          if (ch == ' ')
+            continue;
           const auto g = glyph5x7(ch);
           const float wobY = std::sin(ci * 1.1F + t * 6.0F) * mn * 0.015F;
           for (int fy = 0; fy < 7; ++fy)
@@ -1030,16 +1041,19 @@ void effectCrystalBall(const Renderer& renderer, const std::vector<Rgb>& src, in
               Rgb{u8(50 + dl * 0.20F), u8(20 + dl * 0.10F), u8(70 + dl * 0.20F), false};
         }
       // Pedestal.
-      const float cx = w * 0.5F, cy = h * 0.55F;
+      const float cx = w * 0.5F;
+      const float cy = h * 0.55F;
       const float R = mn * 0.22F;
       drawSeg(dst, w, h, cx, cy + R / ya, cx, h * 0.90F, mn * 0.020F, ya, Rgb{80, 40, 20, false});
       // Crystal ball — translucent disc.
       for (int yo = -static_cast<int>(R / ya); yo <= static_cast<int>(R / ya); ++yo)
         for (int xo = -static_cast<int>(R); xo <= static_cast<int>(R); ++xo) {
-          const float nx = xo / R, nyN = yo * ya / R;
+          const float nx = xo / R;
+          const float nyN = yo * ya / R;
           const float r2 = nx * nx + nyN * nyN;
           if (r2 > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(cy + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(cy + yo);
           if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
           const float shade = 0.6F + 0.4F * std::sqrt(1.0F - r2);
           const Rgb& orig = dst[static_cast<std::size_t>(yy) * w + xx];
@@ -1071,12 +1085,15 @@ void effectTopHat(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
               Rgb{u8(50 + dl * 0.20F), u8(20 + dl * 0.10F), u8(40 + dl * 0.10F), false};
         }
       // Stage (red curtain backdrop already in tint).
-      const float cx = w * 0.50F, hatY = h * 0.70F;
+      const float cx = w * 0.50F;
+      const float hatY = h * 0.70F;
       // Hat body (upturned, opening up).
-      const float crownW = mn * 0.16F, brimW = mn * 0.22F;
+      const float crownW = mn * 0.16F;
+      const float brimW = mn * 0.22F;
       for (int yo = -static_cast<int>(mn * 0.15F); yo <= 0; ++yo)
         for (int xo = -static_cast<int>(crownW); xo <= static_cast<int>(crownW); ++xo) {
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(hatY + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(hatY + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{15, 15, 25, false};
         }
@@ -1126,7 +1143,8 @@ void effectTrophy(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
       const float tier1W = mn * 0.10F;
       for (int yo = 0; yo <= static_cast<int>(baseY - tier1Y); ++yo)
         for (int xo = -static_cast<int>(tier1W); xo <= static_cast<int>(tier1W); ++xo) {
-          const int xx = static_cast<int>(cx + xo), yy = static_cast<int>(tier1Y + yo);
+          const int xx = static_cast<int>(cx + xo);
+          const int yy = static_cast<int>(tier1Y + yo);
           if (xx >= 0 && xx < w && yy >= 0 && yy < h)
             dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{200, 160, 60, false};
         }
@@ -1154,9 +1172,11 @@ void effectTrophy(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
         const float fa = std::fmod(t * 0.7F + hash(i), 1.0F);
         const float fx = hash(i * 3) * w;
         const float fy = fa * h;
-        const Rgb col = (i & 1) ? Rgb{255, 80, 80, false}
-                                : ((i & 2) ? Rgb{80, 255, 80, false}
-                                            : Rgb{80, 80, 255, false});
+        Rgb col{80, 80, 255, false};
+        if (i & 1)
+          col = Rgb{255, 80, 80, false};
+        else if (i & 2)
+          col = Rgb{80, 255, 80, false};
         plotDot(dst, w, h, fx, fy, std::max(1.0F, mn * 0.003F), ya, col);
       }
     });
