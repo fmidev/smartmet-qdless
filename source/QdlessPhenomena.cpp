@@ -456,15 +456,11 @@ PhenomenonHint detectJet(DataSource& src, const Grid& g, const std::string& unit
   float topV = -std::numeric_limits<float>::infinity();
   int topIx = -1;
   int topIy = -1;
-  double sum = 0;
-  int n = 0;
   for (int iy = 0; iy < Grid::H; ++iy)
     for (int ix = 0; ix < Grid::W; ++ix)
     {
       const float v = g.at(ix, iy);
       if (!valid(v)) continue;
-      sum += v;
-      ++n;
       if (v > topV)
       {
         topV = v;
