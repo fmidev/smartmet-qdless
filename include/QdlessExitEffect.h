@@ -42,12 +42,12 @@ struct ExitEffectPlay
 // (or empty / wrong-sized) makes Utopia fall back to a plain fade. Other
 // effects ignore them.
 ExitEffectPlay playExitEffect(const Renderer& renderer,
-                              std::vector<Rgb> frame,
+                              const std::vector<Rgb>& frame,
                               int subW,
                               int subH,
                               int effectIndex = -1,
                               unsigned seed = 0,
-                              std::string words = {},
+                              const std::string& words = {},
                               const std::vector<Rgb>* linesFrame = nullptr,
                               const std::vector<char>* swedenMask = nullptr);
 

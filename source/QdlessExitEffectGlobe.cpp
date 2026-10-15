@@ -289,9 +289,8 @@ struct Globe
   V3 e;  // screen right
   V3 n;  // screen up
 
-  Globe(int w, int h, float yaspect, float radiusFrac)
+  Globe(int w, int h, float yaspect, float radiusFrac) : ya(yaspect)
   {
-    ya = yaspect;
     cx = (w - 1) * 0.5F;
     cy = (h - 1) * 0.5F;
     R = std::min(w * 0.5F, h * 0.5F * ya) * radiusFrac;

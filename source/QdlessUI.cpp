@@ -267,8 +267,11 @@ void UI::drawStatusBar(bool imageMode, bool shapeMode, bool pgMode, bool browseM
   wnoutrefresh(itsStatusWin);
 }
 
-int UI::popupMenu(const std::string& title, const std::vector<std::string>& items,
-                  int currentIndex, bool allowTab, std::function<void(int)> onSelect,
+int UI::popupMenu(const std::string& title,
+                  const std::vector<std::string>& items,
+                  int currentIndex,
+                  bool allowTab,
+                  const std::function<void(int)>& onSelect,
                   bool arrowNav)
 {
   if (items.empty()) return -1;
@@ -477,8 +480,10 @@ int UI::popupMenu(const std::string& title, const std::vector<std::string>& item
   return result;
 }
 
-int UI::popupMenuSections(const std::string& title, const std::vector<MenuRow>& rows,
-                          int currentIndex, std::function<void(int)> onSelect)
+int UI::popupMenuSections(const std::string& title,
+                          const std::vector<MenuRow>& rows,
+                          int currentIndex,
+                          const std::function<void(int)>& onSelect)
 {
   if (rows.empty()) return -1;
   wtimeout(itsStatusWin, -1);
@@ -679,8 +684,9 @@ int UI::popupMenuSections(const std::string& title, const std::vector<MenuRow>& 
 }
 
 int UI::popupSearch(const std::string& title,
-                    std::function<std::vector<std::string>(const std::string&)> matcher,
-                    const std::string& header, bool allowTab)
+                    const std::function<std::vector<std::string>(const std::string&)>& matcher,
+                    const std::string& header,
+                    bool allowTab)
 {
   // Force blocking input. The App's animation loop leaves the
   // window in non-blocking 250ms mode, which would have popupSearch
@@ -1704,7 +1710,7 @@ int UI::popupTimeseries(const std::string& paramName,
                         const Renderer& /*renderer*/,
                         const Palette& palette,
                         std::function<void(int)> onTimeChange,
-                        std::function<StatsSeries()> computeStats,
+                        const std::function<StatsSeries()>& computeStats,
                         const std::string& units,
                         int* animationDelayMs,
                         int avoidCellRow,

@@ -217,12 +217,12 @@ int exitEffectIndexByName(const std::string& name)
 }
 
 ExitEffectPlay playExitEffect(const Renderer& renderer,
-                              std::vector<Rgb> frame,
+                              const std::vector<Rgb>& frame,
                               int subW,
                               int subH,
                               int effectIndex,
                               unsigned seed,
-                              std::string words,
+                              const std::string& words,
                               const std::vector<Rgb>* linesFrame,
                               const std::vector<char>* swedenMask)
 {

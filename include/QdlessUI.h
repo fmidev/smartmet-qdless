@@ -92,9 +92,12 @@ class UI
   // When `arrowNav` is true the picker gains horizontal navigation: Right
   // selects the highlighted row (same as Enter) and Left returns
   // kPopupNavLeft so a hierarchical caller can pop up a level.
-  int popupMenu(const std::string& title, const std::vector<std::string>& items,
-                int currentIndex, bool allowTab = false,
-                std::function<void(int)> onSelect = {}, bool arrowNav = false);
+  int popupMenu(const std::string& title,
+                const std::vector<std::string>& items,
+                int currentIndex,
+                bool allowTab = false,
+                const std::function<void(int)>& onSelect = {},
+                bool arrowNav = false);
 
   // Section-header variant. Same shape as popupMenu, but each row can be
   // marked as a section header: rendered bold with ── decoration, no
@@ -110,7 +113,7 @@ class UI
   };
   int popupMenuSections(const std::string& title, const std::vector<MenuRow>& rows,
                         int currentIndex,
-                        std::function<void(int)> onSelect = {});
+                        const std::function<void(int)>& onSelect = {});
 
   // Centred legend popup showing palette colour swatches and value ranges.
   // The two title strings appear on two stacked rows so the popup can stay
@@ -178,8 +181,9 @@ class UI
   // view (e.g. a column-navigator picker that shares the same dataset).
   static constexpr int kPopupSearchTab = -2;
   int popupSearch(const std::string& title,
-                  std::function<std::vector<std::string>(const std::string&)> matcher,
-                  const std::string& header = {}, bool allowTab = false);
+                  const std::function<std::vector<std::string>(const std::string&)>& matcher,
+                  const std::string& header = {},
+                  bool allowTab = false);
 
   // Min/mean/max series across the visible viewport, one float per time
   // step, used as a translucent overlay on popupTimeseries when 's' is
@@ -227,7 +231,7 @@ class UI
                       const std::vector<std::string>& timeLabels, int currentIndex,
                       const Renderer& renderer, const Palette& palette,
                       std::function<void(int)> onTimeChange = {},
-                      std::function<StatsSeries()> computeStats = {},
+                      const std::function<StatsSeries()>& computeStats = {},
                       const std::string& units = {},
                       int* animationDelayMs = nullptr,
                       int avoidCellRow = -1, int avoidCellCol = -1,
