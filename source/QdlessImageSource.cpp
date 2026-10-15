@@ -223,6 +223,9 @@ ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
   {
     GDALDataset* p;
     ~Guard() { if (p) GDALClose(p); }
+    explicit Guard(GDALDataset* ds) : p(ds) {}
+    Guard(const Guard&) = delete;
+    Guard& operator=(const Guard&) = delete;
   } guard{ds};
 
   itsNx = static_cast<std::size_t>(ds->GetRasterXSize());

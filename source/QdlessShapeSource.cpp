@@ -106,6 +106,9 @@ ShapeSource::ShapeSource(const std::string& filename, Options opts)
   {
     GDALDataset* p;
     ~DsGuard() { if (p) GDALClose(p); }
+    explicit DsGuard(GDALDataset* ds) : p(ds) {}
+    DsGuard(const DsGuard&) = delete;
+    DsGuard& operator=(const DsGuard&) = delete;
   } dsGuard{ds};
 
   if (ds->GetLayerCount() < 1)
@@ -252,6 +255,9 @@ void ShapeSource::init(OGRLayer* layer)
     {
       OGRFeature* f;
       ~FeatGuard() { if (f) OGRFeature::DestroyFeature(f); }
+      explicit FeatGuard(OGRFeature* feat) : f(feat) {}
+      FeatGuard(const FeatGuard&) = delete;
+      FeatGuard& operator=(const FeatGuard&) = delete;
     } fg{feat};
     OGRGeometry* g = feat->GetGeometryRef();
     if (g == nullptr) continue;
@@ -392,6 +398,9 @@ std::vector<std::uint16_t> ShapeSource::rasterise(std::size_t nx, std::size_t ny
   {
     GDALDataset* p;
     ~DsGuard() { if (p) GDALClose(p); }
+    explicit DsGuard(GDALDataset* ds) : p(ds) {}
+    DsGuard(const DsGuard&) = delete;
+    DsGuard& operator=(const DsGuard&) = delete;
   } dsGuard{tempDs};
 
   OGRSpatialReference dst;
@@ -419,6 +428,9 @@ std::vector<std::uint16_t> ShapeSource::rasterise(std::size_t nx, std::size_t ny
   {
     GDALDataset* p;
     ~MemGuard() { if (p) GDALClose(p); }
+    explicit MemGuard(GDALDataset* ds) : p(ds) {}
+    MemGuard(const MemGuard&) = delete;
+    MemGuard& operator=(const MemGuard&) = delete;
   } memGuard{mem};
   const double pxW = (maxX - minX) / static_cast<double>(nx);
   const double pxH = (minY - maxY) / static_cast<double>(ny);

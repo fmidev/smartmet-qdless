@@ -4696,6 +4696,8 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       case 'U':
         itsLastMessage = "Not available in image mode";
         return true;
+      default:
+        break;
     }
   }
   // 3D mode remaps the navigation keys: hjkl orbit + tilt, +/- zoom, 0
@@ -7492,10 +7494,10 @@ void App::draw3DSurfaceStack(const Layout& layout)
   struct Layer
   {
     FmiParameterName paramId;
-    const char* shortName;
-    double heightKm;
-    float threshold;          // value below this is skipped
-    const char* paletteName;  // override for stack viewing
+    const char* shortName = nullptr;
+    double heightKm = 0.0;
+    float threshold = 0.0F;          // value below this is skipped
+    const char* paletteName = nullptr;  // override for stack viewing
     Rgb fallback;             // tint when palette can't be loaded
   };
   const float cloudThreshold = itsThreshold3D;
@@ -8056,15 +8058,15 @@ void App::draw3DCrossSection(const Layout& layout)
   // basis and the tilt angle; only the (A,B) endpoints differ.
   struct Plane
   {
-    double ax, ay;
-    double abx, aby;
-    double abLen2;
-    double upx, upy, upz;
-    double nx, ny, nz;
-    double aDotN;
-    double rightDotN, upDotN, fwdDotN;
+    double ax = 0.0, ay = 0.0;
+    double abx = 0.0, aby = 0.0;
+    double abLen2 = 0.0;
+    double upx = 0.0, upy = 0.0, upz = 0.0;
+    double nx = 0.0, ny = 0.0, nz = 0.0;
+    double aDotN = 0.0;
+    double rightDotN = 0.0, upDotN = 0.0, fwdDotN = 0.0;
     std::vector<DataSource::ColumnProfile> profiles;
-    double lat1, lon1, lat2, lon2;
+    double lat1 = 0.0, lon1 = 0.0, lat2 = 0.0, lon2 = 0.0;
   };
 
   auto buildPlane = [&](double Ax, double Ay, double Bx, double By, Plane& p)
@@ -8320,14 +8322,17 @@ void App::draw3DCrossSection(const Layout& layout)
   // Status footer. Show sub-mode, the rendered (animated) endpoints,
   // active animation flags, and the speed multiplier so the user can
   // see what the toggles are doing.
-  const char* subModeLbl = "?";
-  switch (itsCurtainActiveEnd)
+  const char* subModeLbl = [this]()
   {
-    case CurtainEnd::A: subModeLbl = "A"; break;
-    case CurtainEnd::B: subModeLbl = "B"; break;
-    case CurtainEnd::Both: subModeLbl = "A+B"; break;
-    case CurtainEnd::View: subModeLbl = "View"; break;
-  }
+    switch (itsCurtainActiveEnd)
+    {
+      case CurtainEnd::A: return "A";
+      case CurtainEnd::B: return "B";
+      case CurtainEnd::Both: return "A+B";
+      case CurtainEnd::View: return "View";
+    }
+    return "?";
+  }();
   std::string flags;
   flags.reserve(5);
   flags.push_back(itsCurtainTwoPlane ? 'X' : '.');
@@ -9481,6 +9486,9 @@ int App::runInteractive()
   {
     CPLErrorHandler previous = CPLSetErrorHandler(CPLQuietErrorHandler);
     ~QuietGdal() { CPLSetErrorHandler(previous); }
+    QuietGdal() = default;
+    QuietGdal(const QuietGdal&) = delete;
+    QuietGdal& operator=(const QuietGdal&) = delete;
   } quietGdal;
 
   UI ui;
@@ -9567,7 +9575,6 @@ int App::runInteractive()
 
       std::fputs("\x1b[?2026l", stdout);
       std::fflush(stdout);
-      needRedraw = false;
     }
 
     // While any curtain animation is on we need to redraw on a fixed

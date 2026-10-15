@@ -14,12 +14,12 @@ void effectSnowflakes(
   constexpr int kN = 16;
   struct Flake
   {
-    float x0;
-    float y0;
-    float r0;
-    float drift;
-    float phase;
-    float fall;
+    float x0 = 0.0F;
+    float y0 = 0.0F;
+    float r0 = 0.0F;
+    float drift = 0.0F;
+    float phase = 0.0F;
+    float fall = 0.0F;
     Rgb col;
   };
   std::uniform_real_distribution<float> ux(0.05F, 0.95F);
@@ -78,12 +78,12 @@ void effectAurora(
   constexpr int kC = 4;
   struct Curtain
   {
-    float base;
-    float ampX;
-    float ky;
-    float spd;
-    float phase;
-    float width;
+    float base = 0.0F;
+    float ampX = 0.0F;
+    float ky = 0.0F;
+    float spd = 0.0F;
+    float phase = 0.0F;
+    float width = 0.0F;
     Rgb col;
   };
   static const std::array<Rgb, kC> kHue = {Rgb{60, 255, 140, false},

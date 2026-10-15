@@ -190,6 +190,9 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   {
     GDALDataset* p;
     ~Guard() { if (p) GDALClose(p); }
+    explicit Guard(GDALDataset* ds) : p(ds) {}
+    Guard(const Guard&) = delete;
+    Guard& operator=(const Guard&) = delete;
   } guard{ds};
 
   if (GDALDriver* drv = ds->GetDriver())

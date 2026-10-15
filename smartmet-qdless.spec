@@ -119,6 +119,7 @@ make %{_smp_mflags}
 - Fixed mechanical clang-tidy findings (internal linkage, unused parameters, initialization, redundant code), no functional changes
 - Requires 26.10.13 versions of newbase, calculator, smarttools, grid-files due to their ABI changes
 - Fixed clang-tidy style findings (loops, nested conditionals, dead code)
+- Fixed clang-tidy correctness findings (member initialization, rule of five, printf formats, dead stores)
 
 * Thu Oct 1 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.1-2.fmi
 - The 14 globe weather exit effects (El Nino, Monsoon, ITCZ, MJO, Walker Cell, AMOC, Saharan Dust, Wildfire Smoke, Krakatoa, Hurricane Tracks, Sea Ice, Ozone Hole, Auroral Oval, Jet Stream) are rewritten on a lit orthographic Earth with real coastlines: the crude GSHHS file is rasterised through LandSea on first use (~40 ms, threaded) and coloured by a coarse biome model, with seamless noise fields for clouds and plumes, a day/night terminator, ocean glint and atmospheric rim. Each effect animates its phenomenon in latitude/longitude instead of drawing box-shaped continents

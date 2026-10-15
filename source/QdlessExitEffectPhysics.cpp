@@ -178,9 +178,9 @@ void effectFlatland(
   constexpr int kDots = 8;
   struct Dot
   {
-    float x0;
-    float dir;
-    float spd;  // widths traversed over the flat phase
+    float x0 = 0.0F;
+    float dir = 0.0F;
+    float spd = 0.0F;  // widths traversed over the flat phase
     Rgb col;
   };
   std::uniform_real_distribution<float> u01(0.0F, 1.0F);

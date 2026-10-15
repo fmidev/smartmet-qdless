@@ -35,7 +35,7 @@ double wrapLon(double lon)
 // really dark past the astronomical edge.
 struct ZoneStyle
 {
-  float weight;
+  float weight = 0.0F;
   Rgb grey;
   Rgb bare;
 };

@@ -76,6 +76,7 @@ void putAt(std::ostringstream& os, int absRow, int absCol)
 UI::UI()
 {
   // Required for wide-character (UTF-8) glyphs.
+  // NOLINTNEXTLINE(concurrency-mt-unsafe): set at startup before any threads are started
   setlocale(LC_ALL, "");
 
   initscr();
@@ -1249,7 +1250,7 @@ void UI::popupHelp(HelpContext ctx)
     const int ch = wgetch(itsStatusWin);
     if (!scrolls)
       break;
-    int next = offset;
+    int next = 0;
     if (ch == KEY_DOWN)
       next = offset + 1;
     else if (ch == KEY_UP)

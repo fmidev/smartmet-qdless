@@ -58,7 +58,7 @@ Palette Palette::loadFromFile(const std::string& path)
 
   p.itsBands.reserve(bands.size());
   for (const auto& b : bands)
-    p.itsBands.push_back(Band{readBound(b["lo"]), readBound(b["hi"]), readRgb(b["rgb"])});
+    p.itsBands.push_back(Band{readBound(b["lo"]), readBound(b["hi"]), readRgb(b["rgb"]), {}});
   return p;
 }
 
@@ -75,7 +75,7 @@ Palette Palette::builtinRamp(float dataMin, float dataMax)
   p.itsName = "<builtin>";
   if (!std::isfinite(dataMin) || !std::isfinite(dataMax) || dataMax <= dataMin)
   {
-    p.itsBands.push_back(Band{std::nullopt, std::nullopt, stops[N / 2]});
+    p.itsBands.push_back(Band{std::nullopt, std::nullopt, stops[N / 2], {}});
     return p;
   }
 
@@ -86,7 +86,7 @@ Palette Palette::builtinRamp(float dataMin, float dataMax)
     float lo = dataMin + i * step;
     float hi = dataMin + (i + 1) * step;
     Rgb mid = interpolate(stops[i], stops[i + 1], 0.5F);
-    p.itsBands.push_back(Band{lo, hi, mid});
+    p.itsBands.push_back(Band{lo, hi, mid, {}});
   }
   return p;
 }
@@ -99,7 +99,7 @@ Palette Palette::flatFill(Rgb color, std::string name)
   // and 1..N (a feature ID) inside.
   Palette p;
   p.itsName = std::move(name);
-  p.itsBands.push_back(Band{0.5F, std::nullopt, color});
+  p.itsBands.push_back(Band{0.5F, std::nullopt, color, {}});
   return p;
 }
 
@@ -142,7 +142,7 @@ Palette Palette::rainbowCycle(int n, std::string name)
     const float hue = std::fmod(0.05F + static_cast<float>(i) * kGolden, 1.0F);
     const float lo = static_cast<float>(i) + 0.5F;
     const float hi = static_cast<float>(i) + 1.5F;
-    p.itsBands.push_back(Band{lo, hi, hsvToRgb(hue, 0.7F, 0.9F)});
+    p.itsBands.push_back(Band{lo, hi, hsvToRgb(hue, 0.7F, 0.9F), {}});
   }
   return p;
 }

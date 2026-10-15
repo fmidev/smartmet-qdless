@@ -1766,7 +1766,7 @@ void effectFallToPieces(const Renderer& renderer, const std::vector<Rgb>& src, i
     int bi = 0;
     auto seg = [&](float ax, float ay, float bx, float by, float r)
     {
-      Bone b;
+      Bone b{};
       b.cx = (ax + bx) * 0.5F;
       b.cy = (ay + by) * 0.5F;
       b.ox = (bx - ax) * 0.5F;
@@ -1801,7 +1801,7 @@ void effectFallToPieces(const Renderer& renderer, const std::vector<Rgb>& src, i
       seg(hx, hy, hx, hy + 0.23F * H, bR);
       seg(hx, hy + 0.23F * H, hx, hy + 0.46F * H, bR * 0.9F);
     }
-    Bone sk;  // skull
+    Bone sk{};  // skull
     sk.cx = cx;
     sk.cy = skullY;
     sk.ox = sk.oy = 0.0F;
