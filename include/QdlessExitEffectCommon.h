@@ -269,22 +269,34 @@ inline Rgb hsv2rgb(float hue, float sat, float val)
   switch (i % 6)
   {
     case 0:
-      r = val, g = u, b = p;
+      r = val;
+      g = u;
+      b = p;
       break;
     case 1:
-      r = q, g = val, b = p;
+      r = q;
+      g = val;
+      b = p;
       break;
     case 2:
-      r = p, g = val, b = u;
+      r = p;
+      g = val;
+      b = u;
       break;
     case 3:
-      r = p, g = q, b = val;
+      r = p;
+      g = q;
+      b = val;
       break;
     case 4:
-      r = u, g = p, b = val;
+      r = u;
+      g = p;
+      b = val;
       break;
     default:
-      r = val, g = p, b = q;
+      r = val;
+      g = p;
+      b = q;
       break;
   }
   return Rgb{static_cast<std::uint8_t>(std::lround(r * 255.0F)),
