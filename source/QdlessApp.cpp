@@ -6551,7 +6551,10 @@ void App::draw3D(const Layout& layout)
 
   // Flat-Earth (lat,lon) → (east,north) in metres, anchored at the radar.
   // Good to a few percent inside 250 km — adequate for the prototype.
-  const auto [radarLat, radarLon] = pvol->radarLatLon();
+  // Plain variables: capturing structured bindings in a lambda needs C++20
+  const auto radarLatLon = pvol->radarLatLon();
+  const double radarLat = std::get<0>(radarLatLon);
+  const double radarLon = std::get<1>(radarLatLon);
   const double R_e = 6371000.0;
   const double cosLat0 = std::cos(radarLat * M_PI / 180.0);
   auto latLonToXY = [&](double lat, double lon, double& x, double& y)

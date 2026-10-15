@@ -632,9 +632,9 @@ void effectNapoleon(const Renderer& renderer, const std::vector<Rgb>& src, int w
               const float xb = w * 0.82F;
               const float ya0 = h * 0.20F;
               const float ya1 = h * 0.80F;
-              const Rgb& blue = (Rgb){30, 60, 180, false};
-              const Rgb& white = (Rgb){240, 240, 240, false};
-              const Rgb& red = (Rgb){220, 30, 30, false};
+              const Rgb blue{30, 60, 180, false};
+              const Rgb white{240, 240, 240, false};
+              const Rgb red{220, 30, 30, false};
               const std::array<Rgb, 3> bands = {blue, white, red};
               for (int yy = static_cast<int>(ya0); yy <= static_cast<int>(ya1); ++yy)
                 for (int xx = static_cast<int>(xa); xx <= static_cast<int>(xb); ++xx)

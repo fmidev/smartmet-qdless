@@ -319,15 +319,6 @@ struct Globe
     return true;
   }
 
-  bool project(float latDeg, float lonDeg, float& x, float& y) const
-  {
-    const V3 p = unit(latDeg, lonDeg);
-    if (dot(p, f) < 0.0F)
-      return false;
-    x = cx + dot(p, e) * R;
-    y = cy - dot(p, n) * R / ya;
-    return true;
-  }
 };
 
 void latLonOf(const V3& p, float& lat, float& lon)
