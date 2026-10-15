@@ -1311,7 +1311,7 @@ bool App::openCatalogPicker(UI& ui, const std::string& rootArg)
     std::vector<std::string> items;
     items.reserve(subs.size() + 1);
     if (canUp)
-      items.push_back(".. (up)");
+      items.emplace_back(".. (up)");
     for (std::size_t i = 0; i < dirCol.size(); ++i)
     {
       if (modelCol[i].empty())

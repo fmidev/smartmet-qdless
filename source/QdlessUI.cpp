@@ -1354,7 +1354,8 @@ std::optional<UI::PopupClick> UI::popupMetadata(
       out.push_back(chunk);
       remaining = remaining.substr(cut);
     }
-    if (out.empty()) out.push_back(std::string{});
+    if (out.empty())
+      out.emplace_back();
     return out;
   };
 
