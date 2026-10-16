@@ -284,6 +284,42 @@ void effectMacarena(const Renderer& renderer, const std::vector<Rgb>& src, int w
             });
 }
 
+namespace
+{
+// Paint the rotating hypnotic spiral arms over the pixel
+void applySpiralArm(Rgb& base, float dx, float dy, float r, float t)
+{
+  const float th = std::atan2(dy, dx);
+  const float arm = std::sin(th * 4.0F - std::log(r + 1.0F) * 2.6F + t * 7.0F);
+  if (arm > 0.0F)
+    base = Rgb{8, 8, 10, false};
+  else if (arm < -0.7F)
+    base = Rgb{240, 235, 226, false};
+}
+
+// The grooved LP disk of radius R around (cx, cy), leaving the label area empty
+void drawVinylGrooves(std::vector<Rgb>& dst, int w, int h, float cx, float cy, float R, float ya)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  for (int yy = static_cast<int>(cy - R / ya); yy <= static_cast<int>(cy + R / ya); ++yy)
+    for (int xx = static_cast<int>(cx - R); xx <= static_cast<int>(cx + R); ++xx)
+    {
+      const float dx = xx - cx;
+      const float dy = (yy - cy) * ya;
+      const float r = std::sqrt(dx * dx + dy * dy);
+      if (r > R)
+        continue;
+      if (xx < 0 || xx >= w || yy < 0 || yy >= h)
+        continue;
+      if (r < R * 0.20F)
+        continue;  // label area, drawn separately
+      const float groove = std::sin(r * 0.8F) * 30;
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          Rgb{u8(20 + groove * 0.5F), u8(20 + groove * 0.5F), u8(20 + groove * 0.5F), false};
+    }
+}
+}  // namespace
+
 void effectBassSpiral(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
@@ -321,14 +357,7 @@ void effectBassSpiral(const Renderer& renderer, const std::vector<Rgb>& src, int
                   else
                     base = Rgb{30, 22, 20, false};
                   if (r < spinR)
-                  {
-                    const float th = std::atan2(dy, dx);
-                    const float arm = std::sin(th * 4.0F - std::log(r + 1.0F) * 2.6F + t * 7.0F);
-                    if (arm > 0.0F)
-                      base = Rgb{8, 8, 10, false};
-                    else if (arm < -0.7F)
-                      base = Rgb{240, 235, 226, false};
-                  }
+                    applySpiralArm(base, dx, dy, r, t);
                   dst[static_cast<std::size_t>(y) * w + x] = base;
                 }
             });
@@ -1009,18 +1038,7 @@ void effectVinylSpin(const Renderer& renderer, const std::vector<Rgb>& src, int 
       const float cy = h * 0.5F;
       const float R = mn * 0.35F;
       // LP disk.
-      for (int yy = static_cast<int>(cy - R / ya); yy <= static_cast<int>(cy + R / ya); ++yy)
-        for (int xx = static_cast<int>(cx - R); xx <= static_cast<int>(cx + R); ++xx) {
-          const float dx = xx - cx;
-          const float dy = (yy - cy) * ya;
-          const float r = std::sqrt(dx * dx + dy * dy);
-          if (r > R) continue;
-          if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-          if (r < R * 0.20F) continue;  // label area, drawn separately
-          const float groove = std::sin(r * 0.8F) * 30;
-          dst[static_cast<std::size_t>(yy) * w + xx] =
-              Rgb{u8(20 + groove * 0.5F), u8(20 + groove * 0.5F), u8(20 + groove * 0.5F), false};
-        }
+      drawVinylGrooves(dst, w, h, cx, cy, R, ya);
       // Data-textured label (centre).
       drawDataDisk(dst, w, h, src, cx, cy, R * 0.20F, ya, 0.5F, t * 33.0F / 60.0F * 6.2832F,
                    Rgb{200, 60, 60, false});
