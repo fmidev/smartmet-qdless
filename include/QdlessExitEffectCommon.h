@@ -220,6 +220,20 @@ inline std::array<const char*, 7> glyph5x7(char c)
   }
 }
 
+// Add the scale x scale block of points starting at (x0, y0) which are inside the w x h area
+inline void addScaledPixel(
+    std::vector<std::pair<int, int>>& pts, float x0, float y0, int scale, int w, int h)
+{
+  for (int sy = 0; sy < scale; ++sy)
+    for (int sx = 0; sx < scale; ++sx)
+    {
+      const int x = static_cast<int>(std::lround(x0 + sx));
+      const int y = static_cast<int>(std::lround(y0 + sy));
+      if (x >= 0 && x < w && y >= 0 && y < h)
+        pts.emplace_back(x, y);
+    }
+}
+
 inline std::vector<std::pair<int, int>> wordTargets(
     const std::string& word, int w, int h, float widthFrac, float heightFrac)
 {
@@ -242,14 +256,7 @@ inline std::vector<std::pair<int, int>> wordTargets(
       {
         if (g[fy][fx] != '1')
           continue;
-        for (int sy = 0; sy < scale; ++sy)
-          for (int sx = 0; sx < scale; ++sx)
-          {
-            const int x = static_cast<int>(std::lround(ox + (charOx + fx) * scale + sx));
-            const int y = static_cast<int>(std::lround(oy + fy * scale + sy));
-            if (x >= 0 && x < w && y >= 0 && y < h)
-              pts.emplace_back(x, y);
-          }
+        addScaledPixel(pts, ox + (charOx + fx) * scale, oy + fy * scale, scale, w, h);
       }
   }
   return pts;
@@ -818,6 +825,16 @@ inline std::vector<char> buildTextBitmap(const std::vector<std::string>& lines, 
   return grid;
 }
 
+// True if any text cell in rows rLo..rHi and columns cLo..cHi is set
+inline bool anyTextLit(const std::vector<char>& text, int bw, int rLo, int rHi, int cLo, int cHi)
+{
+  for (int r = rLo; r <= rHi; ++r)
+    for (int c2 = cLo; c2 <= cHi; ++c2)
+      if (text[static_cast<std::size_t>(r) * bw + c2] != 0)
+        return true;
+  return false;
+}
+
 inline void drawCrawl(std::vector<Rgb>& dst,
                int w,
                int h,
@@ -862,15 +879,7 @@ inline void drawCrawl(std::vector<Rgb>& dst,
       const float tu = (x - cx) * depthMid * kx + bw * 0.5F;
       const int cLo = std::max(0, static_cast<int>(std::floor(tu)));
       const int cHi = std::min(bw - 1, static_cast<int>(std::floor(tu + colStep)));
-      bool lit = false;
-      for (int r = rLo; r <= rHi && !lit; ++r)
-        for (int c2 = cLo; c2 <= cHi; ++c2)
-          if (text[static_cast<std::size_t>(r) * bw + c2] != 0)
-          {
-            lit = true;
-            break;
-          }
-      if (lit)
+      if (anyTextLit(text, bw, rLo, rHi, cLo, cHi))
         dst[static_cast<std::size_t>(y) * w + x] = c;
     }
   }
