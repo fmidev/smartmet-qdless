@@ -497,6 +497,20 @@ float QueryDataSource::interpolatedValueAtHeight(double lat, double lon, double 
   return vLo + (vHi - vLo) * t;
 }
 
+namespace
+{
+// Read the values of the first nLoc locations at the current parameter, level and time
+void readLocationValues(NFmiFastQueryInfo& info, std::size_t nLoc, std::vector<float>& values)
+{
+  info.FirstLocation();
+  for (std::size_t i = 0; i < nLoc; ++i)
+  {
+    values[i] = info.FloatValue();
+    if (!info.NextLocation()) break;
+  }
+}
+}  // namespace
+
 bool QueryDataSource::sampleVolume(const std::function<void(const VolumeSample&)>& cb) const
 {
   const auto nLevels = itsInfo->SizeLevels();
@@ -536,21 +550,11 @@ bool QueryDataSource::sampleVolume(const std::function<void(const VolumeSample&)
     // Heights at this level.
     itsInfo->ParamIndex(heightParamIndex);
     itsInfo->LevelIndex(static_cast<unsigned long>(li));
-    itsInfo->FirstLocation();
-    for (std::size_t i = 0; i < nLoc; ++i)
-    {
-      heights[i] = itsInfo->FloatValue();
-      if (!itsInfo->NextLocation()) break;
-    }
+    readLocationValues(*itsInfo, nLoc, heights);
     // Active-param values at this level.
     itsInfo->ParamIndex(savedParam);
     itsInfo->LevelIndex(static_cast<unsigned long>(li));
-    itsInfo->FirstLocation();
-    for (std::size_t i = 0; i < nLoc; ++i)
-    {
-      values[i] = itsInfo->FloatValue();
-      if (!itsInfo->NextLocation()) break;
-    }
+    readLocationValues(*itsInfo, nLoc, values);
     for (std::size_t i = 0; i < nLoc; ++i)
     {
       const float h = heights[i];
