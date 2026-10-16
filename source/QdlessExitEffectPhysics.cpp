@@ -7,6 +7,76 @@ namespace Qdless
 namespace ee_detail
 {
 
+namespace
+{
+// Clamp a channel value to 0..255
+std::uint8_t toChannel(float v)
+{
+  return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F));
+}
+
+// The colour channels of a pixel, or the fallback value for a transparent pixel
+struct Channels
+{
+  float r;
+  float g;
+  float b;
+};
+
+Channels channelsOr(const Rgb& d, float fallback)
+{
+  if (d.transparent)
+    return {fallback, fallback, fallback};
+  return {static_cast<float>(d.r), static_cast<float>(d.g), static_cast<float>(d.b)};
+}
+
+// Magnetotail stretching to the right of the Earth
+void drawMagnetotail(std::vector<Rgb>& dst, int w, int h, float cx, float cy, float Re, float mn)
+{
+  for (float xx = cx + Re * 1.5F; xx < w; xx += 2.0F)
+  {
+    const float xf = (xx - cx) / (w - cx);
+    const float tailH = mn * (0.04F + 0.20F * xf);
+    for (int dy = -static_cast<int>(tailH); dy <= static_cast<int>(tailH); dy += 4)
+    {
+      const int yy = static_cast<int>(cy + dy);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + static_cast<int>(xx)] =
+            Rgb{toChannel(60 - 30 * xf), toChannel(60 + 60 * xf), toChannel(130 + 80 * xf), false};
+    }
+  }
+}
+
+// Data tinted warm inside the heliosphere and cold outside it
+void drawHeliosphereBackground(std::vector<Rgb>& dst,
+                               const std::vector<Rgb>& src,
+                               int w,
+                               int h,
+                               float sunX,
+                               float sunY,
+                               float mn,
+                               float ya)
+{
+  for (int yy = 0; yy < h; ++yy)
+    for (int xx = 0; xx < w; ++xx)
+    {
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dl = d.transparent ? 30.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+      const float dx = xx - sunX;
+      const float dy = (yy - sunY) * ya;
+      const float r = std::sqrt(dx * dx + dy * dy);
+      const float helioR = mn * 0.50F;
+      const bool inside = r < helioR;
+      if (inside)
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{
+            toChannel(60 + dl * 0.15F), toChannel(40 + dl * 0.10F), toChannel(20 + dl * 0.05F), false};
+      else
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{
+            toChannel(20 + dl * 0.10F), toChannel(20 + dl * 0.10F), toChannel(50 + dl * 0.15F), false};
+    }
+}
+}  // namespace
+
 void effectRubik(
     const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
 {
@@ -3285,7 +3355,6 @@ void effectMagnetosphere(const Renderer& renderer, const std::vector<Rgb>& src, 
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   runFrames(renderer, w, h, 6000,
     [&](float t, std::vector<Rgb>& dst) {
@@ -3316,16 +3385,7 @@ void effectMagnetosphere(const Renderer& renderer, const std::vector<Rgb>& src, 
         plotDot(dst, w, h, mpX, mpY, std::max(1.0F, mn * 0.002F), ya, Rgb{160, 180, 240, false});
       }
       // Magnetotail stretching to the right.
-      for (float xx = cx + Re * 1.5F; xx < w; xx += 2.0F) {
-        const float xf = (xx - cx) / (w - cx);
-        const float tailH = mn * (0.04F + 0.20F * xf);
-        for (int dy = -static_cast<int>(tailH); dy <= static_cast<int>(tailH); dy += 4) {
-          const int yy = static_cast<int>(cy + dy);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + static_cast<int>(xx)] =
-                Rgb{u8(60 - 30 * xf), u8(60 + 60 * xf), u8(130 + 80 * xf), false};
-        }
-      }
+      drawMagnetotail(dst, w, h, cx, cy, Re, mn);
       // Dipole field lines.
       for (int k = 0; k < 6; ++k) {
         const float baseAng = (k - 2.5F) * 0.4F;
@@ -3889,9 +3949,7 @@ void effectHRDiagram(const Renderer& renderer, const std::vector<Rgb>& src, int 
         const int sx = axL + static_cast<int>(xf * (axR - axL));
         const int sy = axB - static_cast<int>(yf * (axB - axT));
         const Rgb d = sample(src, w, h, sx, sy);
-        const float dr = d.transparent ? 200.0F : d.r;
-        const float dg = d.transparent ? 200.0F : d.g;
-        const float db = d.transparent ? 200.0F : d.b;
+        const auto [dr, dg, db] = channelsOr(d, 200.0F);
         const Rgb starCol{u8(60 + xf * 200 + dr * 0.10F), u8(80 + xf * 100 + dg * 0.10F),
                          u8(220 - xf * 130 + db * 0.10F), false};
         plotDot(dst, w, h, sx, sy, std::max(1.0F, mn * 0.005F * (0.8F + hash(i * 7) * 0.6F)), ya,
@@ -4325,7 +4383,6 @@ void effectVoyager(const Renderer& renderer, const std::vector<Rgb>& src, int w,
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   runFrames(
       renderer,
@@ -4336,23 +4393,7 @@ void effectVoyager(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       {
         const float sunX = w * 0.10F;
         const float sunY = h * 0.50F;
-        for (int yy = 0; yy < h; ++yy)
-          for (int xx = 0; xx < w; ++xx)
-          {
-            const Rgb d = sample(src, w, h, xx, yy);
-            const float dl = d.transparent ? 30.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-            const float dx = xx - sunX;
-            const float dy = (yy - sunY) * ya;
-            const float r = std::sqrt(dx * dx + dy * dy);
-            const float helioR = mn * 0.50F;
-            const bool inside = r < helioR;
-            if (inside)
-              dst[static_cast<std::size_t>(yy) * w + xx] =
-                  Rgb{u8(60 + dl * 0.15F), u8(40 + dl * 0.10F), u8(20 + dl * 0.05F), false};
-            else
-              dst[static_cast<std::size_t>(yy) * w + xx] =
-                  Rgb{u8(20 + dl * 0.10F), u8(20 + dl * 0.10F), u8(50 + dl * 0.15F), false};
-          }
+        drawHeliosphereBackground(dst, src, w, h, sunX, sunY, mn, ya);
         const float helioR2 = mn * 0.50F;
         for (float a = 0; a < 6.2832F; a += 0.005F)
         {
