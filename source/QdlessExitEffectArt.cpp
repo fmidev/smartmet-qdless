@@ -71,11 +71,49 @@ void effectBanksyBalloon(const Renderer& renderer, const std::vector<Rgb>& src, 
             });
 }
 
+namespace
+{
+// Dimmed bone-coloured greyscale copy of the source frame
+void drawDimBoneBackground(
+    std::vector<Rgb>& dst, const std::vector<Rgb>& src, int w, int h, float dim)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x)
+    {
+      const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+      const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+      dst[static_cast<std::size_t>(y) * w + x] =
+          Rgb{u8(28 + l * 0.12F * dim), u8(22 + l * 0.10F * dim),
+              u8(18 + l * 0.08F * dim), false};
+    }
+}
+
+// Tea-light flicker around the central skull ring of the chandelier
+void drawTeaLights(std::vector<Rgb>& dst,
+                   int w,
+                   int h,
+                   float cxw,
+                   float cy,
+                   float R,
+                   float mn,
+                   float ya,
+                   float t)
+{
+  const float flick = (1.0F + std::sin(t * 13.0F)) * 0.5F;
+  for (int k = 0; k < 6; ++k)
+  {
+    const float a = k / 6.0F * 6.2832F;
+    plotDot(dst, w, h, cxw + std::cos(a) * 0.55F * R, cy + std::sin(a) * 0.20F * R - mn * 0.03F,
+            mn * 0.015F * (0.7F + 0.5F * flick), ya, Rgb{255, 210, 130, false});
+  }
+}
+}  // namespace
+
 void effectBoneChandelier(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n)
   { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   // Target shape, world-relative to the chandelier centre.
@@ -112,15 +150,7 @@ void effectBoneChandelier(const Renderer& renderer, const std::vector<Rgb>& src,
       [&](float t, std::vector<Rgb>& dst)
       {
         const float dim = std::clamp(1.0F - t * 0.8F, 0.18F, 1.0F);
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            dst[static_cast<std::size_t>(y) * w + x] =
-                Rgb{u8(28 + l * 0.12F * dim), u8(22 + l * 0.10F * dim),
-                    u8(18 + l * 0.08F * dim), false};
-          }
+        drawDimBoneBackground(dst, src, w, h, dim);
         const float cxw = w * 0.5F;
         const float cy = h * 0.42F + std::sin(t * 1.4F) * mn * 0.012F;
         const Rgb bone{222, 210, 188, false};
@@ -148,15 +178,7 @@ void effectBoneChandelier(const Renderer& renderer, const std::vector<Rgb>& src,
         }
         // Tea-light flicker around the central ring once the structure assembles.
         if (t > 0.7F)
-        {
-          const float flick = (1.0F + std::sin(t * 13.0F)) * 0.5F;
-          for (int k = 0; k < 6; ++k)
-          {
-            const float a = k / 6.0F * 6.2832F;
-            plotDot(dst, w, h, cxw + std::cos(a) * 0.55F * R, cy + std::sin(a) * 0.20F * R - mn * 0.03F,
-                    mn * 0.015F * (0.7F + 0.5F * flick), ya, Rgb{255, 210, 130, false});
-          }
-        }
+          drawTeaLights(dst, w, h, cxw, cy, R, mn, ya, t);
       });
 }
 
