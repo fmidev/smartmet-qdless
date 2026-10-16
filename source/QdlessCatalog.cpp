@@ -612,6 +612,15 @@ bool looksLikeWeatherDir(const std::string& dir)
       return true;
   return MasalaCatalog::hasCubeFiles(dir) || MasalaCatalog::hasRasterFiles(dir);
 }
+
+// True for the root and the system directories which never hold weather data
+bool isSystemMountPoint(const std::string& mp)
+{
+  return (mp == "/" || underPath(mp, "/home") || underPath(mp, "/boot") ||
+          underPath(mp, "/proc") || underPath(mp, "/sys") || underPath(mp, "/dev") ||
+          underPath(mp, "/var") || underPath(mp, "/usr") || underPath(mp, "/run") ||
+          underPath(mp, "/tmp") || underPath(mp, "/opt"));
+}
 }  // namespace
 
 std::vector<WeatherRoot> discoverWeatherRoots()
@@ -637,10 +646,7 @@ std::vector<WeatherRoot> discoverWeatherRoots()
     // Cheap aborts (no I/O).
     if (isLocalFsType(fstype))
       continue;
-    if (mp == "/" || underPath(mp, "/home") || underPath(mp, "/boot") || underPath(mp, "/proc") ||
-        underPath(mp, "/sys") || underPath(mp, "/dev") || underPath(mp, "/var") ||
-        underPath(mp, "/usr") || underPath(mp, "/run") || underPath(mp, "/tmp") ||
-        underPath(mp, "/opt"))
+    if (isSystemMountPoint(mp))
       continue;
 
     const bool isS3fs = device.rfind("s3fs", 0) == 0;
