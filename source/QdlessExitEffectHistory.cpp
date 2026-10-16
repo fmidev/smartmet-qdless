@@ -1055,6 +1055,31 @@ void effectWrightFlyer(const Renderer& renderer, const std::vector<Rgb>& src, in
     });
 }
 
+namespace
+{
+// Draw the pulsing text in the lower left corner with dots of sc pixels per glyph cell
+void drawBeepText(
+    std::vector<Rgb>& dst, int w, int h, float ya, const std::string& b, int sc, float beep)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  for (int ci = 0; ci < static_cast<int>(b.size()); ++ci)
+  {
+    const auto g = glyph5x7(b[ci]);
+    for (int fy = 0; fy < 7; ++fy)
+      for (int fx = 0; fx < 5; ++fx)
+        if (g[fy][fx] == '1')
+          plotDot(dst,
+                  w,
+                  h,
+                  w * 0.1F + (ci * 6 + fx) * sc,
+                  h * 0.85F + fy * sc,
+                  std::max(1.0F, static_cast<float>(sc) * 0.5F * beep),
+                  ya,
+                  Rgb{u8(255 * beep), u8(80 * beep), u8(80 * beep), false});
+  }
+}
+}  // namespace
+
 void effectSputnik(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
@@ -1095,14 +1120,7 @@ void effectSputnik(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       const float beep = 0.5F + 0.5F * std::sin(t * 12.0F);
       const std::string b = "BEEP";
       const int sc = std::max(2, static_cast<int>(mn / 35.0F));
-      for (int ci = 0; ci < static_cast<int>(b.size()); ++ci) {
-        const auto g = glyph5x7(b[ci]);
-        for (int fy = 0; fy < 7; ++fy)
-          for (int fx = 0; fx < 5; ++fx)
-            if (g[fy][fx] == '1')
-              plotDot(dst, w, h, w * 0.1F + (ci * 6 + fx) * sc, h * 0.85F + fy * sc,
-                      std::max(1.0F, static_cast<float>(sc) * 0.5F * beep), ya, Rgb{u8(255 * beep), u8(80 * beep), u8(80 * beep), false});
-      }
+      drawBeepText(dst, w, h, ya, b, sc, beep);
     });
 }
 
