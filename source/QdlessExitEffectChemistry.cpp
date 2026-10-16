@@ -348,11 +348,35 @@ void effectLavaLamp(const Renderer& renderer, const std::vector<Rgb>& src, int w
             });
 }
 
+namespace
+{
+// Clamp a channel value to 0..255
+std::uint8_t toChannel(float v)
+{
+  return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F));
+}
+
+// Dimmed copy of the pixel, transparent pixels get a dark background colour
+Rgb dimmedPixel(const Rgb& s, float dim)
+{
+  if (s.transparent)
+    return Rgb{12, 12, 18, false};
+  return Rgb{toChannel(s.r * dim), toChannel(s.g * dim), toChannel(s.b * dim + 6), false};
+}
+
+// Colour of a sodium or chloride ion at the given depth
+Rgb ionTint(bool na, float depth)
+{
+  if (na)
+    return Rgb{toChannel(200 * depth), toChannel(80 * depth), toChannel(220 * depth), false};
+  return Rgb{toChannel(70 * depth), toChannel(220 * depth), toChannel(120 * depth), false};
+}
+}  // namespace
+
 void effectNaClLattice(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
@@ -361,10 +385,7 @@ void effectNaClLattice(const Renderer& renderer, const std::vector<Rgb>& src, in
                 for (int x = 0; x < w; ++x)
                 {
                   const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      s.transparent
-                          ? Rgb{12, 12, 18, false}
-                          : Rgb{u8(s.r * dim), u8(s.g * dim), u8(s.b * dim + 6), false};
+                  dst[static_cast<std::size_t>(y) * w + x] = dimmedPixel(s, dim);
                 }
               const float cyw = std::cos(t * 0.8F);
               const float syw = std::sin(t * 0.8F);
@@ -393,8 +414,7 @@ void effectNaClLattice(const Renderer& renderer, const std::vector<Rgb>& src, in
                     const float depth = std::clamp((rz2 + extent * spacing) / (2 * extent * spacing),
                                                    0.2F, 1.0F);
                     const bool na = ((ix + iy + iz) & 1) == 0;
-                    const Rgb tint = na ? Rgb{u8(200 * depth), u8(80 * depth), u8(220 * depth), false}
-                                         : Rgb{u8(70 * depth), u8(220 * depth), u8(120 * depth), false};
+                    const Rgb tint = ionTint(na, depth);
                     drawDataDisk(dst, w, h, src, sx, sy, mn * 0.025F * depth, ya, 0.85F, t * 0.5F,
                                  tint);
                   }
