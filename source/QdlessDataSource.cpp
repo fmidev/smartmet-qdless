@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <gdal_priv.h>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <unistd.h>
@@ -138,6 +139,36 @@ struct S3fsMount
   std::string cacheDir;    // use_cache= value
 };
 
+// Parse one fstab line into an s3fs mount which declares a use_cache dir
+std::optional<S3fsMount> parseS3fsMount(const std::string& line)
+{
+  // The device field legitimately contains '#' ("s3fs#bucket"), so only a
+  // leading '#' marks a comment.
+  const std::size_t first = line.find_first_not_of(" \t");
+  if (first == std::string::npos || line[first] == '#') return std::nullopt;
+  std::istringstream ls(line);
+  std::string device;
+  std::string mountpoint;
+  std::string fstype;
+  std::string options;
+  if (!(ls >> device >> mountpoint >> fstype >> options)) return std::nullopt;
+  if (device.rfind("s3fs", 0) != 0) return std::nullopt;  // not an s3fs entry
+  S3fsMount m;
+  m.mountpoint = mountpoint;
+  if (const std::size_t hash = device.find('#'); hash != std::string::npos)
+    m.bucket = device.substr(hash + 1);
+  // Pull use_cache=<dir> out of the comma-separated options.
+  std::stringstream os(options);
+  std::string opt;
+  while (std::getline(os, opt, ','))
+  {
+    constexpr std::string_view key = "use_cache=";
+    if (opt.rfind(key, 0) == 0) m.cacheDir = opt.substr(key.size());
+  }
+  if (m.mountpoint.empty() || m.cacheDir.empty()) return std::nullopt;
+  return m;
+}
+
 // Parse fstab once, returning the s3fs mounts that declare a use_cache dir,
 // sorted most-specific-mountpoint-first so nested mounts resolve correctly.
 // Empty (a no-op) on a machine with no s3fs mounts or no fstab.
@@ -150,30 +181,7 @@ const std::vector<S3fsMount>& s3fsMounts()
     std::string line;
     while (std::getline(in, line))
     {
-      // The device field legitimately contains '#' ("s3fs#bucket"), so only a
-      // leading '#' marks a comment.
-      const std::size_t first = line.find_first_not_of(" \t");
-      if (first == std::string::npos || line[first] == '#') continue;
-      std::istringstream ls(line);
-      std::string device;
-      std::string mountpoint;
-      std::string fstype;
-      std::string options;
-      if (!(ls >> device >> mountpoint >> fstype >> options)) continue;
-      if (device.rfind("s3fs", 0) != 0) continue;  // not an s3fs entry
-      S3fsMount m;
-      m.mountpoint = mountpoint;
-      if (const std::size_t hash = device.find('#'); hash != std::string::npos)
-        m.bucket = device.substr(hash + 1);
-      // Pull use_cache=<dir> out of the comma-separated options.
-      std::stringstream os(options);
-      std::string opt;
-      while (std::getline(os, opt, ','))
-      {
-        constexpr std::string_view key = "use_cache=";
-        if (opt.rfind(key, 0) == 0) m.cacheDir = opt.substr(key.size());
-      }
-      if (!m.mountpoint.empty() && !m.cacheDir.empty()) out.push_back(std::move(m));
+      if (auto m = parseS3fsMount(line)) out.push_back(std::move(*m));
     }
     std::sort(out.begin(), out.end(), [](const S3fsMount& a, const S3fsMount& b)
               { return a.mountpoint.size() > b.mountpoint.size(); });
