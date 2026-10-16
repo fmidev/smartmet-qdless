@@ -12,7 +12,6 @@
 
 using namespace SmartMet;
 
-#include <algorithm>
 #include <cmath>
 #include <ctime>
 #include <filesystem>
