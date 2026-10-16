@@ -515,6 +515,30 @@ void phase(float t, GlobeLook& look, float introEnd = 0.16F)
   look.fade = 1.0F - smooth01(0.9F, 1.0F, t);
 }
 
+
+// Smoke amount of the fire plume at the point, darkening the land around the fire as the
+// burnt area grows with time
+float fireSmoke(Surface& s, float lat, float lon, const LatLon& f, float reach, float t)
+{
+  const float down = dlon(lon, f.lon);
+  if (down < -2.0F || down > reach + 10.0F)
+    return 0.0F;
+  // Plumes drift east and a little south, spreading with distance.
+  const float axis = f.lat - 0.12F * down + 3.0F * std::sin(down * 0.08F + t * 3.0F);
+  const float width = 1.5F + 0.12F * down;
+  const float a = std::exp(-std::pow((lat - axis) / width, 2.0F)) *
+                  smooth01(reach + 8.0F, reach - 8.0F, down) / (1.0F + down / 60.0F);
+  // Burn scars around the fire.
+  if (s.land)
+  {
+    float x = 0.0F;
+    float y = 0.0F;
+    localDeg(lat, lon, f.lat, f.lon, x, y);
+    const float scar = smooth01(2.5F * smooth01(0.0F, 0.6F, t), 0.0F, std::hypot(x, y));
+    s.albedo = mix(s.albedo, F3{45, 35, 30}, 0.8F * scar);
+  }
+  return a;
+}
 }  // namespace
 
 // El Niño. The Pacific seen from space, coloured by sea-surface temperature.
@@ -1057,27 +1081,7 @@ void effectWildfireSmoke(const Renderer& renderer, const std::vector<Rgb>& src, 
                 return;
               float smoke = 0.0F;
               for (const auto& f : fires)
-              {
-                const float down = dlon(lon, f.lon);
-                if (down < -2.0F || down > reach + 10.0F)
-                  continue;
-                // Plumes drift east and a little south, spreading with distance.
-                const float axis = f.lat - 0.12F * down + 3.0F * std::sin(down * 0.08F + t * 3.0F);
-                const float width = 1.5F + 0.12F * down;
-                const float a = std::exp(-std::pow((lat - axis) / width, 2.0F)) *
-                                smooth01(reach + 8.0F, reach - 8.0F, down) / (1.0F + down / 60.0F);
-                smoke += a;
-                // Burn scars around the fire.
-                if (s.land)
-                {
-                  float x = 0.0F;
-                  float y = 0.0F;
-                  localDeg(lat, lon, f.lat, f.lon, x, y);
-                  const float scar =
-                      smooth01(2.5F * smooth01(0.0F, 0.6F, t), 0.0F, std::hypot(x, y));
-                  s.albedo = mix(s.albedo, F3{45, 35, 30}, 0.8F * scar);
-                }
-              }
+                smoke += fireSmoke(s, lat, lon, f, reach, t);
               const float tex = noiseAt(map, 1, lat, lon - t * 60.0F);
               smoke = std::clamp(smoke * (0.5F + tex), 0.0F, 0.85F);
               s.albedo = mix(s.albedo, F3{150, 130, 110}, smoke);
