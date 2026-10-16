@@ -1333,6 +1333,26 @@ void effectCrown(const Renderer& renderer, const std::vector<Rgb>& src, int w, i
     });
 }
 
+namespace
+{
+// The widening gown and body of the Statue of Liberty
+void drawLibertyGown(std::vector<Rgb>& dst, int w, int h, float cx, float mn, const Rgb& green)
+{
+  for (int yo = 0; yo <= static_cast<int>(h * 0.30F); ++yo)
+  {
+    const float yf = yo / (h * 0.30F);
+    const int half = static_cast<int>(mn * (0.04F + 0.06F * yf));
+    for (int xo = -half; xo <= half; ++xo)
+    {
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(h * 0.55F + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = green;
+    }
+  }
+}
+}  // namespace
+
 void effectLibertyTorch(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
@@ -1359,16 +1379,7 @@ void effectLibertyTorch(const Renderer& renderer, const std::vector<Rgb>& src, i
       const float cx = w * 0.45F;
       const Rgb green{50, 130, 110, false};
       // Body.
-      for (int yo = 0; yo <= static_cast<int>(h * 0.30F); ++yo) {
-        const float yf = yo / (h * 0.30F);
-        const int half = static_cast<int>(mn * (0.04F + 0.06F * yf));
-        for (int xo = -half; xo <= half; ++xo) {
-          const int xx = static_cast<int>(cx + xo);
-          const int yy = static_cast<int>(h * 0.55F + yo);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = green;
-        }
-      }
+      drawLibertyGown(dst, w, h, cx, mn, green);
       // Head with spikes.
       plotDot(dst, w, h, cx, h * 0.50F, mn * 0.030F, ya, green);
       for (int k = 0; k < 7; ++k) {
