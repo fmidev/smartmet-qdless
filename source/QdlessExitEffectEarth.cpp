@@ -394,6 +394,7 @@ void effectRainOnGlass(
   };
   std::vector<Drop> drops;
   const int nSmall = w * h / 140;
+  drops.reserve(nSmall);
   for (int i = 0; i < nSmall; ++i)
     drops.push_back(
         {u01(rng) * w, u01(rng) * h, 0.8F + 1.6F * u01(rng) * u01(rng), u01(rng) * 0.7F});

@@ -181,6 +181,7 @@ void parallelRows(int rows, Body&& body)
 {
   const int nt = std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, 8);
   std::vector<std::thread> pool;
+  pool.reserve(nt);
   for (int k = 0; k < nt; ++k)
     pool.emplace_back(
         [&, k]

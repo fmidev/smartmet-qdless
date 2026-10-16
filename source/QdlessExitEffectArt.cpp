@@ -88,6 +88,7 @@ void effectBoneChandelier(const Renderer& renderer, const std::vector<Rgb>& src,
   std::vector<Piece> pieces;
   const float R = mn * 0.18F;
   // Vertical chain from ceiling.
+  pieces.reserve(6);
   for (int k = 0; k < 6; ++k)
     pieces.push_back({0.0F, -1.55F + k * 0.10F, 0.06F, false});
   // Central skull crown — 6 skulls in a horizontal ring.
