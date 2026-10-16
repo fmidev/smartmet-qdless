@@ -295,6 +295,30 @@ void effectRadarSweep(const Renderer& renderer, const std::vector<Rgb>& src, int
 // The view dissolves into its own contour lines. Isolines of the smoothed
 // brightness field march across the map and grow denser, then lift off and
 // drift away like smoke.
+namespace
+{
+// Intensity of the isoline ink at the point, index contours are drawn stronger
+float isolineIntensity(const std::vector<float>& L,
+                       const std::vector<float>& grad,
+                       int w,
+                       int h,
+                       float sx,
+                       float sy,
+                       float levels,
+                       float offset)
+{
+  const float lv = bilinear(L, w, h, sx, sy) * levels + offset;
+  const float g = bilinear(grad, w, h, sx, sy) * levels;
+  const float d = std::fabs(fract(lv + 0.5F) - 0.5F);  // in level units
+  const float px = d / std::max(g, 1e-4F);
+  float inten = std::clamp(1.1F - px, 0.0F, 1.0F);
+  const int idx = static_cast<int>(std::floor(lv + 0.5F));
+  if (idx % 5 == 0)
+    inten = std::min(1.0F, inten * 1.4F);  // index contours
+  return inten;
+}
+}  // namespace
+
 void effectIsolines(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
@@ -348,15 +372,9 @@ void effectIsolines(const Renderer& renderer, const std::vector<Rgb>& src, int w
                   c = add(c, F3{4, 6, 16});
                   if (sy < h - 1)
                   {
-                    const float lv = bilinear(L, w, h, sx, sy) * levels + offset;
-                    const float g = bilinear(grad, w, h, sx, sy) * levels;
-                    const float d = std::fabs(fract(lv + 0.5F) - 0.5F);  // in level units
-                    const float px = d / std::max(g, 1e-4F);
-                    float inten = std::clamp(1.1F - px, 0.0F, 1.0F);
-                    const int idx = static_cast<int>(std::floor(lv + 0.5F));
-                    if (idx % 5 == 0)
-                      inten = std::min(1.0F, inten * 1.4F);  // index contours
-                    inten *= smooth01(0.0F, 0.12F, t) * breakup;
+                    const float inten =
+                        isolineIntensity(L, grad, w, h, sx, sy, levels, offset) *
+                        (smooth01(0.0F, 0.12F, t) * breakup);
                     if (inten > 0.0F)
                     {
                       const std::size_t si =
