@@ -981,30 +981,53 @@ LatLonBox GridFilesSource::boundingBox() const
   return itsBBox;
 }
 
+namespace
+{
+// Shift the longitude range by multiples of 360 so that minLon is in [-180, 180)
+void shiftLonRange(double& minLon, double& maxLon)
+{
+  while (minLon >= 180.0)
+  {
+    minLon -= 360.0;
+    maxLon -= 360.0;
+  }
+  while (minLon < -180.0)
+  {
+    minLon += 360.0;
+    maxLon += 360.0;
+  }
+}
+}  // namespace
+
+// Corner-only bounding box used when the full grid geometry is unavailable
+LatLonBox GridFilesSource::cornerBoundingBox() const
+{
+  LatLonBox b;
+  // Fall back to the corner-only bbox, which is fine for grids whose
+  // longitudes don't wrap. For wrapping global grids this reduces to a
+  // sliver — the override of uvToLatLon / latLonToUV above means callers
+  // shouldn't see that bbox in the rendering pipeline anyway.
+  if (itsFile == nullptr || itsFile->getNumberOfMessages() == 0)
+    return b;
+  auto* msg = itsFile->getMessageByIndex(0);
+  T::Coordinate tl;
+  T::Coordinate tr;
+  T::Coordinate bl;
+  T::Coordinate br;
+  if (!msg->getGridLatLonArea(tl, tr, bl, br))
+    return b;
+  b.minLat = std::min({tl.y(), tr.y(), bl.y(), br.y()});
+  b.maxLat = std::max({tl.y(), tr.y(), bl.y(), br.y()});
+  b.minLon = std::min({tl.x(), tr.x(), bl.x(), br.x()});
+  b.maxLon = std::max({tl.x(), tr.x(), bl.x(), br.x()});
+  return b;
+}
+
 LatLonBox GridFilesSource::computeBoundingBox() const
 {
   LatLonBox b;
   if (!ensureGridGeometry())
-  {
-    // Fall back to the corner-only bbox, which is fine for grids whose
-    // longitudes don't wrap. For wrapping global grids this reduces to a
-    // sliver — the override of uvToLatLon / latLonToUV above means callers
-    // shouldn't see that bbox in the rendering pipeline anyway.
-    if (itsFile == nullptr || itsFile->getNumberOfMessages() == 0)
-      return b;
-    auto* msg = itsFile->getMessageByIndex(0);
-    T::Coordinate tl;
-    T::Coordinate tr;
-    T::Coordinate bl;
-    T::Coordinate br;
-    if (!msg->getGridLatLonArea(tl, tr, bl, br))
-      return b;
-    b.minLat = std::min({tl.y(), tr.y(), bl.y(), br.y()});
-    b.maxLat = std::max({tl.y(), tr.y(), bl.y(), br.y()});
-    b.minLon = std::min({tl.x(), tr.x(), bl.x(), br.x()});
-    b.maxLon = std::max({tl.x(), tr.x(), bl.x(), br.x()});
-    return b;
-  }
+    return cornerBoundingBox();
   auto* msg = itsFile->getMessageByIndex(0);
 
   // Walk the perimeter as one continuous closed loop, sampling lat/lon at
@@ -1070,16 +1093,7 @@ LatLonBox GridFilesSource::computeBoundingBox() const
   // 180]. Callers (and grid-files itself) accept arbitrary lon values
   // since `getGridPointByLatLonCoordinates` handles both wraps, but a
   // canonical range keeps overlay code (place names, coastlines) happy.
-  while (minLon >= 180.0)
-  {
-    minLon -= 360.0;
-    maxLon -= 360.0;
-  }
-  while (minLon < -180.0)
-  {
-    minLon += 360.0;
-    maxLon += 360.0;
-  }
+  shiftLonRange(minLon, maxLon);
   b.minLat = minLat;
   b.maxLat = maxLat;
   b.minLon = minLon;

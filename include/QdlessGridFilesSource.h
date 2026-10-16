@@ -115,6 +115,7 @@ class GridFilesSource : public DataSource
   // extent is constant for the file and DataSource::latLonToUV calls it once
   // per out-of-grid point (every off-grid coastline vertex).
   LatLonBox computeBoundingBox() const;
+  LatLonBox cornerBoundingBox() const;
 
   // Swap-aware wrappers around getGridLatLonCoordinatesByGridPosition /
   // getGridPointByLatLonCoordinates. See `itsCoordsSwapped`.
