@@ -75,6 +75,67 @@ void drawHeliosphereBackground(std::vector<Rgb>& dst,
             toChannel(20 + dl * 0.10F), toChannel(20 + dl * 0.10F), toChannel(50 + dl * 0.15F), false};
     }
 }
+
+// Centre and start angle of the quarter-circle arc of a golden spiral step in direction dir
+void goldenArcCentre(int dir,
+                     float x0,
+                     float y0,
+                     float x1,
+                     float y1,
+                     float L,
+                     float& ccx,
+                     float& ccy,
+                     float& startAng)
+{
+  if (dir == 0) { ccx = x1; ccy = y0 + L; startAng = -1.5708F; }
+  else if (dir == 1) { ccx = x1 - L; ccy = y1; startAng = 0; }
+  else if (dir == 2) { ccx = x1; ccy = y0 - L; startAng = 1.5708F; }
+  else { ccx = x1 + L; ccy = y1; startAng = 3.14159F; }
+}
+
+// Draw the mode label text near the top left corner with dots of sc pixels per glyph cell
+void drawModeLabel(
+    std::vector<Rgb>& dst, int w, int h, float ya, const std::string& lab, float x0, int sc)
+{
+  for (std::size_t ci = 0; ci < lab.size(); ++ci)
+  {
+    const auto g = glyph5x7(lab[ci]);
+    for (int fy = 0; fy < 7; ++fy)
+      for (int fx = 0; fx < 5; ++fx)
+        if (g[fy][fx] == '1')
+          plotDot(dst, w, h, x0 + (ci * 6 + fx) * sc, h * 0.10F + fy * sc,
+                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                  Rgb{220, 220, 240, false});
+  }
+}
+
+// Shade the data texture on the Moebius strip, transparent points get a fixed colour
+Rgb mobiusColour(const Rgb& d, float bright)
+{
+  return Rgb{toChannel(d.transparent ? 80 : d.r * bright),
+             toChannel(d.transparent ? 80 : d.g * bright),
+             toChannel(d.transparent ? 120 : d.b * bright),
+             false};
+}
+
+// Fill one pixel column of the volcano from its slope down to the ground
+void drawMountainColumn(std::vector<Rgb>& dst,
+                        const std::vector<Rgb>& src,
+                        int w,
+                        int h,
+                        int xx,
+                        float mountY,
+                        float groundY)
+{
+  for (int yy = static_cast<int>(mountY); yy <= static_cast<int>(groundY); ++yy)
+  {
+    const Rgb d = sample(src, w, h, xx, yy);
+    const float dr = d.transparent ? 180.0F : d.r;
+    const float yfr = (yy - mountY) / std::max(1.0F, groundY - mountY);
+    dst[static_cast<std::size_t>(yy) * w + xx] =
+        Rgb{toChannel(160 + dr * 0.20F - 40 * yfr), toChannel(80 + dr * 0.10F), toChannel(40), false};
+  }
+}
 }  // namespace
 
 void effectRubik(
@@ -884,7 +945,6 @@ void effectMobius(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(
       renderer, w, h, 5600,
       [&](float t, std::vector<Rgb>& dst)
@@ -915,9 +975,7 @@ void effectMobius(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
             const Rgb d = sample(src, w, h, texU, texV);
             const float depth = (rz + R) / (2 * R);
             const float bright = 0.55F + 0.45F * depth;
-            const Rgb c{u8(d.transparent ? 80 : d.r * bright),
-                        u8(d.transparent ? 80 : d.g * bright),
-                        u8(d.transparent ? 120 : d.b * bright), false};
+            const Rgb c = mobiusColour(d, bright);
             const int ix = static_cast<int>(sx);
             const int iy = static_cast<int>(sy);
             if (ix >= 0 && ix < w && iy >= 0 && iy < h)
@@ -1734,10 +1792,7 @@ void effectGoldenSpiral(const Renderer& renderer, const std::vector<Rgb>& src, i
             float ccx = NAN;
             float ccy = NAN;
             float startAng = NAN;
-            if (dir == 0) { ccx = x1; ccy = y0 + L; startAng = -1.5708F; }
-            else if (dir == 1) { ccx = x1 - L; ccy = y1; startAng = 0; }
-            else if (dir == 2) { ccx = x1; ccy = y0 - L; startAng = 1.5708F; }
-            else { ccx = x1 + L; ccy = y1; startAng = 3.14159F; }
+            goldenArcCentre(dir, x0, y0, x1, y1, L, ccx, ccy, startAng);
             ax = ccx + std::cos(startAng + a) * L;
             ay = ccy + std::sin(startAng + a) * L;
             plotDot(dst, w, h, ax, ay, std::max(1.0F, mn * 0.005F), ya, gold);
@@ -2082,16 +2137,7 @@ void effectStandingWave(const Renderer& renderer, const std::vector<Rgb>& src, i
         // Label.
         const std::string lab = "N=" + std::to_string(n);
         const int sc = std::max(2, static_cast<int>(mn / 70.0F));
-        for (std::size_t ci = 0; ci < lab.size(); ++ci)
-        {
-          const auto g = glyph5x7(lab[ci]);
-          for (int fy = 0; fy < 7; ++fy)
-            for (int fx = 0; fx < 5; ++fx)
-              if (g[fy][fx] == '1')
-                plotDot(dst, w, h, mn * 0.05F + (ci * 6 + fx) * sc, h * 0.10F + fy * sc,
-                        std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                        Rgb{220, 220, 240, false});
-        }
+        drawModeLabel(dst, w, h, ya, lab, mn * 0.05F, sc);
         (void)modeT;
       });
 }
@@ -4197,13 +4243,7 @@ void effectOlympusMons(const Renderer& renderer, const std::vector<Rgb>& src, in
         const float prof = std::exp(-xf * xf * 1.5F);
         const float mountY = groundY - prof * mn * 0.30F * rise;
         if (mountY < groundY)
-          for (int yy = static_cast<int>(mountY); yy <= static_cast<int>(groundY); ++yy) {
-            const Rgb d = sample(src, w, h, xx, yy);
-            const float dr = d.transparent ? 180.0F : d.r;
-            const float yfr = (yy - mountY) / std::max(1.0F, groundY - mountY);
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(160 + dr * 0.20F - 40 * yfr), u8(80 + dr * 0.10F), u8(40), false};
-          }
+          drawMountainColumn(dst, src, w, h, xx, mountY, groundY);
       }
       plotDot(dst, w, h, peakX, peakY, mn * 0.030F * rise, ya, Rgb{60, 30, 20, false});
     });
