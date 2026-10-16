@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.10.15
+Version: 26.10.16
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -39,12 +39,12 @@ BuildRequires: ncurses-devel
 BuildRequires: netcdf-cxx4-devel
 BuildRequires: netcdf-devel >= 4.3.3.1
 BuildRequires: rpm-build
-BuildRequires: smartmet-library-calculator-devel >= 26.10.15
-BuildRequires: smartmet-library-gis-devel >= 26.10.15
-BuildRequires: smartmet-library-grid-files-devel >= 26.10.15
-BuildRequires: smartmet-library-macgyver-devel >= 26.10.15
-BuildRequires: smartmet-library-newbase-devel >= 26.10.15
-BuildRequires: smartmet-library-smarttools-devel >= 26.10.15
+BuildRequires: smartmet-library-calculator-devel >= 26.10.16
+BuildRequires: smartmet-library-gis-devel >= 26.10.16
+BuildRequires: smartmet-library-grid-files-devel >= 26.10.16
+BuildRequires: smartmet-library-macgyver-devel >= 26.10.16
+BuildRequires: smartmet-library-newbase-devel >= 26.10.16
+BuildRequires: smartmet-library-smarttools-devel >= 26.10.16
 BuildRequires: smartmet-timezones
 BuildRequires: zlib-devel
 
@@ -69,12 +69,12 @@ Requires: libstdc++
 Requires: ncurses-libs
 Requires: netcdf >= 4.3.3.1
 Requires: netcdf-cxx4
-Requires: smartmet-library-calculator >= 26.10.15
-Requires: smartmet-library-gis >= 26.10.15
-Requires: smartmet-library-grid-files >= 26.10.15
-Requires: smartmet-library-macgyver >= 26.10.15
-Requires: smartmet-library-newbase >= 26.10.15
-Requires: smartmet-library-smarttools >= 26.10.15
+Requires: smartmet-library-calculator >= 26.10.16
+Requires: smartmet-library-gis >= 26.10.16
+Requires: smartmet-library-grid-files >= 26.10.16
+Requires: smartmet-library-macgyver >= 26.10.16
+Requires: smartmet-library-newbase >= 26.10.16
+Requires: smartmet-library-smarttools >= 26.10.16
 Requires: smartmet-timezones >= 26.9.26
 Requires: zlib
 
@@ -115,6 +115,12 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Fri Oct 16 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.16-1.fmi
+- Uses boost::regex instead of std::regex
+- Rounding with std::lround instead of adding 0.5
+- The Hdf5File constructor no longer uses already destroyed members when cleaning up after an error
+- Fixed compiler warnings and clang-tidy findings (unused code, unreachable code, empty statements, member initialization, parameter passing, noexcept), no functional changes
+
 * Thu Oct 15 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.15-1.fmi
 - Fixed mechanical clang-tidy findings (internal linkage, unused parameters, initialization, redundant code), no functional changes
 - Requires 26.10.15 versions of newbase, calculator, smarttools, grid-files due to their ABI changes
