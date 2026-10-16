@@ -868,6 +868,7 @@ class App
   // each time 3D is toggled on so a switch between sources doesn't
   // strand the user at the wrong threshold scale.
   void apply3DDefaultsForSource();
+  void dump3D(int cellW, int cellH);
   // True if the active source carries both WindUMS and WindVMS — used to
   // gate the [W]ind status-bar toggle and the wind-arrow overlay.
   bool hasWindComponents() const;

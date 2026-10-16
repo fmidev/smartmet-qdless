@@ -9268,6 +9268,32 @@ int App::dumpExtremaReport() const
   return 0;
 }
 
+// Render the active source once through the 3D renderer for --dump --3d
+void App::dump3D(int cellW, int cellH)
+{
+  itsMode3D = true;
+  apply3DDefaultsForSource();
+  itsShowExtrema = itsOpts.dumpExtrema;  // --3d --extrema → render the blob view
+  Layout layout{};
+  layout.map = {0, 0, cellH, cellW};
+  loadCoastlines(cellW * 2, cellH * 4);
+  if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr)
+  {
+    draw3D(layout);
+  }
+  else if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get()); qd != nullptr)
+  {
+    if (qd->isVolumetric())
+      draw3DQueryData(layout);
+    else
+      draw3DSurfaceStack(layout);
+  }
+  else if (itsSource->isVolumetric())
+  {
+    draw3DQueryData(layout);
+  }
+}
+
 int App::runOnce()
 {
   if (itsSource == nullptr)
@@ -9314,27 +9340,7 @@ int App::runOnce()
   // source isn't 3D-capable so the flag is safe to set globally.
   if (itsOpts.start3D && sourceSupports3D())
   {
-    itsMode3D = true;
-    apply3DDefaultsForSource();
-    itsShowExtrema = itsOpts.dumpExtrema;  // --3d --extrema → render the blob view
-    Layout layout{};
-    layout.map = {0, 0, cellH, cellW};
-    loadCoastlines(cellW * 2, cellH * 4);
-    if (dynamic_cast<const OdimVolumeSource*>(itsSource.get()) != nullptr)
-    {
-      draw3D(layout);
-    }
-    else if (const auto* qd = dynamic_cast<const QueryDataSource*>(itsSource.get()); qd != nullptr)
-    {
-      if (qd->isVolumetric())
-        draw3DQueryData(layout);
-      else
-        draw3DSurfaceStack(layout);
-    }
-    else if (itsSource->isVolumetric())
-    {
-      draw3DQueryData(layout);
-    }
+    dump3D(cellW, cellH);
     std::cout << "\x1b[" << ts.rows << ";1H\n";
     return 0;
   }
@@ -9396,6 +9402,38 @@ void App::cache3DRaster(const std::vector<Rgb>& pixels, int subW, int subH)
   itsLast3DRasterH = subH;
 }
 
+namespace
+{
+// Pick an exit effect at random from the comma-separated allow-list, or keep effectIndex
+// if none of the names is known
+int pickAllowedExitEffect(const std::string& exitEffects, int effectIndex)
+{
+  std::vector<int> allowed;
+  std::string tok;
+  auto add = [&]()
+  {
+    const int idx = Qdless::exitEffectIndexByName(tok);
+    if (idx >= 0)
+      allowed.push_back(idx);
+    tok.clear();
+  };
+  for (char c : exitEffects)
+  {
+    if (c == ',')
+      add();
+    else
+      tok.push_back(c);
+  }
+  add();
+  if (!allowed.empty())
+  {
+    std::mt19937 rng(std::random_device{}());
+    effectIndex = allowed[rng() % allowed.size()];
+  }
+  return effectIndex;
+}
+}  // namespace
+
 void App::playExitEffect(int effectIndex, unsigned seed, const std::string& wordsOverride)
 {
   // The automatic quit path honours the opt-out; explicit previews / repeats /
@@ -9407,30 +9445,7 @@ void App::playExitEffect(int effectIndex, unsigned seed, const std::string& word
   // allow-list (comma-separated names). One name pins it; several pick at
   // random among them; empty / all-unknown leaves the full random pool.
   if (effectIndex < 0 && !itsOpts.exitEffects.empty())
-  {
-    std::vector<int> allowed;
-    std::string tok;
-    auto add = [&]()
-    {
-      const int idx = Qdless::exitEffectIndexByName(tok);
-      if (idx >= 0)
-        allowed.push_back(idx);
-      tok.clear();
-    };
-    for (char c : itsOpts.exitEffects)
-    {
-      if (c == ',')
-        add();
-      else
-        tok.push_back(c);
-    }
-    add();
-    if (!allowed.empty())
-    {
-      std::mt19937 rng(std::random_device{}());
-      effectIndex = allowed[rng() % allowed.size()];
-    }
-  }
+    effectIndex = pickAllowedExitEffect(itsOpts.exitEffects, effectIndex);
 
   // 3D views own the screen with their own point-cloud raster; animate the most
   // recent one. Otherwise snapshot the current 2D view at full-terminal
