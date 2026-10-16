@@ -136,6 +136,62 @@ void drawMountainColumn(std::vector<Rgb>& dst,
         Rgb{toChannel(160 + dr * 0.20F - 40 * yfr), toChannel(80 + dr * 0.10F), toChannel(40), false};
   }
 }
+
+// The banded gas giant disk of radius R, textured with the data
+void drawBandedDisk(std::vector<Rgb>& dst,
+                    const std::vector<Rgb>& src,
+                    int w,
+                    int h,
+                    float cx,
+                    float cy,
+                    float R,
+                    float ya,
+                    float t)
+{
+  for (int yy = static_cast<int>(cy - R / ya); yy <= static_cast<int>(cy + R / ya); ++yy)
+    for (int xx = static_cast<int>(cx - R); xx <= static_cast<int>(cx + R); ++xx)
+    {
+      const float dx = (xx - cx) / R;
+      const float dy = (yy - cy) * ya / R;
+      if (dx * dx + dy * dy > 1.0F)
+        continue;
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 200.0F : d.r;
+      const float dg = d.transparent ? 160.0F : d.g;
+      // Latitude band shading.
+      const float band = std::sin(dy * 10.0F + t * 2.0F);
+      const float r3 = std::sqrt(std::max(0.0F, 1.0F - dx * dx - dy * dy));  // for lighting
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          Rgb{toChannel((220 + 30 * band + dr * 0.10F) * (0.6F + 0.4F * r3)),
+              toChannel((160 + 30 * band + dg * 0.10F) * (0.6F + 0.4F * r3)),
+              toChannel((100 + 20 * band) * (0.6F + 0.4F * r3)),
+              false};
+    }
+}
+
+// The Trojan asteroids scattered around the Lagrange point at angle lAng
+void drawTrojans(std::vector<Rgb>& dst,
+                 int w,
+                 int h,
+                 float ya,
+                 float mn,
+                 float sunX,
+                 float sunY,
+                 float earthOrbitR,
+                 float lAng,
+                 int side)
+{
+  auto hash = [](int n)
+  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
+  for (int i = 0; i < 6; ++i)
+  {
+    const float jitter = (hash(i * (side > 0 ? 7 : 13)) - 0.5F) * 0.30F;
+    const float jr = (hash(i * (side > 0 ? 11 : 17)) - 0.5F) * mn * 0.03F;
+    const float tx = sunX + std::cos(lAng + jitter) * (earthOrbitR + jr);
+    const float ty = sunY + std::sin(lAng + jitter) * (earthOrbitR + jr) / ya;
+    plotDot(dst, w, h, tx, ty, std::max(1.0F, mn * 0.003F), ya, Rgb{200, 200, 220, false});
+  }
+}
 }  // namespace
 
 void effectRubik(
@@ -2392,7 +2448,6 @@ void effectGasGiant(const Renderer& renderer, const std::vector<Rgb>& src, int w
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
       for (int y = 0; y < h; ++y)
@@ -2402,22 +2457,7 @@ void effectGasGiant(const Renderer& renderer, const std::vector<Rgb>& src, int w
       const float cy = h * 0.5F;
       const float R = mn * 0.25F;
       // Disk fills (banded).
-      for (int yy = static_cast<int>(cy - R / ya); yy <= static_cast<int>(cy + R / ya); ++yy)
-        for (int xx = static_cast<int>(cx - R); xx <= static_cast<int>(cx + R); ++xx) {
-          const float dx = (xx - cx) / R;
-          const float dy = (yy - cy) * ya / R;
-          if (dx * dx + dy * dy > 1.0F) continue;
-          const Rgb d = sample(src, w, h, xx, yy);
-          const float dr = d.transparent ? 200.0F : d.r;
-          const float dg = d.transparent ? 160.0F : d.g;
-          // Latitude band shading.
-          const float band = std::sin(dy * 10.0F + t * 2.0F);
-          const float r3 = std::sqrt(std::max(0.0F, 1.0F - dx * dx - dy * dy));  // for lighting
-          dst[static_cast<std::size_t>(yy) * w + xx] =
-              Rgb{u8((220 + 30 * band + dr * 0.10F) * (0.6F + 0.4F * r3)),
-                  u8((160 + 30 * band + dg * 0.10F) * (0.6F + 0.4F * r3)),
-                  u8((100 + 20 * band) * (0.6F + 0.4F * r3)), false};
-        }
+      drawBandedDisk(dst, src, w, h, cx, cy, R, ya, t);
       // Ring system (ellipse).
       for (float a = 0; a < 6.2832F; a += 0.005F) {
         const float rR = R * 1.40F;
@@ -4116,7 +4156,6 @@ void effectLagrangePoints(const Renderer& renderer, const std::vector<Rgb>& src,
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   runFrames(renderer, w, h, 6000,
     [&](float t, std::vector<Rgb>& dst) {
       for (int y = 0; y < h; ++y)
@@ -4155,13 +4194,7 @@ void effectLagrangePoints(const Renderer& renderer, const std::vector<Rgb>& src,
       plotL(earthAng - 1.0472F, earthOrbitR);
       for (int side = -1; side <= 1; side += 2) {
         const float lAng = earthAng + side * 1.0472F;
-        for (int i = 0; i < 6; ++i) {
-          const float jitter = (hash(i * (side > 0 ? 7 : 13)) - 0.5F) * 0.30F;
-          const float jr = (hash(i * (side > 0 ? 11 : 17)) - 0.5F) * mn * 0.03F;
-          const float tx = sunX + std::cos(lAng + jitter) * (earthOrbitR + jr);
-          const float ty = sunY + std::sin(lAng + jitter) * (earthOrbitR + jr) / ya;
-          plotDot(dst, w, h, tx, ty, std::max(1.0F, mn * 0.003F), ya, Rgb{200, 200, 220, false});
-        }
+        drawTrojans(dst, w, h, ya, mn, sunX, sunY, earthOrbitR, lAng, side);
       }
     });
 }
