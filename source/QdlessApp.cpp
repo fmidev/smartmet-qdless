@@ -9057,6 +9057,31 @@ void App::drawGlobe(const Layout& layout)
   std::fflush(stdout);
 }
 
+namespace
+{
+// Probe the active slice of the source on a coarse lattice for its minimum value
+float sliceMinimum(const DataSource& theSource)
+{
+  const auto bb = theSource.boundingBox();
+  float dmin = std::numeric_limits<float>::infinity();
+  if (bb.maxLat > bb.minLat && bb.maxLon > bb.minLon)
+  {
+    constexpr int kNx = 40;
+    constexpr int kNy = 30;
+    for (int j = 0; j < kNy; ++j)
+      for (int i = 0; i < kNx; ++i)
+      {
+        const double lat = bb.minLat + (bb.maxLat - bb.minLat) * j / (kNy - 1);
+        const double lon = bb.minLon + (bb.maxLon - bb.minLon) * i / (kNx - 1);
+        const float v = theSource.interpolatedValue(lat, lon);
+        if (v != kFloatMissing && std::isfinite(v))
+          dmin = std::min(dmin, v);
+      }
+  }
+  return dmin;
+}
+}  // namespace
+
 void App::apply3DDefaultsForSource()
 {
   // Defaults are picked per backend because the natural threshold scale
@@ -9092,22 +9117,7 @@ void App::apply3DDefaultsForSource()
     // steps gate meaningfully. Units come from the active parameter. The
     // atmosphere is ~100× thinner than NWP domains are wide, so exaggerate hard
     // (also the [+] cap).
-    const auto bb = itsSource->boundingBox();
-    float dmin = std::numeric_limits<float>::infinity();
-    if (bb.maxLat > bb.minLat && bb.maxLon > bb.minLon)
-    {
-      constexpr int kNx = 40;
-      constexpr int kNy = 30;
-      for (int j = 0; j < kNy; ++j)
-        for (int i = 0; i < kNx; ++i)
-        {
-          const double lat = bb.minLat + (bb.maxLat - bb.minLat) * j / (kNy - 1);
-          const double lon = bb.minLon + (bb.maxLon - bb.minLon) * i / (kNx - 1);
-          const float v = itsSource->interpolatedValue(lat, lon);
-          if (v != kFloatMissing && std::isfinite(v))
-            dmin = std::min(dmin, v);
-        }
-    }
+    const float dmin = sliceMinimum(*itsSource);
     itsThreshold3D = std::isfinite(dmin) ? dmin : 0.0F;
     const std::string u = itsSource->paramUnits(itsSource->currentParamId());
     itsThreshold3DUnit = u.empty() ? "" : u;
