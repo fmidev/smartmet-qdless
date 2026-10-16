@@ -355,6 +355,26 @@ F3 starfield(int x, int y)
   return F3{2, 3, 10};
 }
 
+// The starfield and the atmosphere halo around the globe, faded in from the view
+template <typename Glow>
+F3 spacePixel(int x,
+              int y,
+              int w,
+              const std::vector<Rgb>& src,
+              const Globe& g,
+              const GlobeLook& look,
+              Glow& glow)
+{
+  F3 c = starfield(x, y);
+  const float r = std::hypot(x - g.cx, (y - g.cy) * g.ya) / g.R;
+  if (r < 1.2F)
+    c = add(c, mul(F3{70, 120, 230}, 0.6F * std::exp(-(r - 1.0F) * 30.0F)));
+  glow(std::numeric_limits<float>::quiet_NaN(), 0.0F, x, y, c);
+  if (look.intro < 1.0F)
+    c = mix(texel(src, w, x, y), c, look.intro);
+  return c;
+}
+
 // Render the globe: space and stars, the Earth lit by the sun, clouds, an
 // atmospheric rim and an ocean glint. `paint(lat, lon, p, s)` adjusts the
 // surface; `glow(lat, lon, x, y, c)` adds light after shading (fires,
@@ -384,13 +404,7 @@ void renderGlobe(std::vector<Rgb>& dst,
       F3 c;
       if (!g.locate(static_cast<float>(x), static_cast<float>(y), p, nz))
       {
-        c = starfield(x, y);
-        const float r = std::hypot(x - g.cx, (y - g.cy) * g.ya) / g.R;
-        if (r < 1.2F)
-          c = add(c, mul(F3{70, 120, 230}, 0.6F * std::exp(-(r - 1.0F) * 30.0F)));
-        glow(std::numeric_limits<float>::quiet_NaN(), 0.0F, x, y, c);
-        if (look.intro < 1.0F)
-          c = mix(texel(src, w, x, y), c, look.intro);
+        c = spacePixel(x, y, w, src, g, look, glow);
       }
       else
       {
