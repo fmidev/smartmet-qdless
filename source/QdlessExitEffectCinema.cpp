@@ -65,6 +65,120 @@ Channels opaqueChannels(const Rgb& s)
     return {0, 0, 0};
   return {static_cast<float>(s.r), static_cast<float>(s.g), static_cast<float>(s.b)};
 }
+
+// Darken every pixel by the factor
+void darkenAll(std::vector<Rgb>& dst, float f)
+{
+  for (std::size_t k = 0; k < dst.size(); ++k)
+    dst[k] = Rgb{toChannel(dst[k].r * (1 - f)),
+                 toChannel(dst[k].g * (1 - f)),
+                 toChannel(dst[k].b * (1 - f)),
+                 false};
+}
+
+// Fill the triangle a-b-t inside the bounding box x0..x1, y0..y1 clipped to the image
+void fillTriangle(std::vector<Rgb>& dst,
+                  int w,
+                  int h,
+                  int x0,
+                  int x1,
+                  int y0,
+                  int y1,
+                  float ax,
+                  float ay,
+                  float bx,
+                  float by,
+                  float ttx,
+                  float tty,
+                  const Rgb& c)
+{
+  for (int y = std::max(0, y0); y <= std::min(h - 1, y1); ++y)
+    for (int x = std::max(0, x0); x <= std::min(w - 1, x1); ++x)
+      if (inTri(static_cast<float>(x), static_cast<float>(y), ax, ay, bx, by, ttx, tty))
+        dst[static_cast<std::size_t>(y) * w + x] = c;
+}
+
+// Dark ridge below the ridge line, glowing sky above it
+Rgb ridgeOrSky(int y, float ridge, float ridgeY, float g)
+{
+  if (y > ridge)
+    return Rgb{toChannel(12 + g * 200), toChannel(10 + g * 200), toChannel(14 + g * 160), false};
+  const float sf = y / ridgeY;
+  return Rgb{toChannel(10 + 18 * sf + g * 220),
+             toChannel(12 + 22 * sf + g * 220),
+             toChannel(26 + 40 * sf + g * 180),
+             false};
+}
+
+// Pseudo random value 0..1 for the given integer
+float hashUnit(int n)
+{
+  return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F;
+}
+
+// The ship pixel, deep dark blue once under the water line
+Rgb sinkingShipPixel(const Rgb& s, int y, int h, float waterY)
+{
+  if (y > waterY)  // ship gone under: deep, dark, blue
+  {
+    const float dd = std::clamp((y - waterY) / (h - waterY), 0.0F, 1.0F);
+    return Rgb{toChannel(s.r * 0.10F * (1 - dd)),
+               toChannel(s.g * 0.14F * (1 - dd) + 8),
+               toChannel(s.b * 0.20F * (1 - dd) + 18),
+               false};
+  }
+  // night ship
+  return Rgb{toChannel(s.r * 0.55F), toChannel(s.g * 0.55F), toChannel(s.b * 0.6F), false};
+}
+
+// The sea with debris below the water line, the starry night sky above it
+Rgb seaOrSkyPixel(int x, int y, int h, float waterY)
+{
+  Rgb out;
+  if (y > waterY)  // sea
+  {
+    const float dd = (y - waterY) / (h - waterY);
+    out = Rgb{toChannel(6 + 6 * (1 - dd)),
+              toChannel(12 + 10 * (1 - dd)),
+              toChannel(28 + 18 * (1 - dd)),
+              false};
+    if (hashUnit(x * 13 + y * 7) > 0.992F)
+      out = Rgb{60, 70, 90, false};  // debris / froth fleck
+  }
+  else  // night sky
+  {
+    out = Rgb{6, 8, 18, false};
+    if (hashUnit(x * 7 + y * 131) > 0.985F)
+      out = Rgb{150, 150, 180, false};  // star
+  }
+  return out;
+}
+
+// The idol pedestal
+void drawPedestal(std::vector<Rgb>& dst, int w, int h, float cx, float top, float mn)
+{
+  for (int yo = 0; yo <= static_cast<int>(mn * 0.10F); ++yo)
+    for (int xo = -static_cast<int>(mn * 0.08F); xo <= static_cast<int>(mn * 0.08F); ++xo)
+    {
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(top + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{160, 120, 60, false};
+    }
+}
+
+// Brighten the whole image with a warm flash
+void warmFlash(std::vector<Rgb>& dst, int w, int h, float flash)
+{
+  for (int yy = 0; yy < h; ++yy)
+    for (int xx = 0; xx < w; ++xx)
+    {
+      Rgb& p = dst[static_cast<std::size_t>(yy) * w + xx];
+      p.r = toChannel(p.r + 120 * flash);
+      p.g = toChannel(p.g + 100 * flash);
+      p.b = toChannel(p.b + 60 * flash);
+    }
+}
 }  // namespace
 
 void effectMatrix(
@@ -2186,18 +2300,12 @@ void effectJaws(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
           const int x1 = static_cast<int>(finX + mn * 0.08F);
           const int y0 = static_cast<int>(surfaceY - finH - 1);
           const int y1 = static_cast<int>(surfaceY + 1);
-          for (int y = std::max(0, y0); y <= std::min(h - 1, y1); ++y)
-            for (int x = std::max(0, x0); x <= std::min(w - 1, x1); ++x)
-              if (inTri(static_cast<float>(x), static_cast<float>(y), ax, ay, bx, by, ttx, tty))
-                dst[static_cast<std::size_t>(y) * w + x] = Rgb{18, 22, 30, false};
+          fillTriangle(
+              dst, w, h, x0, x1, y0, y1, ax, ay, bx, by, ttx, tty, Rgb{18, 22, 30, false});
         }
         const float endDark = std::clamp((t - 0.90F) / 0.10F, 0.0F, 1.0F);
         if (endDark > 0.0F)
-          for (std::size_t k = 0; k < dst.size(); ++k)
-            dst[k] = Rgb{u8(dst[k].r * (1 - endDark)),
-                         u8(dst[k].g * (1 - endDark)),
-                         u8(dst[k].b * (1 - endDark)),
-                         false};
+          darkenAll(dst, endDark);
       });
 }
 
@@ -2312,18 +2420,7 @@ void effectCloseEncounters(const Renderer& renderer, const std::vector<Rgb>& src
                 ridgeY + std::sin(x * 0.10F) * h * 0.02F + std::sin(x * 0.031F + 1.0F) * h * 0.03F;
             const float gd = std::hypot(x - w * 0.5F, (y - shipCy) * ya);
             const float g = halo * std::exp(-gd / (0.7F * mn)) * 0.6F;
-            Rgb c;
-            if (y > ridge)
-              c = Rgb{u8(12 + g * 200), u8(10 + g * 200), u8(14 + g * 160), false};  // dark ridge
-            else
-            {
-              const float sf = y / ridgeY;
-              c = Rgb{u8(10 + 18 * sf + g * 220),
-                      u8(12 + 22 * sf + g * 220),
-                      u8(26 + 40 * sf + g * 180),
-                      false};
-            }
-            dst[static_cast<std::size_t>(y) * w + x] = c;
+            dst[static_cast<std::size_t>(y) * w + x] = ridgeOrSky(y, ridge, ridgeY, g);
           }
         for (int i = 0; i < 70; ++i)  // stars
         {
@@ -2396,19 +2493,12 @@ void effectCloseEncounters(const Renderer& renderer, const std::vector<Rgb>& src
         }
         const float fin = std::clamp((t - 0.93F) / 0.07F, 0.0F, 1.0F);
         if (fin > 0.0F)
-          for (std::size_t k = 0; k < dst.size(); ++k)
-            dst[k] = Rgb{u8(dst[k].r + (255 - dst[k].r) * fin),
-                         u8(dst[k].g + (255 - dst[k].g) * fin),
-                         u8(dst[k].b + (255 - dst[k].b) * fin),
-                         false};
+          blendToWhite(dst, fin, 1.0F);
       });
 }
 
 void effectTitanic(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  auto hash = [](int n)
-  { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   const float pivotX = w * 0.5F;
   const float pivotY = h * 0.92F;
   const float waterY = h * 0.66F;
@@ -2431,35 +2521,9 @@ void effectTitanic(const Renderer& renderer, const std::vector<Rgb>& src, int w,
             const float sxv = pivotX + (rx * ca - ry * sa);
             const float syv = pivotY + (rx * sa + ry * ca);
             const Rgb s = sample(src, w, h, sxv, syv);
-            Rgb out;
-            if (!s.transparent && sxv >= 0 && sxv < w && syv >= 0 && syv < h)
-            {
-              if (y > waterY)  // ship gone under: deep, dark, blue
-              {
-                const float dd = std::clamp((y - waterY) / (h - waterY), 0.0F, 1.0F);
-                out = Rgb{u8(s.r * 0.10F * (1 - dd)),
-                          u8(s.g * 0.14F * (1 - dd) + 8),
-                          u8(s.b * 0.20F * (1 - dd) + 18),
-                          false};
-              }
-              else
-                out = Rgb{u8(s.r * 0.55F), u8(s.g * 0.55F), u8(s.b * 0.6F), false};  // night ship
-            }
-            else if (y > waterY)  // sea
-            {
-              const float dd = (y - waterY) / (h - waterY);
-              out =
-                  Rgb{u8(6 + 6 * (1 - dd)), u8(12 + 10 * (1 - dd)), u8(28 + 18 * (1 - dd)), false};
-              if (hash(x * 13 + y * 7) > 0.992F)
-                out = Rgb{60, 70, 90, false};  // debris / froth fleck
-            }
-            else  // night sky
-            {
-              out = Rgb{6, 8, 18, false};
-              if (hash(x * 7 + y * 131) > 0.985F)
-                out = Rgb{150, 150, 180, false};  // star
-            }
-            dst[static_cast<std::size_t>(y) * w + x] = out;
+            const bool onShip = (!s.transparent && sxv >= 0 && sxv < w && syv >= 0 && syv < h);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                (onShip ? sinkingShipPixel(s, y, h, waterY) : seaOrSkyPixel(x, y, h, waterY));
           }
       });
 }
@@ -5683,13 +5747,7 @@ void effectIndyIdol(const Renderer& renderer, const std::vector<Rgb>& src, int w
       // Pedestal.
       const float cx = w * 0.5F;
       const float top = h * 0.58F;
-      for (int yo = 0; yo <= static_cast<int>(mn * 0.10F); ++yo)
-        for (int xo = -static_cast<int>(mn * 0.08F); xo <= static_cast<int>(mn * 0.08F); ++xo) {
-          const int xx = static_cast<int>(cx + xo);
-          const int yy = static_cast<int>(top + yo);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{160, 120, 60, false};
-        }
+      drawPedestal(dst, w, h, cx, top, mn);
       // Foot — initially on pedestal; swap progress lifts foot, drops sandbag.
       const float swap = std::clamp(t * 1.3F, 0.0F, 1.0F);
       const float footX = cx - swap * mn * 0.15F;
@@ -5710,13 +5768,7 @@ void effectIndyIdol(const Renderer& renderer, const std::vector<Rgb>& src, int w
       // Trigger flash after the swap.
       if (swap > 0.9F) {
         const float flash = (swap - 0.9F) / 0.1F;
-        for (int yy = 0; yy < h; ++yy)
-          for (int xx = 0; xx < w; ++xx) {
-            Rgb& p = dst[static_cast<std::size_t>(yy) * w + xx];
-            p.r = u8(p.r + 120 * flash);
-            p.g = u8(p.g + 100 * flash);
-            p.b = u8(p.b + 60 * flash);
-          }
+        warmFlash(dst, w, h, flash);
       }
     });
 }
