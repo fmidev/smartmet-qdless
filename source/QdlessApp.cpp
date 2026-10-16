@@ -37,7 +37,7 @@
 #include <iostream>
 #include <numeric>
 #include <random>
-#include <regex>
+#include <boost/regex.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <unistd.h>
@@ -1143,9 +1143,9 @@ std::string rasterProductKey(const std::string& basename)
   const std::size_t dot = stem.rfind('.');
   if (dot != std::string::npos)
     stem = stem.substr(0, dot);
-  static const std::regex re(R"(^(?:\d{12,14}_){1,2}(.*)$)");
-  std::smatch m;
-  if (std::regex_search(stem, m, re))
+  static const boost::regex re(R"(^(?:\d{12,14}_){1,2}(.*)$)");
+  boost::smatch m;
+  if (boost::regex_search(stem, m, re))
     return m[1];
   return stem;
 }
@@ -1154,9 +1154,9 @@ std::string rasterProductKey(const std::string& basename)
 // stamps), or "" if the name doesn't lead with two timestamps.
 std::string rasterOriginStamp(const std::string& basename)
 {
-  static const std::regex re(R"(^(\d{12,14})_(\d{12,14})_)");
-  std::smatch m;
-  if (std::regex_search(basename, m, re))
+  static const boost::regex re(R"(^(\d{12,14})_(\d{12,14})_)");
+  boost::smatch m;
+  if (boost::regex_search(basename, m, re))
     return m[1];
   return {};
 }
@@ -5318,7 +5318,7 @@ bool App::handleKey(int key, UI& ui, bool& quit)
       }
       else
       {
-        applyRow(multi ? picked : picked);
+        applyRow(picked);
       }
       return true;
     }
@@ -9458,7 +9458,7 @@ void App::playExitEffect(int effectIndex, unsigned seed, const std::string& word
     return;
   const std::string& words = wordsOverride.empty() ? itsOpts.exitMessage : wordsOverride;
   const auto played = Qdless::playExitEffect(itsRenderer,
-                                             std::move(frame),
+                                             frame,
                                              subW,
                                              subH,
                                              effectIndex,

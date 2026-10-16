@@ -11,7 +11,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <regex>
+#include <boost/regex.hpp>
 #include <stdexcept>
 
 namespace Qdless
@@ -71,9 +71,9 @@ NFmiMetTime parseTimeFromName(const std::string& filename)
   // (`202605081430_RR.png`), others put it in the middle
   // (`HAV_202605081430_RR.png`). The {12,14} length bound avoids
   // false matches against shorter numeric tokens (versions, indices).
-  static const std::regex re(R"((\d{12,14}))");
-  std::smatch m;
-  if (std::regex_search(base, m, re))
+  static const boost::regex re(R"((\d{12,14}))");
+  boost::smatch m;
+  if (boost::regex_search(base, m, re))
     return parseUtcStamp(m[1]);
   return mtimeUtc(filename);
 }
@@ -450,7 +450,7 @@ Rgb ImageSource::pixelAtUV(double u, double v) const
     const double v = (w00 * a + w10 * b + w01 * c + w11 * d) * inv;
     if (v <= 0) return std::uint8_t{0};
     if (v >= 255) return std::uint8_t{255};
-    return static_cast<std::uint8_t>(v + 0.5);
+    return static_cast<std::uint8_t>(std::lround(v));
   };
   Rgb out;
   out.r = chan(p00.r, p10.r, p01.r, p11.r);

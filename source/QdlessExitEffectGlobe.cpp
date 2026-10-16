@@ -1299,7 +1299,7 @@ void effectHurricaneTracks(const Renderer& renderer, const std::vector<Rgb>& src
           {
             const LatLon q = alongPath(storms[k].path, u);
             const float strength = std::sin(kPi * std::pow(u, 0.8F));
-            const int cat = std::clamp(static_cast<int>(strength * storms[k].peak + 0.5F), 0, 5);
+            const int cat = std::clamp(static_cast<int>(std::lround(strength * storms[k].peak)), 0, 5);
             splat(dst, w, h, g, q.lat, q.lon, 0.0F, 0.9F, kCat[cat], a * 0.9F);
           }
         }

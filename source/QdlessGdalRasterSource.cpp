@@ -15,7 +15,7 @@
 #include <limits>
 #include <map>
 #include <optional>
-#include <regex>
+#include <boost/regex.hpp>
 #include <stdexcept>
 
 namespace Qdless
@@ -56,16 +56,16 @@ NFmiMetTime parseTimeFromName(const std::string& filename)
   // Nowcast / forecast rasters often lead with TWO timestamps,
   // `<origin>_<validtime>_<product>.tif` (e.g. FMI-PPN radar). When both are
   // present the second is the valid time we want to animate on; prefer it.
-  static const std::regex re2(R"(^(\d{12,14})_(\d{12,14})_)");
-  std::smatch m2;
-  if (std::regex_search(base, m2, re2))
+  static const boost::regex re2(R"(^(\d{12,14})_(\d{12,14})_)");
+  boost::smatch m2;
+  if (boost::regex_search(base, m2, re2))
     if (auto t = parseUtcStamp(m2[2])) return *t;
   // Otherwise match a single 12- or 14-digit timestamp anywhere in the
   // basename so files named `<prefix>_<timestamp>_<suffix>.tif` work the
   // same as those with the timestamp at the start.
-  static const std::regex re(R"((\d{12,14}))");
-  std::smatch m;
-  if (std::regex_search(base, m, re))
+  static const boost::regex re(R"((\d{12,14}))");
+  boost::smatch m;
+  if (boost::regex_search(base, m, re))
     if (auto t = parseUtcStamp(m[1])) return *t;
   std::error_code ec;
   auto ftime = std::filesystem::last_write_time(filename, ec);
@@ -87,9 +87,9 @@ std::string extractLabel(const std::string& filename)
 {
   std::string base = std::filesystem::path(filename).stem().string();
   // Strip one or two leading timestamps (`<origin>_<valid>_<label>`).
-  static const std::regex re(R"(^(?:\d{12,14}_){1,2}(.*)$)");
-  std::smatch m;
-  if (std::regex_search(base, m, re)) return m[1];
+  static const boost::regex re(R"(^(?:\d{12,14}_){1,2}(.*)$)");
+  boost::smatch m;
+  if (boost::regex_search(base, m, re)) return m[1];
   return base;
 }
 
@@ -127,23 +127,23 @@ std::map<std::string, MetaItem> parseGdalMetadata(const std::string& xml)
   // Match `<Item name="…"  unit="…">value</Item>` with optional unit.
   // Using a relaxed pattern: name attr is required; unit is captured if
   // present anywhere in the open tag; value is everything until </Item>.
-  static const std::regex itemRe(
-      R"(<Item\s+([^>]*?)>([^<]*)</Item>)", std::regex::ECMAScript);
+  static const boost::regex itemRe(
+      R"(<Item\s+([^>]*?)>([^<]*)</Item>)", boost::regex::ECMAScript);
   // Use a custom raw-string delimiter (`x`) so the regex's literal `"` and
   // `)` don't collide with the closing `)"` of an unadorned raw string.
-  static const std::regex nameRe(R"x(name="([^"]*)")x");
-  static const std::regex unitRe(R"x(unit="([^"]*)")x");
-  auto begin = std::sregex_iterator(xml.begin(), xml.end(), itemRe);
-  for (auto it = begin; it != std::sregex_iterator(); ++it)
+  static const boost::regex nameRe(R"x(name="([^"]*)")x");
+  static const boost::regex unitRe(R"x(unit="([^"]*)")x");
+  auto begin = boost::sregex_iterator(xml.begin(), xml.end(), itemRe);
+  for (auto it = begin; it != boost::sregex_iterator(); ++it)
   {
     const std::string attrs = (*it)[1].str();
     const std::string value = unescapeXml((*it)[2].str());
-    std::smatch nm;
-    if (!std::regex_search(attrs, nm, nameRe)) continue;
+    boost::smatch nm;
+    if (!boost::regex_search(attrs, nm, nameRe)) continue;
     MetaItem mi;
     mi.value = value;
-    std::smatch um;
-    if (std::regex_search(attrs, um, unitRe)) mi.unit = um[1].str();
+    boost::smatch um;
+    if (boost::regex_search(attrs, um, unitRe)) mi.unit = um[1].str();
     out[nm[1].str()] = std::move(mi);
   }
   return out;
@@ -294,9 +294,9 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   else
   {
     const std::string base = std::filesystem::path(filename).filename().string();
-    static const std::regex re2(R"(^(\d{12,14})_(\d{12,14})_)");
-    std::smatch m2;
-    if (std::regex_search(base, m2, re2))
+    static const boost::regex re2(R"(^(\d{12,14})_(\d{12,14})_)");
+    boost::smatch m2;
+    if (boost::regex_search(base, m2, re2))
       if (auto o = parseUtcStamp(m2[1]))
       {
         itsOriginTime = *o;

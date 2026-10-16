@@ -17,6 +17,7 @@
 #include <functional>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace Qdless
 {
@@ -121,8 +122,8 @@ ShapeSource::ShapeSource(OGRLayer* layer, const std::string& displayName)
 {
 }
 
-ShapeSource::ShapeSource(OGRLayer* layer, const std::string& displayName, Options opts)
-    : itsFilename(displayName), itsOpts(std::move(opts))
+ShapeSource::ShapeSource(OGRLayer* layer, std::string displayName, Options opts)
+    : itsFilename(std::move(displayName)), itsOpts(std::move(opts))
 {
   GDALAllRegister();  // idempotent — guards against PG-only callers
   if (layer == nullptr) throw std::runtime_error("ShapeSource: null layer");

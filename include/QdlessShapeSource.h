@@ -59,7 +59,7 @@ class ShapeSource : public DataSource
   // discarded. `displayName` shows up as the source's "filename" in
   // status messages and metadata (e.g. "public.itameri_alueet").
   ShapeSource(OGRLayer* layer, const std::string& displayName);
-  ShapeSource(OGRLayer* layer, const std::string& displayName, Options opts);
+  ShapeSource(OGRLayer* layer, std::string displayName, Options opts);
   ~ShapeSource() override;
   ShapeSource(const ShapeSource&) = delete;
   ShapeSource& operator=(const ShapeSource&) = delete;
