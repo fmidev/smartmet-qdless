@@ -1162,11 +1162,11 @@ std::string rasterOriginStamp(const std::string& basename)
 }
 }  // namespace
 
-bool App::openCatalogRasterCube(const std::string& dir, UI* ui)
+namespace
 {
-  namespace fs = std::filesystem;
-  // Collect rasters directly in `dir` and one level down (the radar layout
-  // is <geometry>/<YYYYMMDD>/*.tif). Store absolute paths.
+// Raster files directly in the directory and one level down, as absolute paths
+std::vector<std::string> catalogRasterFiles(const std::string& dir)
+{
   std::vector<std::string> all;
   for (const auto& f : MasalaCatalog::listRasterFiles(dir))
     all.push_back(dir + "/" + f);
@@ -1176,6 +1176,33 @@ bool App::openCatalogRasterCube(const std::string& dir, UI* ui)
     for (const auto& f : MasalaCatalog::listRasterFiles(sub))
       all.push_back(sub + "/" + f);
   }
+  return all;
+}
+
+// Keep only the files of the latest origin run
+void keepLatestOrigin(std::vector<std::string>& files)
+{
+  namespace fs = std::filesystem;
+  std::string latestOrigin;
+  for (const auto& f : files)
+    latestOrigin = std::max(latestOrigin, rasterOriginStamp(fs::path(f).filename().string()));
+  if (!latestOrigin.empty())
+  {
+    std::vector<std::string> filtered;
+    for (const auto& f : files)
+      if (rasterOriginStamp(fs::path(f).filename().string()) == latestOrigin)
+        filtered.push_back(f);
+    files = std::move(filtered);
+  }
+}
+}  // namespace
+
+bool App::openCatalogRasterCube(const std::string& dir, UI* ui)
+{
+  namespace fs = std::filesystem;
+  // Collect rasters directly in `dir` and one level down (the radar layout
+  // is <geometry>/<YYYYMMDD>/*.tif). Store absolute paths.
+  std::vector<std::string> all = catalogRasterFiles(dir);
   if (all.empty())
     return false;
 
@@ -1219,17 +1246,7 @@ bool App::openCatalogRasterCube(const std::string& dir, UI* ui)
 
   // Keep only the latest origin run so the animation isn't a tangle of
   // overlapping forecasts at duplicate valid times.
-  std::string latestOrigin;
-  for (const auto& f : files)
-    latestOrigin = std::max(latestOrigin, rasterOriginStamp(fs::path(f).filename().string()));
-  if (!latestOrigin.empty())
-  {
-    std::vector<std::string> filtered;
-    for (const auto& f : files)
-      if (rasterOriginStamp(fs::path(f).filename().string()) == latestOrigin)
-        filtered.push_back(f);
-    files = std::move(filtered);
-  }
+  keepLatestOrigin(files);
   if (files.empty())
     return false;
 
