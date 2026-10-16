@@ -8,6 +8,65 @@ namespace Qdless
 namespace ee_detail
 {
 
+namespace
+{
+// Clamp a channel value to 0..255
+std::uint8_t toChannel(float v)
+{
+  return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F));
+}
+
+// Blend every pixel towards white by the factor a * b
+void blendToWhite(std::vector<Rgb>& dst, float a, float b)
+{
+  for (std::size_t k = 0; k < dst.size(); ++k)
+    dst[k] = Rgb{toChannel(dst[k].r + (255 - dst[k].r) * a * b),
+                 toChannel(dst[k].g + (255 - dst[k].g) * a * b),
+                 toChannel(dst[k].b + (255 - dst[k].b) * a * b),
+                 false};
+}
+
+// Paint every pixel black
+void fillBlack(std::vector<Rgb>& dst)
+{
+  for (std::size_t k = 0; k < dst.size(); ++k)
+    dst[k] = Rgb{0, 0, 0, false};
+}
+
+// Fill the part of the rectangle x0..x1, y0..y1 which is inside the image
+void fillClippedRect(
+    std::vector<Rgb>& dst, int w, int h, int x0, int x1, int y0, int y1, const Rgb& c)
+{
+  for (int y = y0; y <= y1; ++y)
+    for (int x = x0; x <= x1; ++x)
+      if (x >= 0 && x < w && y >= 0 && y < h)
+        dst[static_cast<std::size_t>(y) * w + x] = c;
+}
+
+// Fill the pixels x0..x1 of row y which are inside the image width
+void fillRowSpan(std::vector<Rgb>& dst, int w, int y, int x0, int x1, const Rgb& c)
+{
+  for (int x = x0; x <= x1; ++x)
+    if (x >= 0 && x < w)
+      dst[static_cast<std::size_t>(y) * w + x] = c;
+}
+
+// The colour channels of a pixel, zero for a transparent pixel
+struct Channels
+{
+  float r;
+  float g;
+  float b;
+};
+
+Channels opaqueChannels(const Rgb& s)
+{
+  if (s.transparent)
+    return {0, 0, 0};
+  return {static_cast<float>(s.r), static_cast<float>(s.g), static_cast<float>(s.b)};
+}
+}  // namespace
+
 void effectMatrix(
     const Renderer& renderer, const std::vector<Rgb>& src, int w, int h, std::mt19937& rng)
 {
@@ -2056,17 +2115,9 @@ void effectStandoff(const Renderer& renderer, const std::vector<Rgb>& src, int w
         {
           const float f = (t - 0.88F) / 0.12F;
           if (f < 0.45F)
-          {
-            const float wf = f / 0.45F;
-            for (std::size_t k = 0; k < dst.size(); ++k)
-              dst[k] = Rgb{u8(dst[k].r + (255 - dst[k].r) * wf),
-                           u8(dst[k].g + (255 - dst[k].g) * wf),
-                           u8(dst[k].b + (255 - dst[k].b) * wf),
-                           false};
-          }
+            blendToWhite(dst, f / 0.45F, 1.0F);
           else
-            for (std::size_t k = 0; k < dst.size(); ++k)
-              dst[k] = Rgb{0, 0, 0, false};
+            fillBlack(dst);
         }
       });
 }
@@ -3046,16 +3097,16 @@ void effectMonolith(const Renderer& renderer, const std::vector<Rgb>& src, int w
                       Rgb{8, 9, 18, false});
               const float mh = rise * h * 0.56F;
               const float mw = mn * 0.055F;  // the black slab
-              for (int y = static_cast<int>(horizonY - mh); y <= static_cast<int>(horizonY); ++y)
-                for (int x = static_cast<int>(monoCx - mw); x <= static_cast<int>(monoCx + mw); ++x)
-                  if (x >= 0 && x < w && y >= 0 && y < h)
-                    dst[static_cast<std::size_t>(y) * w + x] = Rgb{2, 2, 4, false};
+              fillClippedRect(dst,
+                              w,
+                              h,
+                              static_cast<int>(monoCx - mw),
+                              static_cast<int>(monoCx + mw),
+                              static_cast<int>(horizonY - mh),
+                              static_cast<int>(horizonY),
+                              Rgb{2, 2, 4, false});
               if (flare > 0.0F)
-                for (std::size_t k = 0; k < dst.size(); ++k)
-                  dst[k] = Rgb{u8(dst[k].r + (255 - dst[k].r) * flare * 0.7F),
-                               u8(dst[k].g + (255 - dst[k].g) * flare * 0.7F),
-                               u8(dst[k].b + (255 - dst[k].b) * flare * 0.7F),
-                               false};
+                blendToWhite(dst, flare, 0.7F);
             });
 }
 
@@ -3386,9 +3437,7 @@ void effectOz(const Renderer& renderer, const std::vector<Rgb>& src, int w, int 
                   const Rgb s =
                       sample(src, w, h, cx + std::cos(th) * r2, vy + std::sin(th) * r2 / ya);
                   const float l = s.transparent ? 0.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  const float br = s.transparent ? 0 : s.r;
-                  const float bg = s.transparent ? 0 : s.g;
-                  const float bb = s.transparent ? 0 : s.b;
+                  const auto [br, bg, bb] = opaqueChannels(s);
                   dst[static_cast<std::size_t>(y) * w + x] =
                       Rgb{u8((br * (1 - desat) + l * 1.07F * desat) * fade),
                           u8((bg * (1 - desat) + l * 0.88F * desat) * fade),
@@ -4462,9 +4511,8 @@ void effectPrideRock(const Renderer& renderer, const std::vector<Rgb>& src, int 
                 // left silhouette edge ramps from tip to base
                 const float xl = rtx - (rtx - rx0) * f;
                 const float xr = rtx + (rx1 - rtx) * f;
-                for (int x = static_cast<int>(xl); x <= static_cast<int>(xr); ++x)
-                  if (x >= 0 && x < w)
-                    dst[static_cast<std::size_t>(y) * w + x] = Rgb{18, 14, 10, false};
+                fillRowSpan(
+                    dst, w, y, static_cast<int>(xl), static_cast<int>(xr), Rgb{18, 14, 10, false});
               }
               // figure on the tip with the cub raised
               const float lift = std::clamp((t - 0.35F) / 0.45F, 0.0F, 1.0F);
@@ -4530,9 +4578,7 @@ void effectPleasantville(const Renderer& renderer, const std::vector<Rgb>& src, 
                 {
                   const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
                   const float l = s.transparent ? 0.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  const float br = s.transparent ? 0 : s.r;
-                  const float bg = s.transparent ? 0 : s.g;
-                  const float bb = s.transparent ? 0 : s.b;
+                  const auto [br, bg, bb] = opaqueChannels(s);
                   const float d = std::hypot(x - seedX, (y - seedY) * ya);
                   // colour mix: how much colour does this pixel keep?
                   const float colorAmt = std::max(
