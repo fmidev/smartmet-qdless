@@ -203,6 +203,83 @@ bool tryDecodeAnimatedWebP(const std::string& filename,
 }
 }  // namespace
 
+namespace
+{
+// Read raster band idx of the dataset as nx * ny bytes
+std::vector<std::uint8_t> readByteBand(
+    GDALDataset* ds, int idx, std::size_t nx, std::size_t ny, const std::string& filename)
+{
+  std::vector<std::uint8_t> dst(nx * ny);
+  GDALRasterBand* b = ds->GetRasterBand(idx);
+  if (!b) throw std::runtime_error("missing band " + std::to_string(idx) + ": " + filename);
+  CPLErr err = b->RasterIO(GF_Read, 0, 0, static_cast<int>(nx), static_cast<int>(ny),
+                           dst.data(), static_cast<int>(nx), static_cast<int>(ny),
+                           GDT_Byte, 0, 0);
+  if (err != CE_None) throw std::runtime_error("RasterIO failed: " + filename);
+  return dst;
+}
+
+// Pre-flatten the palette to a 256-entry Rgb table indexed by byte
+// value. Out-of-range indices (palette has fewer than 256 entries)
+// render transparent.
+std::array<Rgb, 256> colorTableLut(GDALColorTable* ct)
+{
+  std::array<Rgb, 256> lut{};
+  for (auto& e : lut) e.transparent = true;
+  const int n = ct->GetColorEntryCount();
+  for (int k = 0; k < n && k < 256; ++k)
+  {
+    GDALColorEntry e;
+    ct->GetColorEntryAsRGB(k, &e);
+    Rgb px;
+    px.r = static_cast<std::uint8_t>(e.c1);
+    px.g = static_cast<std::uint8_t>(e.c2);
+    px.b = static_cast<std::uint8_t>(e.c3);
+    px.transparent = (e.c4 < 128);
+    lut[static_cast<std::size_t>(k)] = px;
+  }
+  return lut;
+}
+
+// Truecolour RGB(A) or grayscale bands as pixels: grayscale replicates the
+// single channel to all three, alpha below 128 is transparent
+std::vector<Rgb> bandsToPixels(
+    GDALDataset* ds, int nBands, std::size_t nx, std::size_t ny, const std::string& filename)
+{
+  const std::size_t pixelCount = nx * ny;
+  std::vector<Rgb> pixels(pixelCount);
+  std::vector<std::uint8_t> rband;
+  std::vector<std::uint8_t> gband;
+  std::vector<std::uint8_t> bband;
+  std::vector<std::uint8_t> aband;
+  rband = readByteBand(ds, 1, nx, ny, filename);
+  if (nBands >= 3)
+  {
+    gband = readByteBand(ds, 2, nx, ny, filename);
+    bband = readByteBand(ds, 3, nx, ny, filename);
+  }
+  if (nBands >= 4) aband = readByteBand(ds, 4, nx, ny, filename);
+
+  for (std::size_t i = 0; i < pixelCount; ++i)
+  {
+    Rgb px;
+    if (nBands >= 3)
+    {
+      px.r = rband[i];
+      px.g = gband[i];
+      px.b = bband[i];
+    }
+    else
+    {
+      px.r = px.g = px.b = rband[i];
+    }
+    if (nBands >= 4 && aband[i] < 128) px.transparent = true;
+    pixels[i] = px;
+  }
+  return pixels;
+}
+}  // namespace
+
 ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
 {
   // Animated WebP: every frame is a separate timestep. We decode all
@@ -252,16 +329,6 @@ ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
   // structure so pixelAtUV / timeCount can stay agnostic.
   std::vector<Rgb> pixels(pixelCount);
 
-  auto readBand = [&](int idx, std::vector<std::uint8_t>& dst) {
-    dst.resize(pixelCount);
-    GDALRasterBand* b = ds->GetRasterBand(idx);
-    if (!b) throw std::runtime_error("missing band " + std::to_string(idx) + ": " + filename);
-    CPLErr err = b->RasterIO(GF_Read, 0, 0, static_cast<int>(itsNx), static_cast<int>(itsNy),
-                             dst.data(), static_cast<int>(itsNx), static_cast<int>(itsNy),
-                             GDT_Byte, 0, 0);
-    if (err != CE_None) throw std::runtime_error("RasterIO failed: " + filename);
-  };
-
   GDALRasterBand* band1 = ds->GetRasterBand(1);
   GDALColorTable* ct = nBands == 1 ? band1->GetColorTable() : nullptr;
   const bool paletted = (ct != nullptr) &&
@@ -269,59 +336,13 @@ ImageSource::ImageSource(const std::string& filename) : itsFilename(filename)
 
   if (paletted)
   {
-    // Pre-flatten the palette to a 256-entry Rgb table indexed by byte
-    // value. Out-of-range indices (palette has fewer than 256 entries)
-    // render transparent.
-    std::array<Rgb, 256> lut{};
-    for (auto& e : lut) e.transparent = true;
-    const int n = ct->GetColorEntryCount();
-    for (int k = 0; k < n && k < 256; ++k)
-    {
-      GDALColorEntry e;
-      ct->GetColorEntryAsRGB(k, &e);
-      Rgb px;
-      px.r = static_cast<std::uint8_t>(e.c1);
-      px.g = static_cast<std::uint8_t>(e.c2);
-      px.b = static_cast<std::uint8_t>(e.c3);
-      px.transparent = (e.c4 < 128);
-      lut[static_cast<std::size_t>(k)] = px;
-    }
-    std::vector<std::uint8_t> idx;
-    readBand(1, idx);
+    const std::array<Rgb, 256> lut = colorTableLut(ct);
+    const std::vector<std::uint8_t> idx = readByteBand(ds, 1, itsNx, itsNy, filename);
     for (std::size_t i = 0; i < pixelCount; ++i)
       pixels[i] = lut[idx[i]];
   }
   else
-  {
-    std::vector<std::uint8_t> rband;
-    std::vector<std::uint8_t> gband;
-    std::vector<std::uint8_t> bband;
-    std::vector<std::uint8_t> aband;
-    readBand(1, rband);
-    if (nBands >= 3)
-    {
-      readBand(2, gband);
-      readBand(3, bband);
-    }
-    if (nBands >= 4) readBand(4, aband);
-
-    for (std::size_t i = 0; i < pixelCount; ++i)
-    {
-      Rgb px;
-      if (nBands >= 3)
-      {
-        px.r = rband[i];
-        px.g = gband[i];
-        px.b = bband[i];
-      }
-      else
-      {
-        px.r = px.g = px.b = rband[i];
-      }
-      if (nBands >= 4 && aband[i] < 128) px.transparent = true;
-      pixels[i] = px;
-    }
-  }
+    pixels = bandsToPixels(ds, nBands, itsNx, itsNy, filename);
 
   itsValidTime = parseTimeFromName(filename);
   itsFrames.push_back(std::move(pixels));
