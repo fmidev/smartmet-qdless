@@ -144,6 +144,17 @@ void runFrames(const Renderer& renderer, int w, int h, int durationMs, Fill&& fi
   }
 }
 
+// Sets every pixel of dst to shade(source pixel, x, y): the per-pixel
+// background pass most effects start their frame with.
+template <typename Shade>
+void shadePixels(std::vector<Rgb>& dst, const std::vector<Rgb>& src, int w, int h, Shade&& shade)
+{
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x)
+      dst[static_cast<std::size_t>(y) * w + x] =
+          shade(src[static_cast<std::size_t>(y) * w + x], x, y);
+}
+
 inline float yAspectFor(const Renderer& renderer)
 {
   return 4.0F / static_cast<float>(subRowsForStyle(renderer.cornerStyle()));

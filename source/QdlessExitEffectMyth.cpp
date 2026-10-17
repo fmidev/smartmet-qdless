@@ -6,6 +6,175 @@ namespace Qdless
 namespace ee_detail
 {
 
+namespace
+{
+// Clamp a channel value to 0..255
+std::uint8_t clampU8(float v)
+{
+  return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F));
+}
+
+// Data-textured pyramid standing on groundY, shaded on its right half
+void drawDataPyramid(std::vector<Rgb>& dst,
+                     const std::vector<Rgb>& src,
+                     int w,
+                     int h,
+                     float cx,
+                     float groundY,
+                     float pyrW,
+                     float pyrH)
+{
+  for (int yo = 0; yo <= static_cast<int>(pyrH); ++yo)
+  {
+    const float yf = yo / pyrH;
+    const int half = static_cast<int>(pyrW * 0.5F * (1.0F - yf));
+    for (int xo = -half; xo <= half; ++xo)
+    {
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(groundY - yo);
+      if (xx < 0 || xx >= w || yy < 0 || yy >= h)
+        continue;
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 200.0F : d.r;
+      const bool shade = xo > 0;
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          shade ? Rgb{clampU8(160 + dr * 0.20F), clampU8(130), clampU8(80), false}
+                : Rgb{clampU8(210 + dr * 0.15F), clampU8(180), clampU8(120), false};
+    }
+  }
+}
+
+// Garuda's data-filled triangular wings on both sides of (cx, cy)
+void drawGarudaWings(std::vector<Rgb>& dst,
+                     const std::vector<Rgb>& src,
+                     int w,
+                     int h,
+                     float cx,
+                     float cy,
+                     float wing,
+                     float flap,
+                     float mn)
+{
+  for (int side = -1; side <= 1; side += 2) {
+    for (int yo = -static_cast<int>(wing * 0.30F); yo <= static_cast<int>(wing * 0.10F); ++yo) {
+      const float yf = (yo + wing * 0.30F) / (wing * 0.40F);
+      const int half = static_cast<int>(wing * (0.50F * yf));
+      for (int xo = 0; xo <= half; ++xo) {
+        const int xx = static_cast<int>(cx + side * (wing * 0.10F + xo));
+        const int yy = static_cast<int>(cy + yo + side * flap * mn * 0.05F);
+        if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+        const Rgb d = sample(src, w, h, xx, yy);
+        const float dr = d.transparent ? 180.0F : d.r;
+        const float dg = d.transparent ? 120.0F : d.g;
+        dst[static_cast<std::size_t>(yy) * w + xx] =
+            Rgb{clampU8(200 + dr * 0.20F), clampU8(150 + dg * 0.18F), clampU8(60), false};
+      }
+    }
+  }
+}
+
+// Mjolnir's data-textured hammer head centred on (hcx, hcy)
+void drawHammerHead(std::vector<Rgb>& dst,
+                    const std::vector<Rgb>& src,
+                    int w,
+                    int h,
+                    float hcx,
+                    float hcy,
+                    float mn)
+{
+  for (int yo = -static_cast<int>(mn * 0.06F); yo <= static_cast<int>(mn * 0.06F); ++yo)
+    for (int xo = -static_cast<int>(mn * 0.10F); xo <= static_cast<int>(mn * 0.10F); ++xo) {
+      const int xx = static_cast<int>(hcx + xo);
+      const int yy = static_cast<int>(hcy + yo);
+      if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 180.0F : d.r;
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          Rgb{clampU8(180 + dr * 0.20F), clampU8(180 + dr * 0.10F), clampU8(200), false};
+    }
+}
+
+// Eight jagged lightning bolts radiating from the impact point (bx0, by0)
+template <typename Hash>
+void drawImpactBolts(std::vector<Rgb>& dst,
+                     int w,
+                     int h,
+                     float bx0,
+                     float by0,
+                     float mn,
+                     float ya,
+                     Hash&& hash)
+{
+  for (int b = 0; b < 8; ++b) {
+    const float ang = (b / 8.0F) * 6.2832F + hash(b) * 0.5F;
+    float bx = bx0;
+    float by = by0;
+    for (int s = 0; s < 5; ++s) {
+      const float nx = bx + std::cos(ang) * mn * 0.04F + (hash(b * 7 + s) - 0.5F) * mn * 0.02F;
+      const float ny = by + std::sin(ang) * mn * 0.04F + (hash(b * 11 + s) - 0.5F) * mn * 0.02F;
+      drawSeg(dst, w, h, bx, by, nx, ny, std::max(1.0F, mn * 0.003F), ya,
+              Rgb{240, 240, 255, false});
+      bx = nx; by = ny;
+    }
+  }
+}
+
+// Yggdrasil's huge data-textured trunk from trunkTop to trunkBot
+void drawWorldTreeTrunk(std::vector<Rgb>& dst,
+                        const std::vector<Rgb>& src,
+                        int w,
+                        int h,
+                        float cx,
+                        float trunkTop,
+                        float trunkBot,
+                        float mn)
+{
+  for (int yy = static_cast<int>(trunkTop); yy <= static_cast<int>(trunkBot); ++yy) {
+    const float yf = (yy - trunkTop) / (trunkBot - trunkTop);
+    const float halfW = mn * (0.04F + 0.02F * std::sin(yf * 3.14159F));
+    for (int xo = -static_cast<int>(halfW); xo <= static_cast<int>(halfW); ++xo) {
+      const int xx = static_cast<int>(cx + xo);
+      if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 120.0F : d.r;
+      const float dg = d.transparent ? 80.0F : d.g;
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          Rgb{clampU8(100 + dr * 0.30F), clampU8(70 + dg * 0.30F), clampU8(40), false};
+    }
+  }
+}
+
+// Excalibur's stone: a grey ellipse lit towards its vertical centre line
+void drawSwordStone(std::vector<Rgb>& dst, int w, int h, float stoneCx, float stoneCy, float mn)
+{
+  for (int yo = -static_cast<int>(mn * 0.10F); yo <= static_cast<int>(mn * 0.10F); ++yo)
+    for (int xo = -static_cast<int>(mn * 0.22F); xo <= static_cast<int>(mn * 0.22F); ++xo) {
+      const float nx = xo / (mn * 0.22F);
+      const float nyN = yo / (mn * 0.10F);
+      if (nx * nx + nyN * nyN > 1.0F) continue;
+      const int xx = static_cast<int>(stoneCx + xo);
+      const int yy = static_cast<int>(stoneCy + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{clampU8(110 + 30 * (1.0F - std::fabs(nx))), clampU8(110), clampU8(110), false};
+    }
+}
+
+// Trojan horse body: an oval resting body/2 above groundY
+void drawHorseBody(std::vector<Rgb>& dst, int w, int h, float cx, float groundY, float body)
+{
+  for (int yo = -static_cast<int>(body * 0.35F); yo <= static_cast<int>(body * 0.35F); ++yo)
+    for (int xo = -static_cast<int>(body * 1.1F); xo <= static_cast<int>(body * 0.7F); ++xo) {
+      const float nx = xo / (body * 1.1F);
+      const float nyN = yo / (body * 0.35F);
+      if (nx * nx + nyN * nyN > 1.0F) continue;
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(groundY - body * 0.5F + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{100, 70, 35, false};
+    }
+}
+}  // namespace
+
 void effectAnubis(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
@@ -19,17 +188,14 @@ void effectAnubis(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
       [&](float /*t*/, std::vector<Rgb>& dst)
       {
         // Desert sky.
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            const float sf = static_cast<float>(y) / h;
-            dst[static_cast<std::size_t>(y) * w + x] = Rgb{u8(180 - 30 * sf + l * 0.10F),
-                                                           u8(120 - 40 * sf + l * 0.08F),
-                                                           u8(80 + 10 * sf + l * 0.06F),
-                                                           false};
-          }
+        shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+          const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+          const float sf = static_cast<float>(y) / h;
+          return Rgb{u8(180 - 30 * sf + l * 0.10F),
+                     u8(120 - 40 * sf + l * 0.08F),
+                     u8(80 + 10 * sf + l * 0.06F),
+                     false};
+        });
         // Sand horizon.
         const float groundY = h * 0.85F;
         for (int yy = static_cast<int>(groundY); yy < h; ++yy)
@@ -39,24 +205,7 @@ void effectAnubis(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
         const float cx = w * 0.5F;
         const float pyrW = mn * 0.40F;
         const float pyrH = mn * 0.35F;
-        for (int yo = 0; yo <= static_cast<int>(pyrH); ++yo)
-        {
-          const float yf = yo / pyrH;
-          const int half = static_cast<int>(pyrW * 0.5F * (1.0F - yf));
-          for (int xo = -half; xo <= half; ++xo)
-          {
-            const int xx = static_cast<int>(cx + xo);
-            const int yy = static_cast<int>(groundY - yo);
-            if (xx < 0 || xx >= w || yy < 0 || yy >= h)
-              continue;
-            const Rgb d = sample(src, w, h, xx, yy);
-            const float dr = d.transparent ? 200.0F : d.r;
-            const bool shade = xo > 0;
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                shade ? Rgb{u8(160 + dr * 0.20F), u8(130), u8(80), false}
-                      : Rgb{u8(210 + dr * 0.15F), u8(180), u8(120), false};
-          }
-        }
+        drawDataPyramid(dst, src, w, h, cx, groundY, pyrW, pyrH);
         // Anubis silhouette in foreground.
         const float ax = w * 0.20F;
         const float ay = groundY - mn * 0.05F;
@@ -179,36 +328,18 @@ void effectGaruda(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          const float sf = static_cast<float>(y) / h;
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(220 - 40 * sf + l * 0.10F), u8(180 - 50 * sf + l * 0.08F),
-                  u8(100 + 30 * sf + l * 0.06F), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+        const float sf = static_cast<float>(y) / h;
+        return Rgb{u8(220 - 40 * sf + l * 0.10F), u8(180 - 50 * sf + l * 0.08F),
+                   u8(100 + 30 * sf + l * 0.06F), false};
+      });
       const float cx = w * 0.5F;
       const float cy = h * 0.55F;
       const float wing = mn * 0.30F;
       const float flap = std::sin(t * 4.0F) * 0.4F;
       // Wings — data-filled triangles.
-      for (int side = -1; side <= 1; side += 2) {
-        for (int yo = -static_cast<int>(wing * 0.30F); yo <= static_cast<int>(wing * 0.10F); ++yo) {
-          const float yf = (yo + wing * 0.30F) / (wing * 0.40F);
-          const int half = static_cast<int>(wing * (0.50F * yf));
-          for (int xo = 0; xo <= half; ++xo) {
-            const int xx = static_cast<int>(cx + side * (wing * 0.10F + xo));
-            const int yy = static_cast<int>(cy + yo + side * flap * mn * 0.05F);
-            if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-            const Rgb d = sample(src, w, h, xx, yy);
-            const float dr = d.transparent ? 180.0F : d.r;
-            const float dg = d.transparent ? 120.0F : d.g;
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(200 + dr * 0.20F), u8(150 + dg * 0.18F), u8(60), false};
-          }
-        }
-      }
+      drawGarudaWings(dst, src, w, h, cx, cy, wing, flap, mn);
       // Body.
       drawSeg(dst, w, h, cx, cy - mn * 0.05F, cx, cy + mn * 0.12F, mn * 0.04F, ya, Rgb{160, 80, 30, false});
       // Eagle head.
@@ -233,16 +364,13 @@ void effectMjolnir(const Renderer& renderer, const std::vector<Rgb>& src, int w,
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
       const bool flash = t > 0.55F && std::fmod(t * 4.0F, 1.0F) < 0.2F;
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          const float fb = flash ? 60.0F : 0.0F;
-          const float sf = static_cast<float>(y) / h;
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(40 + 30 * sf + l * 0.08F + fb), u8(50 + 30 * sf + l * 0.08F + fb),
-                  u8(70 + 30 * sf + l * 0.08F + fb), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+        const float fb = flash ? 60.0F : 0.0F;
+        const float sf = static_cast<float>(y) / h;
+        return Rgb{u8(40 + 30 * sf + l * 0.08F + fb), u8(50 + 30 * sf + l * 0.08F + fb),
+                   u8(70 + 30 * sf + l * 0.08F + fb), false};
+      });
       // Hammer falls.
       const float groundY = h * 0.78F;
       const float fall = std::clamp(t / 0.55F, 0.0F, 1.0F);
@@ -252,31 +380,10 @@ void effectMjolnir(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       drawSeg(dst, w, h, hcx, hcy + mn * 0.05F, hcx, hcy + mn * 0.20F,
               std::max(1.0F, mn * 0.010F), ya, Rgb{100, 70, 40, false});
       // Hammer head (data-textured).
-      for (int yo = -static_cast<int>(mn * 0.06F); yo <= static_cast<int>(mn * 0.06F); ++yo)
-        for (int xo = -static_cast<int>(mn * 0.10F); xo <= static_cast<int>(mn * 0.10F); ++xo) {
-          const int xx = static_cast<int>(hcx + xo);
-          const int yy = static_cast<int>(hcy + yo);
-          if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-          const Rgb d = sample(src, w, h, xx, yy);
-          const float dr = d.transparent ? 180.0F : d.r;
-          dst[static_cast<std::size_t>(yy) * w + xx] =
-              Rgb{u8(180 + dr * 0.20F), u8(180 + dr * 0.10F), u8(200), false};
-        }
+      drawHammerHead(dst, src, w, h, hcx, hcy, mn);
       // Lightning bolts on impact.
-      if (t > 0.55F) {
-        for (int b = 0; b < 8; ++b) {
-          const float ang = (b / 8.0F) * 6.2832F + hash(b) * 0.5F;
-          float bx = hcx;
-          float by = groundY - mn * 0.08F;
-          for (int s = 0; s < 5; ++s) {
-            const float nx = bx + std::cos(ang) * mn * 0.04F + (hash(b * 7 + s) - 0.5F) * mn * 0.02F;
-            const float ny = by + std::sin(ang) * mn * 0.04F + (hash(b * 11 + s) - 0.5F) * mn * 0.02F;
-            drawSeg(dst, w, h, bx, by, nx, ny, std::max(1.0F, mn * 0.003F), ya,
-                    Rgb{240, 240, 255, false});
-            bx = nx; by = ny;
-          }
-        }
-      }
+      if (t > 0.55F)
+        drawImpactBolts(dst, w, h, hcx, groundY - mn * 0.08F, mn, ya, hash);
     });
 }
 
@@ -288,13 +395,10 @@ void effectPandora(const Renderer& renderer, const std::vector<Rgb>& src, int w,
   auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(30 + l * 0.10F), u8(20 + l * 0.08F), u8(40 + l * 0.10F), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+        return Rgb{u8(30 + l * 0.10F), u8(20 + l * 0.08F), u8(40 + l * 0.10F), false};
+      });
       const float cx = w * 0.5F;
       const float cy = h * 0.65F;
       const float W = mn * 0.10F;
@@ -340,15 +444,12 @@ void effectPegasus(const Renderer& renderer, const std::vector<Rgb>& src, int w,
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          const float sf = static_cast<float>(y) / h;
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(180 - 50 * sf + l * 0.10F), u8(180 - 40 * sf + l * 0.10F),
-                  u8(220 - 30 * sf + l * 0.10F), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+        const float sf = static_cast<float>(y) / h;
+        return Rgb{u8(180 - 50 * sf + l * 0.10F), u8(180 - 40 * sf + l * 0.10F),
+                   u8(220 - 30 * sf + l * 0.10F), false};
+      });
       const float cx = -mn * 0.15F + t * (w + mn * 0.30F);
       const float cy = h * 0.50F + std::sin(t * 4.0F) * mn * 0.05F;
       const Rgb body{240, 240, 240, false};
@@ -553,35 +654,20 @@ void effectYggdrasil(const Renderer& renderer, const std::vector<Rgb>& src, int 
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
       // Two-tone sky: blue above, brown below.
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          const float sf = static_cast<float>(y) / h;
-          const bool below = y > h * 0.55F;
-          dst[static_cast<std::size_t>(y) * w + x] =
-              below ? Rgb{u8(80 + l * 0.10F - 30 * (sf - 0.55F) * 2),
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+        const float sf = static_cast<float>(y) / h;
+        const bool below = y > h * 0.55F;
+        return below ? Rgb{u8(80 + l * 0.10F - 30 * (sf - 0.55F) * 2),
                            u8(60 + l * 0.08F), u8(40 + l * 0.06F), false}
-                    : Rgb{u8(80 + l * 0.10F), u8(120 + l * 0.10F),
+                           : Rgb{u8(80 + l * 0.10F), u8(120 + l * 0.10F),
                            u8(180 + l * 0.10F - 50 * sf), false};
-        }
+      });
       const float cx = w * 0.5F;
       const float trunkTop = h * 0.15F;
       const float trunkBot = h * 0.85F;
       // Huge data-textured trunk.
-      for (int yy = static_cast<int>(trunkTop); yy <= static_cast<int>(trunkBot); ++yy) {
-        const float yf = (yy - trunkTop) / (trunkBot - trunkTop);
-        const float halfW = mn * (0.04F + 0.02F * std::sin(yf * 3.14159F));
-        for (int xo = -static_cast<int>(halfW); xo <= static_cast<int>(halfW); ++xo) {
-          const int xx = static_cast<int>(cx + xo);
-          if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-          const Rgb d = sample(src, w, h, xx, yy);
-          const float dr = d.transparent ? 120.0F : d.r;
-          const float dg = d.transparent ? 80.0F : d.g;
-          dst[static_cast<std::size_t>(yy) * w + xx] =
-              Rgb{u8(100 + dr * 0.30F), u8(70 + dg * 0.30F), u8(40), false};
-        }
-      }
+      drawWorldTreeTrunk(dst, src, w, h, cx, trunkTop, trunkBot, mn);
       // Up-branches (3) — leafy with data tint.
       for (int b = 0; b < 5; ++b) {
         const float ang = -1.57F + (b - 2) * 0.40F + std::sin(t * 1.5F) * 0.05F;
@@ -764,28 +850,17 @@ void effectExcalibur(const Renderer& renderer, const std::vector<Rgb>& src, int 
   FootSprite f = loadPythonFootSprite();
   runFrames(renderer, w, h, 5800,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb d = sample(src, w, h, x, y);
-          const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-          const float sf = static_cast<float>(y) / h;
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(80 + dl * 0.15F + 40 * (1 - sf)), u8(100 + dl * 0.15F + 30 * (1 - sf)),
-                  u8(130 + dl * 0.20F - 30 * sf), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& /*s*/, int x, int y) {
+        const Rgb d = sample(src, w, h, x, y);
+        const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+        const float sf = static_cast<float>(y) / h;
+        return Rgb{u8(80 + dl * 0.15F + 40 * (1 - sf)), u8(100 + dl * 0.15F + 30 * (1 - sf)),
+                   u8(130 + dl * 0.20F - 30 * sf), false};
+      });
       // Stone — big grey blob.
       const float stoneCx = w * 0.5F;
       const float stoneCy = h * 0.78F;
-      for (int yo = -static_cast<int>(mn * 0.10F); yo <= static_cast<int>(mn * 0.10F); ++yo)
-        for (int xo = -static_cast<int>(mn * 0.22F); xo <= static_cast<int>(mn * 0.22F); ++xo) {
-          const float nx = xo / (mn * 0.22F);
-          const float nyN = yo / (mn * 0.10F);
-          if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(stoneCx + xo);
-          const int yy = static_cast<int>(stoneCy + yo);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(110 + 30 * (1.0F - std::fabs(nx))), u8(110), u8(110), false};
-        }
+      drawSwordStone(dst, w, h, stoneCx, stoneCy, mn);
       // Pull progress: foot rises from stone.
       const float pull = std::clamp(t * 1.4F, 0.0F, 1.0F);
       const float footY = stoneCy - mn * 0.10F - pull * mn * 0.25F;
@@ -871,13 +946,11 @@ void effectTrojanFoot(const Renderer& renderer, const std::vector<Rgb>& src, int
   FootSprite f = loadPythonFootSprite();
   runFrames(renderer, w, h, 5800,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb d = sample(src, w, h, x, y);
-          const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(160 + dl * 0.20F), u8(120 + dl * 0.15F), u8(80 + dl * 0.10F), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& /*s*/, int x, int y) {
+        const Rgb d = sample(src, w, h, x, y);
+        const float dl = d.transparent ? 60.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+        return Rgb{u8(160 + dl * 0.20F), u8(120 + dl * 0.15F), u8(80 + dl * 0.10F), false};
+      });
       // Ground.
       const float groundY = h * 0.85F;
       for (int xx = 0; xx < w; ++xx)
@@ -886,16 +959,7 @@ void effectTrojanFoot(const Renderer& renderer, const std::vector<Rgb>& src, int
       const float cx = w * 0.5F;
       const float body = mn * 0.22F;
       // Body oval.
-      for (int yo = -static_cast<int>(body * 0.35F); yo <= static_cast<int>(body * 0.35F); ++yo)
-        for (int xo = -static_cast<int>(body * 1.1F); xo <= static_cast<int>(body * 0.7F); ++xo) {
-          const float nx = xo / (body * 1.1F);
-          const float nyN = yo / (body * 0.35F);
-          if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo);
-          const int yy = static_cast<int>(groundY - body * 0.5F + yo);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{100, 70, 35, false};
-        }
+      drawHorseBody(dst, w, h, cx, groundY, body);
       // Head + neck.
       drawSeg(dst, w, h, cx + body * 0.7F, groundY - body * 0.5F,
               cx + body * 1.0F, groundY - body * 1.2F, std::max(1.0F, mn * 0.018F), ya,
