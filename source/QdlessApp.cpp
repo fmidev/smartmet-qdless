@@ -136,6 +136,72 @@ unsigned brailleBit(int subCol, int subRow)
   return static_cast<unsigned>(subCol * 3 + subRow);
 }
 
+// Braille dot mask of terminal cell (cx, cy) from a 2x4-per-cell dot mask bW dots wide
+unsigned brailleCellMask(const std::vector<unsigned char>& mask, int bW, int cx, int cy)
+{
+  unsigned cellMask = 0;
+  for (int sy = 0; sy < 4; ++sy)
+  {
+    for (int sx = 0; sx < 2; ++sx)
+    {
+      const int bx = cx * 2 + sx;
+      const int by = cy * 4 + sy;
+      if (mask[static_cast<std::size_t>(by) * bW + bx] != 0U)
+        cellMask |= 1U << brailleBit(sx, sy);
+    }
+  }
+  return cellMask;
+}
+
+// Bresenham line from (x0, y0) to (x1, y1), calling plot(x, y) for every point
+template <typename Plot>
+void traceLine(int x0, int y0, int x1, int y1, Plot&& plot)
+{
+  int dx = std::abs(x1 - x0);
+  int dy = -std::abs(y1 - y0);
+  int sx = x0 < x1 ? 1 : -1;
+  int sy = y0 < y1 ? 1 : -1;
+  int err = dx + dy;
+  while (true)
+  {
+    plot(x0, y0);
+    if (x0 == x1 && y0 == y1)
+      break;
+    int e2 = 2 * err;
+    if (e2 >= dy)
+    {
+      err += dy;
+      x0 += sx;
+    }
+    if (e2 <= dx)
+    {
+      err += dx;
+      y0 += sy;
+    }
+  }
+}
+
+// Draw the projected polylines through toSub, skipping segments that jump
+// further than maxDx / maxDy (wrap-around across the grid seam)
+template <typename Polylines, typename ToSub, typename DrawLine>
+void traceProjectedPolylines(
+    const Polylines& proj, ToSub&& toSub, int maxDx, int maxDy, DrawLine&& drawLine)
+{
+  for (const auto& pp : proj)
+  {
+    if (pp.us.size() < 2)
+      continue;
+    auto prev = toSub(pp.us[0], pp.vs[0]);
+    for (std::size_t i = 1; i < pp.us.size(); ++i)
+    {
+      auto cur = toSub(pp.us[i], pp.vs[i]);
+      if (std::abs(cur.first - prev.first) < maxDx && std::abs(cur.second - prev.second) < maxDy)
+        drawLine(prev.first, prev.second, cur.first, cur.second);
+      prev = cur;
+    }
+  }
+}
+
 // Screen-space lattice of solar elevation angles for the pixel-domain style.
 // The angle is a very smooth function of position — a few hundredths of a
 // degree of curvature over a node spacing — so evaluating the model on a
@@ -2847,31 +2913,7 @@ void App::overlayGraticule(std::vector<Rgb>& pixels, int subWidth, int subHeight
       pixels[static_cast<std::size_t>(y) * subWidth + x] = gridColor;
   };
 
-  auto drawLine = [&](int x0, int y0, int x1, int y1)
-  {
-    int dx = std::abs(x1 - x0);
-    int dy = -std::abs(y1 - y0);
-    int sx = x0 < x1 ? 1 : -1;
-    int sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy;
-    while (true)
-    {
-      plot(x0, y0);
-      if (x0 == x1 && y0 == y1)
-        break;
-      int e2 = 2 * err;
-      if (e2 >= dy)
-      {
-        err += dy;
-        x0 += sx;
-      }
-      if (e2 <= dx)
-      {
-        err += dx;
-        y0 += sy;
-      }
-    }
-  };
+  auto drawLine = [&](int x0, int y0, int x1, int y1) { traceLine(x0, y0, x1, y1, plot); };
 
   for (const auto& s : traceGraticuleSegments(subWidth, subHeight))
     drawLine(s[0], s[1], s[2], s[3]);
@@ -2903,31 +2945,7 @@ void App::appendGraticuleBraille(std::ostringstream& os,
       mask[static_cast<std::size_t>(y) * bW + x] = 1;
   };
 
-  auto drawLine = [&](int x0, int y0, int x1, int y1)
-  {
-    int dx = std::abs(x1 - x0);
-    int dy = -std::abs(y1 - y0);
-    int sx = x0 < x1 ? 1 : -1;
-    int sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy;
-    while (true)
-    {
-      plot(x0, y0);
-      if (x0 == x1 && y0 == y1)
-        break;
-      int e2 = 2 * err;
-      if (e2 >= dy)
-      {
-        err += dy;
-        x0 += sx;
-      }
-      if (e2 <= dx)
-      {
-        err += dx;
-        y0 += sy;
-      }
-    }
-  };
+  auto drawLine = [&](int x0, int y0, int x1, int y1) { traceLine(x0, y0, x1, y1, plot); };
 
   for (const auto& s : traceGraticuleSegments(bW, bH))
     drawLine(s[0], s[1], s[2], s[3]);
@@ -2939,17 +2957,7 @@ void App::appendGraticuleBraille(std::ostringstream& os,
   {
     for (int cx = 0; cx < cellW; ++cx)
     {
-      unsigned cellMask = 0;
-      for (int sy = 0; sy < 4; ++sy)
-      {
-        for (int sx = 0; sx < 2; ++sx)
-        {
-          const int bx = cx * 2 + sx;
-          const int by = cy * 4 + sy;
-          if (mask[static_cast<std::size_t>(by) * bW + bx] != 0U)
-            cellMask |= 1U << brailleBit(sx, sy);
-        }
-      }
+      const unsigned cellMask = brailleCellMask(mask, bW, cx, cy);
       if (cellMask == 0U)
         continue;
       const Rgb bg = pixels[static_cast<std::size_t>(cy * subRows) * subWidth + (cx * 2)];
@@ -3175,31 +3183,7 @@ void App::overlayPolylines(std::vector<Rgb>& pixels,
       pixels[static_cast<std::size_t>(y) * subWidth + x] = color;
   };
 
-  auto drawLine = [&](int x0, int y0, int x1, int y1)
-  {
-    int dx = std::abs(x1 - x0);
-    int dy = -std::abs(y1 - y0);
-    int sx = x0 < x1 ? 1 : -1;
-    int sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy;
-    while (true)
-    {
-      plot(x0, y0);
-      if (x0 == x1 && y0 == y1)
-        break;
-      int e2 = 2 * err;
-      if (e2 >= dy)
-      {
-        err += dy;
-        x0 += sx;
-      }
-      if (e2 <= dx)
-      {
-        err += dx;
-        y0 += sy;
-      }
-    }
-  };
+  auto drawLine = [&](int x0, int y0, int x1, int y1) { traceLine(x0, y0, x1, y1, plot); };
 
   // Vertices are pre-projected to (u, v) once per grid (see
   // projectedPolylines); here we only apply the cheap viewport crop + scale.
@@ -3210,21 +3194,7 @@ void App::overlayPolylines(std::vector<Rgb>& pixels,
     return {static_cast<int>(u01 * subWidth), static_cast<int>(v01 * subHeight)};
   };
 
-  const auto& proj = projectedPolylines(polylines);
-  for (const auto& pp : proj)
-  {
-    if (pp.us.size() < 2)
-      continue;
-    auto prev = toSub(pp.us[0], pp.vs[0]);
-    for (std::size_t i = 1; i < pp.us.size(); ++i)
-    {
-      auto cur = toSub(pp.us[i], pp.vs[i]);
-      if (std::abs(cur.first - prev.first) < subWidth &&
-          std::abs(cur.second - prev.second) < subHeight)
-        drawLine(prev.first, prev.second, cur.first, cur.second);
-      prev = cur;
-    }
-  }
+  traceProjectedPolylines(projectedPolylines(polylines), toSub, subWidth, subHeight, drawLine);
 }
 
 void App::buildUtopiaGeo(int subWidth,
@@ -3323,31 +3293,7 @@ void App::appendPolylineBraille(std::ostringstream& os,
       mask[static_cast<std::size_t>(y) * bW + x] = 1;
   };
 
-  auto drawLine = [&](int x0, int y0, int x1, int y1)
-  {
-    int dx = std::abs(x1 - x0);
-    int dy = -std::abs(y1 - y0);
-    int sx = x0 < x1 ? 1 : -1;
-    int sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy;
-    while (true)
-    {
-      plot(x0, y0);
-      if (x0 == x1 && y0 == y1)
-        break;
-      int e2 = 2 * err;
-      if (e2 >= dy)
-      {
-        err += dy;
-        x0 += sx;
-      }
-      if (e2 <= dx)
-      {
-        err += dx;
-        y0 += sy;
-      }
-    }
-  };
+  auto drawLine = [&](int x0, int y0, int x1, int y1) { traceLine(x0, y0, x1, y1, plot); };
 
   // Vertices are pre-projected to (u, v) once per grid (see
   // projectedPolylines); here we only apply the cheap viewport crop + scale.
@@ -3358,20 +3304,7 @@ void App::appendPolylineBraille(std::ostringstream& os,
     return {static_cast<int>(u01 * bW), static_cast<int>(v01 * bH)};
   };
 
-  const auto& proj = projectedPolylines(polylines);
-  for (const auto& pp : proj)
-  {
-    if (pp.us.size() < 2)
-      continue;
-    auto prev = toSub(pp.us[0], pp.vs[0]);
-    for (std::size_t i = 1; i < pp.us.size(); ++i)
-    {
-      auto cur = toSub(pp.us[i], pp.vs[i]);
-      if (std::abs(cur.first - prev.first) < bW && std::abs(cur.second - prev.second) < bH)
-        drawLine(prev.first, prev.second, cur.first, cur.second);
-      prev = cur;
-    }
-  }
+  traceProjectedPolylines(projectedPolylines(polylines), toSub, bW, bH, drawLine);
 
   // For each cell with any dots, emit a positioned braille glyph. Background
   // is sampled from the top-left sub-pixel of the cell so the underlying
@@ -3382,17 +3315,7 @@ void App::appendPolylineBraille(std::ostringstream& os,
   {
     for (int cx = 0; cx < cellW; ++cx)
     {
-      unsigned cellMask = 0;
-      for (int sy = 0; sy < 4; ++sy)
-      {
-        for (int sx = 0; sx < 2; ++sx)
-        {
-          const int bx = cx * 2 + sx;
-          const int by = cy * 4 + sy;
-          if (mask[static_cast<std::size_t>(by) * bW + bx] != 0U)
-            cellMask |= 1U << brailleBit(sx, sy);
-        }
-      }
+      const unsigned cellMask = brailleCellMask(mask, bW, cx, cy);
       if (cellMask == 0U)
         continue;
       const Rgb bg = pixels[static_cast<std::size_t>(cy * subRows) * subWidth + (cx * 2)];
