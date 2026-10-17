@@ -3717,6 +3717,42 @@ void App::overlayCrossSection(std::vector<Rgb>& pixels, int subWidth, int subHei
   }
 }
 
+namespace
+{
+// Find a free spot of w cells for a label next to the city dot at (cellX, cellY),
+// mark it occupied and return its first cell in (rowY, startX). False if all
+// candidate spots collide or fall off the screen.
+bool placeCityLabel(
+    std::vector<std::vector<bool>>& occupied, int cellX, int cellY, int w, int& rowY, int& startX)
+{
+  const int cellH = static_cast<int>(occupied.size());
+  const int cellW = cellH > 0 ? static_cast<int>(occupied[0].size()) : 0;
+  static const std::array<std::pair<int, int>, 5> kOffsets = {{
+      {1, 0},   // right
+      {-1, 0},  // left (will need to be drawn from the right edge)
+      {0, -1},  // above
+      {0, 1},   // below
+      {2, 0},   // further right
+  }};
+  for (const auto& [dx, dy] : kOffsets)
+  {
+    rowY = cellY + dy;
+    if (dx >= 0)
+      startX = cellX + dx;
+    else
+      startX = cellX + dx - w + 1;  // anchor right edge to the left of dot
+    if (rowY < 0 || rowY >= cellH || startX < 0 || startX + w > cellW)
+      continue;
+    auto& row = occupied[rowY];
+    if (std::any_of(row.begin() + startX, row.begin() + startX + w, [](bool b) { return b; }))
+      continue;
+    std::fill(row.begin() + startX, row.begin() + startX + w, true);
+    return true;
+  }
+  return false;
+}
+}  // namespace
+
 std::string App::buildCityLabels(int cellW, int cellH, int originRow, int originCol)
 {
   if (!itsShowCities || cellW <= 0 || cellH <= 0)
@@ -3745,45 +3781,15 @@ std::string App::buildCityLabels(int cellW, int cellH, int originRow, int origin
 
     const std::string& name = c.name;
     const int w = displayCells(name);
-    // Place label one cell right of the dot. Try a few fallback offsets if
+    // Place label one cell right of the dot, or at a fallback offset if
     // the primary placement collides with a higher-population label.
-    static const std::array<std::pair<int, int>, 5> kOffsets = {{
-        {1, 0},   // right
-        {-1, 0},  // left (will need to be drawn from the right edge)
-        {0, -1},  // above
-        {0, 1},   // below
-        {2, 0},   // further right
-    }};
-    bool placed = false;
-    for (const auto& [dx, dy] : kOffsets)
-    {
-      const int rowY = cellY + dy;
-      int startX = 0;
-      if (dx >= 0)
-        startX = cellX + dx;
-      else
-        startX = cellX + dx - w + 1;  // anchor right edge to the left of dot
-      if (rowY < 0 || rowY >= cellH || startX < 0 || startX + w > cellW)
-        continue;
-      bool collision = false;
-      for (int k = 0; k < w; ++k)
-        if (occupied[rowY][startX + k])
-        {
-          collision = true;
-          break;
-        }
-      if (collision)
-        continue;
-      for (int k = 0; k < w; ++k)
-        occupied[rowY][startX + k] = true;
-      // White on a dim background so the label is legible against any palette.
-      os << "\x1b[" << (originRow + rowY + 1) << ';' << (originCol + startX + 1) << 'H'
-         << "\x1b[1;48;5;235;38;5;231m" << name << "\x1b[0m";
-      placed = true;
-      break;
-    }
-    if (!placed)
+    int rowY = 0;
+    int startX = 0;
+    if (!placeCityLabel(occupied, cellX, cellY, w, rowY, startX))
       continue;
+    // White on a dim background so the label is legible against any palette.
+    os << "\x1b[" << (originRow + rowY + 1) << ';' << (originCol + startX + 1) << 'H'
+       << "\x1b[1;48;5;235;38;5;231m" << name << "\x1b[0m";
   }
   return os.str();
 }
