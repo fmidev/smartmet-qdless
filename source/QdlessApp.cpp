@@ -890,6 +890,59 @@ std::string stripSchema(const std::string& full)
   auto dot = full.find('.');
   return (dot == std::string::npos) ? full : full.substr(dot + 1);
 }
+
+// A PostGIS layer in the picker
+struct PgLayerEntry
+{
+  std::string fullName;
+  std::string display;  // "schema.name (Polygon, 16 features)"
+};
+
+// Picker label of a layer: "schema.name  (Polygon, 16 features)"
+std::string pgLayerDisplay(OGRLayer* layer, const std::string& name, OGRwkbGeometryType gt)
+{
+  const char* gtype = OGRGeometryTypeToName(gt);
+  // GetFeatureCount(false) skips the COUNT(*) round-trip; OGR
+  // returns -1 if the driver can't supply a fast estimate.
+  GIntBig n = layer->GetFeatureCount(/*force=*/0);
+  std::string display = name;
+  display += "  (";
+  display += (gtype ? gtype : "Geometry");
+  if (n >= 0)
+  {
+    display += ", ";
+    display += std::to_string(static_cast<long long>(n));
+    display += " features";
+  }
+  display += ")";
+  return display;
+}
+
+// The spatial layers of the dataset whose names start with prefix
+std::vector<PgLayerEntry> collectPgLayers(GDALDataset* ds, const std::string& prefix)
+{
+  std::vector<PgLayerEntry> entries;
+  for (int i = 0; i < ds->GetLayerCount(); ++i)
+  {
+    OGRLayer* layer = ds->GetLayer(i);
+    if (layer == nullptr)
+      continue;
+    std::string name = layer->GetName();
+    if (!prefix.empty() && name.compare(0, prefix.size(), prefix) != 0)
+      continue;
+    // Hide non-spatial tables. OGR's PostgreSQL driver lists ALL
+    // tables visible to the role, including pure attribute tables
+    // (no geometry column) — those would land in the picker as
+    // e.g. "wind" without anything renderable. wkbUnknown is OK
+    // (mixed geometries), only wkbNone means "no geometry column".
+    const OGRwkbGeometryType gt = layer->GetGeomType();
+    if (gt == wkbNone)
+      continue;
+    std::string display = pgLayerDisplay(layer, name, gt);
+    entries.push_back({std::move(name), std::move(display)});
+  }
+  return entries;
+}
 }  // namespace
 
 void App::openPgLayer(const std::string& schemaTable)
@@ -915,45 +968,8 @@ bool App::openPgPicker(UI& ui)
     return false;
   // Build the layer list once. Filtering by --schema (if given) is a
   // simple prefix match against the OGR-reported "schema.name".
-  struct Entry
-  {
-    std::string fullName;
-    std::string display;  // "schema.name (Polygon, 16 features)"
-  };
-  std::vector<Entry> entries;
   const std::string prefix = itsOpts.pgSchema.empty() ? std::string{} : itsOpts.pgSchema + ".";
-  for (int i = 0; i < ds->GetLayerCount(); ++i)
-  {
-    OGRLayer* layer = ds->GetLayer(i);
-    if (layer == nullptr)
-      continue;
-    std::string name = layer->GetName();
-    if (!prefix.empty() && name.compare(0, prefix.size(), prefix) != 0)
-      continue;
-    // Hide non-spatial tables. OGR's PostgreSQL driver lists ALL
-    // tables visible to the role, including pure attribute tables
-    // (no geometry column) — those would land in the picker as
-    // e.g. "wind" without anything renderable. wkbUnknown is OK
-    // (mixed geometries), only wkbNone means "no geometry column".
-    const OGRwkbGeometryType gt = layer->GetGeomType();
-    if (gt == wkbNone)
-      continue;
-    const char* gtype = OGRGeometryTypeToName(gt);
-    // GetFeatureCount(false) skips the COUNT(*) round-trip; OGR
-    // returns -1 if the driver can't supply a fast estimate.
-    GIntBig n = layer->GetFeatureCount(/*force=*/0);
-    std::string display = name;
-    display += "  (";
-    display += (gtype ? gtype : "Geometry");
-    if (n >= 0)
-    {
-      display += ", ";
-      display += std::to_string(static_cast<long long>(n));
-      display += " features";
-    }
-    display += ")";
-    entries.push_back({std::move(name), std::move(display)});
-  }
+  const std::vector<PgLayerEntry> entries = collectPgLayers(ds, prefix);
   if (entries.empty())
   {
     throw std::runtime_error(std::string("PostGIS: no layers visible") +
