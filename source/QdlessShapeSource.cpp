@@ -172,7 +172,7 @@ void rasterGridSize(double aspect, int M, std::size_t& nx, std::size_t& ny)
 // The .dbf attributes of the feature verbatim (no type conversion) so the
 // click-popup shows the file's own representation
 std::vector<std::pair<std::string, std::string>> featureFieldStrings(OGRLayer* layer,
-                                                                   OGRFeature* feat)
+                                                                     OGRFeature* feat)
 {
   std::vector<std::pair<std::string, std::string>> attrs;
   if (auto* defn = layer->GetLayerDefn())
@@ -700,6 +700,87 @@ Palette ShapeSource::recommendedPalette() const
   return Palette::flatFill(itsOpts.fillColor);
 }
 
+namespace
+{
+// HSV → RGB, replicating Palette::rainbowCycle's conversion
+Rgb hsvToRgb(float hueTurns, float s, float v)
+{
+  const float h = hueTurns - std::floor(hueTurns);
+  const int i = static_cast<int>(h * 6.0F);
+  const float f = h * 6.0F - i;
+  const float p1 = v * (1 - s);
+  const float q = v * (1 - f * s);
+  const float t = v * (1 - (1 - f) * s);
+  float r = 0;
+  float g = 0;
+  float b = 0;
+  switch (i % 6)
+  {
+    case 0: r = v; g = t; b = p1; break;
+    case 1: r = q; g = v; b = p1; break;
+    case 2: r = p1; g = v; b = t; break;
+    case 3: r = p1; g = q; b = v; break;
+    case 4: r = t; g = p1; b = v; break;
+    default: r = v; g = p1; b = q; break;
+  }
+  return Rgb{static_cast<std::uint8_t>(r * 255),
+             static_cast<std::uint8_t>(g * 255),
+             static_cast<std::uint8_t>(b * 255)};
+}
+
+// Case-insensitive comparison of a with b
+bool equalsIgnoreCase(const std::string& a, const char* b)
+{
+  if (a.size() != std::strlen(b)) return false;
+  for (std::size_t i = 0; i < a.size(); ++i)
+    if (std::tolower(static_cast<unsigned char>(a[i])) !=
+        std::tolower(static_cast<unsigned char>(b[i])))
+      return false;
+  return true;
+}
+
+// Does the value consist of digits, separators, minus signs and spaces only?
+bool looksNumeric(const std::string& v)
+{
+  return std::all_of(v.begin(),
+                     v.end(),
+                     [](char c)
+                     {
+                       return std::isdigit(static_cast<unsigned char>(c)) || c == '.' ||
+                              c == ',' || c == '-' || c == ' ';
+                     });
+}
+
+// Field-name preference for the label: NIMI / NAME (case-insensitive),
+// then any other text-looking field.
+std::string pickLabelField(const std::vector<std::pair<std::string, std::string>>& attrs)
+{
+  for (const char* want : {"nimi", "name", "label", "title"})
+    for (const auto& [k, v] : attrs)
+      if (equalsIgnoreCase(k, want) && !v.empty()) return v;
+  // Fallback: first non-numeric, non-empty value (avoids returning
+  // the area in km² as a "name").
+  for (const auto& [k, v] : attrs)
+    if (!v.empty() && !looksNumeric(v)) return v;
+  return {};
+}
+
+// Legend label of a burn id: the label field of its feature, or "#id"
+std::string burnLabel(const std::vector<int>& burnToFeature,
+                      const std::vector<std::vector<std::pair<std::string, std::string>>>& attributes,
+                      int id)
+{
+  const int featureIdx = (id - 1) < static_cast<int>(burnToFeature.size())
+                             ? burnToFeature[static_cast<std::size_t>(id - 1)]
+                             : -1;
+  std::string label;
+  if (featureIdx >= 0 && static_cast<std::size_t>(featureIdx) < attributes.size())
+    label = pickLabelField(attributes[static_cast<std::size_t>(featureIdx)]);
+  if (label.empty()) label = "#" + std::to_string(id);
+  return label;
+}
+}  // namespace
+
 Palette ShapeSource::rainbowPalette() const
 {
   // 1. Find the burn ids that ended up with at least one cell in the
@@ -724,62 +805,7 @@ Palette ShapeSource::rainbowPalette() const
   Palette p;
   // Hand-roll because we need labels + non-contiguous integer values.
   // Replicates Palette::rainbowCycle's HSV → RGB conversion.
-  auto hsvToRgb = [](float hueTurns, float s, float v) -> Rgb {
-    const float h = hueTurns - std::floor(hueTurns);
-    const int i = static_cast<int>(h * 6.0F);
-    const float f = h * 6.0F - i;
-    const float p1 = v * (1 - s);
-    const float q = v * (1 - f * s);
-    const float t = v * (1 - (1 - f) * s);
-    float r = 0;
-    float g = 0;
-    float b = 0;
-    switch (i % 6)
-    {
-      case 0: r = v; g = t; b = p1; break;
-      case 1: r = q; g = v; b = p1; break;
-      case 2: r = p1; g = v; b = t; break;
-      case 3: r = p1; g = q; b = v; break;
-      case 4: r = t; g = p1; b = v; break;
-      default: r = v; g = p1; b = q; break;
-    }
-    return Rgb{static_cast<std::uint8_t>(r * 255),
-               static_cast<std::uint8_t>(g * 255),
-               static_cast<std::uint8_t>(b * 255)};
-  };
   constexpr float kGolden = 0.61803398875F;
-
-  // Field-name preference for the label: NIMI / NAME (case-insensitive),
-  // then any other text-looking field. Computed once.
-  auto pickField = [&](const std::vector<std::pair<std::string, std::string>>& attrs) -> std::string {
-    auto eqIcase = [](const std::string& a, const char* b) {
-      if (a.size() != std::strlen(b)) return false;
-      for (std::size_t i = 0; i < a.size(); ++i)
-        if (std::tolower(static_cast<unsigned char>(a[i])) !=
-            std::tolower(static_cast<unsigned char>(b[i])))
-          return false;
-      return true;
-    };
-    for (const char* want : {"nimi", "name", "label", "title"})
-      for (const auto& [k, v] : attrs)
-        if (eqIcase(k, want) && !v.empty()) return v;
-    // Fallback: first non-numeric, non-empty value (avoids returning
-    // the area in km² as a "name").
-    for (const auto& [k, v] : attrs)
-    {
-      if (v.empty()) continue;
-      bool numeric = true;
-      for (char c : v)
-        if (!std::isdigit(static_cast<unsigned char>(c)) && c != '.' && c != ',' && c != '-' &&
-            c != ' ')
-        {
-          numeric = false;
-          break;
-        }
-      if (!numeric) return v;
-    }
-    return {};
-  };
 
   // 3. Resolve a label (NAME/NIMI/…) for each used burn id. Multiple
   //    burn ids can map to the same feature (a MultiPolygon's
@@ -789,15 +815,7 @@ Palette ShapeSource::rainbowPalette() const
   std::vector<std::string> labelFor(usedIds.size());
   for (std::size_t i = 0; i < usedIds.size(); ++i)
   {
-    const int id = usedIds[i];
-    const int featureIdx = (id - 1) < static_cast<int>(itsBurnToFeature.size())
-                               ? itsBurnToFeature[static_cast<std::size_t>(id - 1)]
-                               : -1;
-    std::string label;
-    if (featureIdx >= 0 && static_cast<std::size_t>(featureIdx) < itsAttributes.size())
-      label = pickField(itsAttributes[static_cast<std::size_t>(featureIdx)]);
-    if (label.empty()) label = "#" + std::to_string(id);
-    labelFor[i] = std::move(label);
+    labelFor[i] = burnLabel(itsBurnToFeature, itsAttributes, usedIds[i]);
   }
 
   // 4. Assign one hue per UNIQUE label. Hues cycle by golden angle in
