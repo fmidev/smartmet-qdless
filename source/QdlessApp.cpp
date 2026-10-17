@@ -3961,6 +3961,47 @@ std::string formatMetTime(const NFmiMetTime& t)
 }
 }  // namespace
 
+namespace
+{
+// "N (lo..hi)" for the metadata popup, ignoring non-finite sentinels (used by
+// sources with synthetic levels like PVOL's "MAX" composite) for the min/max.
+std::string levelCountText(DataSource& source)
+{
+  const std::size_t nl = source.levelCount();
+  float lo = std::numeric_limits<float>::infinity();
+  float hi = -std::numeric_limits<float>::infinity();
+  std::size_t finiteCount = 0;
+  for (std::size_t i = 0; i < nl; ++i)
+  {
+    const float v = source.levelValueAt(i);
+    if (!std::isfinite(v))
+      continue;
+    lo = std::min(lo, v);
+    hi = std::max(hi, v);
+    ++finiteCount;
+  }
+  if (finiteCount == 1)
+    return fmt::format("{} ({:g})", nl, lo);
+  if (finiteCount > 1)
+    return fmt::format("{} ({:g}..{:g})", nl, lo, hi);
+  return fmt::format("{}", nl);
+}
+
+// "pressure (13), hybrid (65)": the level types and their level counts
+template <typename Groups>
+std::string levelTypesText(const Groups& groups)
+{
+  std::string s;
+  for (std::size_t i = 0; i < groups.size(); ++i)
+  {
+    if (i)
+      s += ", ";
+    s += fmt::format("{} ({})", groups[i].typeName, groups[i].values.size());
+  }
+  return s;
+}
+}  // namespace
+
 std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
 {
   std::vector<std::pair<std::string, std::string>> rows;
@@ -4006,28 +4047,8 @@ std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
 
   // Levels — ignore non-finite sentinels (used by sources with synthetic
   // levels like PVOL's "MAX" composite) for the min/max display.
-  const std::size_t nl = itsSource->levelCount();
-  if (nl > 0)
-  {
-    float lo = std::numeric_limits<float>::infinity();
-    float hi = -std::numeric_limits<float>::infinity();
-    std::size_t finiteCount = 0;
-    for (std::size_t i = 0; i < nl; ++i)
-    {
-      const float v = itsSource->levelValueAt(i);
-      if (!std::isfinite(v))
-        continue;
-      lo = std::min(lo, v);
-      hi = std::max(hi, v);
-      ++finiteCount;
-    }
-    if (finiteCount == 1)
-      rows.emplace_back("Levels", fmt::format("{} ({:g})", nl, lo));
-    else if (finiteCount > 1)
-      rows.emplace_back("Levels", fmt::format("{} ({:g}..{:g})", nl, lo, hi));
-    else
-      rows.emplace_back("Levels", fmt::format("{}", nl));
-  }
+  if (itsSource->levelCount() > 0)
+    rows.emplace_back("Levels", levelCountText(*itsSource));
   // Level-type inventory — one row per type present for the active
   // parameter, sized to indicate "Temperature has 13 pressure surfaces
   // *and* 65 hybrid surfaces in this file." Only shown when more than
@@ -4035,16 +4056,7 @@ std::vector<std::pair<std::string, std::string>> App::buildMetadataRows() const
   {
     const auto groups = itsSource->levelGroupsForParam(itsSource->currentParamId());
     if (groups.size() > 1)
-    {
-      std::string s;
-      for (std::size_t i = 0; i < groups.size(); ++i)
-      {
-        if (i)
-          s += ", ";
-        s += fmt::format("{} ({})", groups[i].typeName, groups[i].values.size());
-      }
-      rows.emplace_back("Level types", s);
-    }
+      rows.emplace_back("Level types", levelTypesText(groups));
   }
 
   rows.emplace_back("", "");
