@@ -2990,6 +2990,48 @@ bool App::hasWindComponents() const
          std::find(ids.begin(), ids.end(), vEnum) != ids.end();
 }
 
+namespace
+{
+// Both wind components are finite and not missing-value sentinels
+bool validWindComponents(float u, float v)
+{
+  if (!std::isfinite(u) || !std::isfinite(v))
+    return false;
+  return std::abs(u) <= 1e10F && std::abs(v) <= 1e10F;
+}
+
+// Wind arrow colour by speed using the wind palette range (3..32 m/s)
+Rgb windArrowColour(float speed)
+{
+  if (speed < 5)
+    return Rgb{200, 230, 255};
+  if (speed < 10)
+    return Rgb{120, 180, 255};
+  if (speed < 17)
+    return Rgb{255, 100, 200};
+  if (speed < 26)
+    return Rgb{255, 60, 60};
+  return Rgb{255, 170, 0};
+}
+
+// The rendered raster colour at the centre of terminal cell (cx, cy), or a
+// transparent colour when there is no raster
+Rgb cellBackground(const std::vector<Rgb>& pixels, int subWidth, int cellW, int cellH, int cx, int cy)
+{
+  Rgb bg{};
+  bg.transparent = true;
+  if (subWidth > 0 && !pixels.empty())
+  {
+    const int subHeight = static_cast<int>(pixels.size()) / subWidth;
+    const int px = (cx * subWidth + subWidth / 2) / cellW;
+    const int py = (cy * subHeight + subHeight / 2) / cellH;
+    if (px >= 0 && px < subWidth && py >= 0 && py < subHeight)
+      bg = pixels[static_cast<std::size_t>(py) * subWidth + px];
+  }
+  return bg;
+}
+}  // namespace
+
 std::string App::buildWindArrows(int cellW,
                                  int cellH,
                                  int originRow,
@@ -3069,9 +3111,7 @@ std::string App::buildWindArrows(int cellW,
   std::ostringstream os;
   for (const auto& s : samples)
   {
-    if (!std::isfinite(s.u) || !std::isfinite(s.v))
-      continue;
-    if (std::abs(s.u) > 1e10F || std::abs(s.v) > 1e10F)
+    if (!validWindComponents(s.u, s.v))
       continue;
     const float speed = std::sqrt(s.u * s.u + s.v * s.v);
     if (speed < 0.5F)
@@ -3084,30 +3124,10 @@ std::string App::buildWindArrows(int cellW,
     idx = ((idx % 8) + 8) % 8;
 
     // Colour by speed using the wind palette range (3..32 m/s).
-    Rgb color{255, 255, 255};  // default bright white
-    if (speed < 5)
-      color = Rgb{200, 230, 255};
-    else if (speed < 10)
-      color = Rgb{120, 180, 255};
-    else if (speed < 17)
-      color = Rgb{255, 100, 200};
-    else if (speed < 26)
-      color = Rgb{255, 60, 60};
-    else
-      color = Rgb{255, 170, 0};
-
+    const Rgb color = windArrowColour(speed);
     // Keep the data colour behind the arrow: sample the rendered raster at
     // the centre of the cell (works for block and graphics sub-pixel grids).
-    Rgb bg{};
-    bg.transparent = true;
-    if (subWidth > 0 && !pixels.empty())
-    {
-      const int subHeight = static_cast<int>(pixels.size()) / subWidth;
-      const int px = (s.cx * subWidth + subWidth / 2) / cellW;
-      const int py = (s.cy * subHeight + subHeight / 2) / cellH;
-      if (px >= 0 && px < subWidth && py >= 0 && py < subHeight)
-        bg = pixels[static_cast<std::size_t>(py) * subWidth + px];
-    }
+    const Rgb bg = cellBackground(pixels, subWidth, cellW, cellH, s.cx, s.cy);
     os << "\x1b[" << (originRow + s.cy + 1) << ';' << (originCol + s.cx + 1) << 'H'
        << itsRenderer.bgEscape(bg) << itsRenderer.fgEscape(color) << "\x1b[1m" << kArrows[idx]
        << "\x1b[0m";
