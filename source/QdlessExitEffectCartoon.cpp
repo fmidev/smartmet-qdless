@@ -8,6 +8,557 @@ namespace Qdless
 namespace ee_detail
 {
 
+namespace
+{
+// Clamp a channel value to 0..255
+std::uint8_t clampU8(float v)
+{
+  return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F));
+}
+
+// Upper-cased 5x7 text with its top-left at (px, py), one pixel per font dot
+void drawPixelText(std::vector<Rgb>& dst, int w, int h, const char* s, float px, float py, Rgb color)
+{
+  constexpr int kFW = 5;
+  constexpr int kFH = 7;
+  constexpr int kGap = 1;
+  int x0 = static_cast<int>(std::round(px));
+  const int y0 = static_cast<int>(std::round(py));
+  for (const char* p = s; *p; ++p)
+  {
+    const auto g = glyph5x7(static_cast<char>(std::toupper(static_cast<unsigned char>(*p))));
+    for (int fy = 0; fy < kFH; ++fy)
+      for (int fx = 0; fx < kFW; ++fx)
+      {
+        if (g[fy][fx] != '1')
+          continue;
+        const int xx = x0 + fx;
+        const int yy = y0 + fy;
+        if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+          dst[static_cast<std::size_t>(yy) * w + xx] = color;
+      }
+    x0 += kFW + kGap;
+  }
+}
+
+// Thin dividers between the cells of a cols x rows grid
+void drawGridDividers(
+    std::vector<Rgb>& dst, int w, int h, int cols, int rows, float cellW, float cellH, const Rgb& divCol)
+{
+  for (int c = 1; c < cols; ++c)
+  {
+    const int xx = static_cast<int>(c * cellW);
+    for (int yy = 0; yy < h; ++yy)
+      dst[static_cast<std::size_t>(yy) * w + xx] = divCol;
+  }
+  for (int r = 1; r < rows; ++r)
+  {
+    const int yy = static_cast<int>(r * cellH);
+    for (int xx = 0; xx < w; ++xx)
+      dst[static_cast<std::size_t>(yy) * w + xx] = divCol;
+  }
+}
+
+// A toe of the stomping foot: centre and radius in foot-local coordinates
+struct Toe
+{
+  float x, y, r;
+};
+
+// Five toes (sole view): big toe to little toe, in a shallow arc above the
+// ball. {centre x, centre y, radius} in foot-local coords.
+const Toe kToes[5] = {{-0.34F, -0.82F, 0.170F},
+                      {-0.11F, -0.93F, 0.135F},
+                      {0.10F, -0.96F, 0.120F},
+                      {0.29F, -0.93F, 0.105F},
+                      {0.46F, -0.86F, 0.090F}};
+
+bool inEllipse(float nx, float ny, float cx, float cy, float rx, float ry)
+{
+  const float dx = (nx - cx) / rx;
+  const float dy = (ny - cy) / ry;
+  return dx * dx + dy * dy <= 1.0F;
+}
+
+// Solid foot silhouette in local coords (nx across, ny along; -1 ~ toe tips,
+// +1 ~ heel): a wide ball, a full (flat-footed) arch, a rounded heel, toes.
+bool inFoot(float nx, float ny)
+{
+  if (inEllipse(nx, ny, 0.0F, -0.42F, 0.60F, 0.46F))
+    return true;
+  if (inEllipse(nx, ny, 0.0F, 0.60F, 0.52F, 0.42F))
+    return true;
+  if (ny > -0.42F && ny < 0.60F && std::fabs(nx) <= 0.52F)  // filled arch (flat-footed)
+    return true;
+  for (const auto& toe : kToes)
+  {
+    const float dx = nx - toe.x;
+    const float dy = ny - toe.y;
+    if (dx * dx + dy * dy <= toe.r * toe.r)
+      return true;
+  }
+  return false;
+}
+
+// Fleshy pads (ball, heel, toe tips) read as a sole
+bool onSolePad(float nx, float ny)
+{
+  if (inEllipse(nx, ny, 0.0F, -0.40F, 0.42F, 0.30F) ||
+      inEllipse(nx, ny, 0.0F, 0.58F, 0.34F, 0.26F))
+    return true;
+  for (const auto& toe : kToes)
+    if (inEllipse(nx, ny, toe.x, toe.y, toe.r * 0.72F, toe.r * 0.72F))
+      return true;
+  return false;
+}
+
+// Paint the foot at (cx,cy) with half-extents (sx,sy); `alpha` fades it out.
+void drawSoleFoot(
+    std::vector<Rgb>& dst, int w, int h, float cx, float cy, float sx, float sy, float alpha)
+{
+  const Rgb skin{226, 190, 158, false};
+  const Rgb pad{240, 205, 188, false};  // fleshy sole / toe pads (pinker, lighter)
+  const Rgb rim{150, 112, 84, false};   // darkened outline
+  const int x0 = std::max(0, static_cast<int>(std::floor(cx - 0.66F * sx)));
+  const int x1 = std::min(w - 1, static_cast<int>(std::ceil(cx + 0.66F * sx)));
+  const int y0 = std::max(0, static_cast<int>(std::floor(cy - 1.14F * sy)));
+  const int y1 = std::min(h - 1, static_cast<int>(std::ceil(cy + 1.07F * sy)));
+  constexpr float e = 0.05F;  // neighbour offset for the rim test
+  for (int y = y0; y <= y1; ++y)
+    for (int x = x0; x <= x1; ++x)
+    {
+      const float nx = (x - cx) / sx;
+      const float ny = (y - cy) / sy;
+      if (!inFoot(nx, ny))
+        continue;
+      Rgb c = onSolePad(nx, ny) ? pad : skin;
+      // Top-lit roundness, and a darkened rim where a neighbour falls outside.
+      float lit = 0.82F + 0.18F * (1.0F - std::min(1.0F, std::fabs(nx) / 0.62F));
+      if (!inFoot(nx - e, ny) || !inFoot(nx + e, ny) || !inFoot(nx, ny - e) ||
+          !inFoot(nx, ny + e))
+      {
+        c = rim;
+        lit = 1.0F;
+      }
+      const float k = lit * alpha;
+      dst[static_cast<std::size_t>(y) * w + x] = Rgb{static_cast<std::uint8_t>(c.r * k),
+                                                     static_cast<std::uint8_t>(c.g * k),
+                                                     static_cast<std::uint8_t>(c.b * k),
+                                                     false};
+    }
+}
+
+// Signed difference a - b wrapped to -pi..pi
+float angleDifference(float a, float b)
+{
+  float d = a - b;
+  while (d > 3.14159F)
+    d -= 6.28318F;
+  while (d < -3.14159F)
+    d += 6.28318F;
+  return d;
+}
+
+// A Pac-Man disc: centre, radius, facing, mouth half-angle, data texture and opacity
+struct PacDisc
+{
+  float cx;
+  float cy;
+  float r;
+  float dir;
+  float mouth;
+  bool textured;
+  float alpha;
+};
+
+// Shaded Pac-Man disc alpha-blended onto dst
+void drawPacDisc(
+    std::vector<Rgb>& dst, const std::vector<Rgb>& src, int w, int h, float ya, const PacDisc& p)
+{
+  const int x0 = std::max(0, static_cast<int>(p.cx - p.r));
+  const int x1 = std::min(w - 1, static_cast<int>(p.cx + p.r));
+  const int y0 = std::max(0, static_cast<int>(p.cy - p.r / ya));
+  const int y1 = std::min(h - 1, static_cast<int>(p.cy + p.r / ya));
+  for (int y = y0; y <= y1; ++y)
+    for (int x = x0; x <= x1; ++x)
+    {
+      const float dx = x - p.cx;
+      const float dy = (y - p.cy) * ya;
+      const float rr = std::sqrt(dx * dx + dy * dy);
+      if (rr > p.r)
+        continue;
+      if (std::fabs(angleDifference(std::atan2(dy, dx), p.dir)) < p.mouth)
+        continue;  // the open mouth wedge
+      const float z = std::sqrt(std::max(0.0F, 1.0F - (rr / p.r) * (rr / p.r)));
+      float yr = 255.0F;
+      float yg = 225.0F;
+      float yb = 45.0F;
+      if (p.textured)
+      {
+        const Rgb v = sample(src, w, h, static_cast<float>(x), static_cast<float>(y));
+        yr = (v.transparent ? 200.0F : v.r) * 0.4F + 255.0F * 0.6F;
+        yg = (v.transparent ? 200.0F : v.g) * 0.4F + 225.0F * 0.6F;
+        yb = (v.transparent ? 60.0F : v.b) * 0.4F + 45.0F * 0.6F;
+      }
+      const float sh = 0.55F + 0.45F * z;
+      const std::size_t idx = static_cast<std::size_t>(y) * w + x;
+      const Rgb cur = dst[idx];  // alpha-blend so the giant fades in as it forms
+      dst[idx] = Rgb{clampU8(cur.r * (1.0F - p.alpha) + yr * sh * p.alpha),
+                     clampU8(cur.g * (1.0F - p.alpha) + yg * sh * p.alpha),
+                     clampU8(cur.b * (1.0F - p.alpha) + yb * sh * p.alpha),
+                     false};
+    }
+}
+
+// Where the two Pac-Men are and how far the eating / implosion has got
+struct PacDuelState
+{
+  float sx = 0;
+  float sy = 0;
+  float sr = 0;
+  float sdir = 0.0F;
+  float eatFront = 0;
+  float gather = 0.0F;  // data-implosion progress
+  float bigAlpha = 0.0F;
+  float blx = 0;  // big Pac-Man x (lunges in the duel)
+};
+
+PacDuelState pacDuelState(float t, int w, int h, float smallR, float bx)
+{
+  PacDuelState st;
+  st.sy = (h - 1) * 0.5F;
+  st.sr = smallR;
+  st.blx = bx;
+  const float eatEnd = 0.42F * w;
+  if (t < 0.18F)  // eat across (~1 s before the giant forms)
+  {
+    const float p = t / 0.18F;
+    st.sx = -smallR + p * (eatEnd + smallR);
+    st.eatFront = st.sx;
+  }
+  else if (t < 0.32F)  // SUDDEN: the leftover data flies together into the giant
+  {
+    const float p = (t - 0.18F) / 0.14F;
+    st.sx = eatEnd;
+    st.eatFront = eatEnd;
+    st.gather = p;
+    st.bigAlpha = std::clamp(p * 1.3F, 0.0F, 1.0F);
+  }
+  else  // the duel: giant lunges, little one flees
+  {
+    const float p = (t - 0.32F) / 0.68F;
+    st.eatFront = eatEnd;
+    st.gather = 1.0F;
+    st.bigAlpha = 1.0F;
+    const float lunge = 0.5F + 0.5F * std::sin(t * 14.0F);
+    st.blx = bx - p * 0.16F * w - lunge * 0.04F * w;               // advance + menacing snaps
+    st.sx = eatEnd - p * p * (0.7F * w);                           // flee left, accelerating
+    st.sy = (h - 1) * 0.5F + std::sin(t * 34.0F) * h * 0.05F * p;  // terror wobble
+    st.sr = smallR * (1.0F - 0.25F * p);
+    st.sdir = 3.14159F;
+  }
+  return st;
+}
+
+// Background pixel of the Pac-Man duel: eaten, intact, or imploding towards (bx, by)
+Rgb pacDuelPixel(const std::vector<Rgb>& src,
+                 int w,
+                 int h,
+                 int x,
+                 int y,
+                 float eatFront,
+                 float gather,
+                 float bx,
+                 float by)
+{
+  if (x < eatFront)
+    return Rgb{0, 0, 0, false};  // eaten
+  if (gather <= 0.0F)
+  {
+    const Rgb& s0 = src[static_cast<std::size_t>(y) * w + x];  // intact data ahead of the eater
+    return s0.transparent ? Rgb{0, 0, 0, false} : s0;
+  }
+  // The leftover data implodes toward the giant's centre.
+  const float k = std::max(0.05F, 1.0F - 0.85F * gather);
+  const float ssx = bx + (x - bx) / k;
+  const float ssy = by + (y - by) / k;
+  if (ssx < eatFront)
+    return Rgb{0, 0, 0, false};
+  const Rgb v = sample(src, w, h, ssx, ssy);
+  const float dd = 1.0F - 0.55F * gather;  // loose data dims as it gathers
+  return v.transparent ? Rgb{0, 0, 0, false}
+                       : Rgb{clampU8(v.r * dd), clampU8(v.g * dd), clampU8(v.b * dd), false};
+}
+
+// Skin-tone chroma key for the renaissance-background fallback.
+bool isFootColour(const Rgb& c)
+{
+  return !c.transparent && c.r > c.g + 12 && c.r > c.b + 24 && c.r > 110;
+}
+
+// A bone shaft: a thick segment of length L at angle ang with round knobs at both ends
+void drawBoneShaft(std::vector<Rgb>& dst,
+                   int w,
+                   int h,
+                   float ya,
+                   float cx,
+                 float cy,
+                 float L,
+                 float R,
+                 float ang,
+                 const Rgb& col)
+{
+  const float dx = std::cos(ang) * L * 0.5F;
+  const float dy = std::sin(ang) * L * 0.5F;
+  drawSeg(dst, w, h, cx - dx, cy - dy, cx + dx, cy + dy, R, ya, col);
+  plotDot(dst, w, h, cx - dx, cy - dy, R * 1.25F, ya, col);
+  plotDot(dst, w, h, cx + dx, cy + dy, R * 1.25F, ya, col);
+}
+
+// Twinkling stars seeded at bright data pixels
+template <typename Hash>
+void drawDataStars(std::vector<Rgb>& dst, const std::vector<Rgb>& src, int w, int h, float t, Hash&& hash)
+{
+  for (int i = 0; i < 120; ++i)
+  {
+    const int sx = static_cast<int>(hash(i * 2) * w);
+    const int sy = static_cast<int>(hash(i * 2 + 1) * h);
+    if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+    const Rgb& s = src[static_cast<std::size_t>(sy) * w + sx];
+    const float l = s.transparent ? 100.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+    if (l < 90.0F) continue;
+    const float tw = 0.5F + 0.5F * std::sin(t * 6.0F + i);
+    dst[static_cast<std::size_t>(sy) * w + sx] =
+        Rgb{clampU8(190 + tw * 50), clampU8(190 + tw * 50), clampU8(210 + tw * 40), false};
+  }
+}
+
+// The foot image scaleW x scaleH centred on (cx, cy), rotated by ang
+void drawSpinningFoot(std::vector<Rgb>& dst,
+                      int w,
+                      int h,
+                      float ya,
+                      const ImageSource& foot,
+                      bool needChromaKey,
+                      float cx,
+                      float cy,
+                      float scaleW,
+                      float scaleH,
+                      float ang)
+{
+  const float cs = std::cos(-ang);
+  const float sn = std::sin(-ang);
+  // Bounding circle of the rotated sprite (longest half-diagonal).
+  const float halfDiag = 0.5F * std::sqrt(scaleW * scaleW + scaleH * scaleH);
+  const int x0 = static_cast<int>(std::max(0.0F, cx - halfDiag));
+  const int x1 = static_cast<int>(std::min(static_cast<float>(w - 1), cx + halfDiag));
+  const int y0 = static_cast<int>(std::max(0.0F, cy - halfDiag / ya));
+  const int y1 = static_cast<int>(std::min(static_cast<float>(h - 1), cy + halfDiag / ya));
+  for (int yy = y0; yy <= y1; ++yy)
+    for (int xx = x0; xx <= x1; ++xx)
+    {
+      const float dx = static_cast<float>(xx) - cx;
+      const float dy = (static_cast<float>(yy) - cy) * ya;
+      // Rotate into image-local axes.
+      const float lx = dx * cs - dy * sn;
+      const float lyL = dx * sn + dy * cs;
+      const float u = lx / scaleW + 0.5F;
+      const float v = lyL / scaleH + 0.5F;
+      if (u < 0.0F || u > 1.0F || v < 0.0F || v > 1.0F) continue;
+      const Rgb pix = foot.pixelAtUV(std::clamp(u, 0.0F, 0.999F),
+                                     std::clamp(v, 0.0F, 0.999F));
+      if (pix.transparent) continue;
+      if (needChromaKey && !isFootColour(pix)) continue;
+      dst[static_cast<std::size_t>(yy) * w + xx] = pix;
+    }
+}
+
+// Multiply every frame value of the joint's axis channel by scale
+void scaleJointChannel(BvhAnimation& walk, const char* jointName, char axis, double scale)
+{
+  const int ji = walk.jointIndex(jointName);
+  if (ji < 0) return;
+  const auto& j = walk.joints[ji];
+  for (std::size_t k = 0; k < j.channels.size(); ++k)
+    if (j.channels[k] == axis)
+      for (int f = 0; f < walk.frameCount; ++f)
+        walk.frames[static_cast<std::size_t>(f) * walk.totalChannels +
+                    j.channelStart + k] *= scale;
+}
+
+// Add bias to every frame value of the joint's axis channel
+void offsetJointChannel(BvhAnimation& walk, const char* jointName, char axis, double bias)
+{
+  const int ji = walk.jointIndex(jointName);
+  if (ji < 0) return;
+  const auto& j = walk.joints[ji];
+  for (std::size_t k = 0; k < j.channels.size(); ++k)
+    if (j.channels[k] == axis)
+      for (int f = 0; f < walk.frameCount; ++f)
+        walk.frames[static_cast<std::size_t>(f) * walk.totalChannels +
+                    j.channelStart + k] += bias;
+}
+
+// Exaggerate the CMU walk into a silly walk (see effectSillyWalk)
+void makeWalkSilly(BvhAnimation& walk)
+{
+  // High-kick amplification on the forward swing axis (X) — the
+  // CMU convention makes X the side axis, which controls
+  // thigh-forward angle. Knees too, doubled.
+  scaleJointChannel(walk, "LeftUpLeg",  'X', 2.6);
+  scaleJointChannel(walk, "RightUpLeg", 'X', 2.6);
+  scaleJointChannel(walk, "LeftLeg",    'X', 1.8);
+  scaleJointChannel(walk, "RightLeg",   'X', 1.8);
+  // Splay sideways too (Z) for the goose-step splay.
+  scaleJointChannel(walk, "LeftUpLeg",  'Z', 1.5);
+  scaleJointChannel(walk, "RightUpLeg", 'Z', 1.5);
+  // Arms: kill the natural swing so they hang stiffly. Setting
+  // all three channels to zero pins each arm to its rest pose
+  // pointing down beside the body.
+  for (const char* arm : {"LeftArm", "LeftForeArm", "RightArm", "RightForeArm"})
+    for (char ax : {'X', 'Y', 'Z'}) scaleJointChannel(walk, arm, ax, 0.0);
+  // A tiny chin-up bias on the spine so the body holds itself
+  // pompously upright while the legs go nuts.
+  offsetJointChannel(walk, "Spine",  'X', -8.0);
+  offsetJointChannel(walk, "Spine1", 'X', -4.0);
+}
+
+// Bowler hat sitting above the head joint at (hx, hy)
+void drawBowlerHat(std::vector<Rgb>& dst, int w, int h, float ya, double hx, double hy, float figH, const Rgb& ink)
+{
+  const double bodyUnit = std::max(1.0, static_cast<double>(figH) / 30.0);
+  // Brim: a thin horizontal slab just above the head disc.
+  const double brimY = hy - bodyUnit * 2.0;
+  const double brimHalfW = bodyUnit * 2.6;
+  drawCapsule(dst, w, h, ya,
+              hx - brimHalfW, brimY, hx + brimHalfW, brimY,
+              bodyUnit * 0.35, bodyUnit * 0.35, ink);
+  // Crown: a rounded dome above the brim.
+  for (int yo = -static_cast<int>(bodyUnit * 2.4); yo <= 0; ++yo)
+  {
+    const int yy = static_cast<int>(brimY) + yo;
+    const double w0 = bodyUnit * 1.6 *
+                      std::sqrt(std::max(0.0, 1.0 - std::pow(yo / (bodyUnit * 2.4), 2)));
+    for (int xo = -static_cast<int>(w0); xo <= static_cast<int>(w0); ++xo)
+    {
+      const int xx = static_cast<int>(hx) + xo;
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = ink;
+    }
+  }
+}
+
+// Briefcase dangling below the hand joint at (bx, by)
+void drawBriefcase(std::vector<Rgb>& dst, int w, int h, float ya, double bx, double by, float figH)
+{
+  const double bodyUnit = std::max(1.0, static_cast<double>(figH) / 30.0);
+  const Rgb leather{80, 60, 40, false};
+  const double caseH = bodyUnit * 2.2;
+  const double caseW = bodyUnit * 1.6;
+  for (int yo = 0; yo < static_cast<int>(caseH / ya); ++yo)
+  {
+    const int yy = static_cast<int>(by) + yo + static_cast<int>(bodyUnit * 0.5);
+    for (int xo = -static_cast<int>(caseW); xo <= static_cast<int>(caseW); ++xo)
+    {
+      const int xx = static_cast<int>(bx) + xo;
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = leather;
+    }
+  }
+}
+
+// Is joint index i a valid index into joints?
+bool hasJoint(int i, const std::vector<std::array<double, 2>>& joints)
+{
+  return i >= 0 && i < static_cast<int>(joints.size());
+}
+
+// ACME anvil silhouette: crown, narrow waist and base, with a dark outline
+void drawAnvil(std::vector<Rgb>& dst, int w, int h, float anvilCx, float anvilCy, float aWf, float aHf)
+{
+  const Rgb steel{55, 58, 68, false};
+  const Rgb dark{16, 18, 22, false};
+  for (int yo = -static_cast<int>(aHf * 0.5F); yo <= static_cast<int>(aHf * 0.5F); ++yo)
+  {
+    const int yy = static_cast<int>(anvilCy + yo);
+    if (yy < 0 || yy >= h) continue;
+    const float yf = static_cast<float>(yo) / (aHf * 0.5F);
+    float scale = NAN;
+    if (yf < -0.6F) scale = 1.05F + 0.15F * (-yf - 0.6F);  // top crown
+    else if (yf < 0.1F) scale = 0.55F + 0.3F * (yf + 0.6F);  // narrow waist
+    else scale = 0.85F + 0.20F * yf;  // base
+    const int half = static_cast<int>(aWf * 0.5F * scale);
+    for (int xo = -half; xo <= half; ++xo)
+    {
+      const int xx = static_cast<int>(anvilCx + xo);
+      if (xx < 0 || xx >= w) continue;
+      const float xf = std::fabs(xo) / static_cast<float>(std::max(1, half));
+      dst[static_cast<std::size_t>(yy) * w + xx] = (xf > 0.93F) ? dark : steel;
+    }
+  }
+}
+
+// Dust puffs kicked up around the anvil base, du = 0..1
+template <typename Hash>
+void drawImpactDust(std::vector<Rgb>& dst, int w, int h, float cx, float baseY, float du, float mn, float ya, Hash&& hash)
+{
+  const Rgb dust{190, 178, 156, false};
+  for (int i = 0; i < 28; ++i)
+  {
+    const float a = i / 28.0F * 6.2832F + hash(i) * 0.3F;
+    const float rr = du * mn * 0.35F * (0.7F + 0.6F * hash(i * 3));
+    plotDot(dst, w, h, cx + std::cos(a) * rr,
+            baseY + std::sin(a) * rr * 0.25F,
+            mn * 0.028F * (1.0F - du), ya, dust);
+  }
+}
+
+// Closing-iris pixel: dimmed outside the iris, a wobbly gold rim, the view inside
+Rgb irisPixel(const Rgb& s, float gd, float irisR, float wob, float mn)
+{
+  if (gd > irisR)
+    return Rgb{clampU8(s.r * 0.20F), clampU8(s.g * 0.20F + 4), clampU8(s.b * 0.20F + 12), false};
+  if (gd > irisR + wob - mn * 0.003F && gd < irisR + wob)
+    return Rgb{220, 180, 80, false};
+  return s;
+}
+
+// "THAT'S ALL FOLKS!" centred at (cx, cy), letters bobbing, fading in with fadeT
+void drawFolksText(std::vector<Rgb>& dst, int w, int h, float cx, float cy, float t, float fadeT, float mn, float ya)
+{
+  const std::string text = "THAT'S ALL FOLKS!";
+  const int sc = std::max(2, static_cast<int>(mn / 60.0F));
+  const float lineW = static_cast<float>(text.size()) * 6 * sc;
+  for (int ci = 0; ci < static_cast<int>(text.size()); ++ci)
+  {
+    const char ch = text[ci];
+    if (ch == ' ')
+      continue;
+    const auto g = glyph5x7(ch);
+    const float wobY = std::sin(ci * 1.1F + t * 6.0F) * mn * 0.015F;
+    for (int fy = 0; fy < 7; ++fy)
+      for (int fx = 0; fx < 5; ++fx)
+        if (g[fy][fx] == '1')
+          plotDot(dst, w, h, cx - lineW * 0.5F + (ci * 6 + fx) * sc,
+                  cy + fy * sc + wobY,
+                  std::max(1.0F, static_cast<float>(sc) * 0.6F * fadeT), ya,
+                  Rgb{clampU8(220 * fadeT), clampU8(40 * fadeT), clampU8(60 * fadeT), false});
+  }
+}
+
+// Golden podium block from tier1Y down to baseY, tier1W either side of cx
+void drawPodium(std::vector<Rgb>& dst, int w, int h, float cx, float tier1Y, float baseY, float tier1W)
+{
+  for (int yo = 0; yo <= static_cast<int>(baseY - tier1Y); ++yo)
+    for (int xo = -static_cast<int>(tier1W); xo <= static_cast<int>(tier1W); ++xo) {
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(tier1Y + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{200, 160, 60, false};
+    }
+}
+}  // namespace
+
 // Kenney gallery: 4×4 grid of Kenney.nl "Platformer Art Deluxe" (CC0)
 // character animations playing simultaneously over the dimmed data
 // backdrop. The 11-frame player walk cycle is the showpiece (top-left
@@ -28,30 +579,6 @@ void effectKenney(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
   const float cellH = static_cast<float>(h) / rows;
   const float spriteH = cellH * 0.78F;
 
-  auto drawText = [&](std::vector<Rgb>& dst, const char* s, float px, float py, Rgb color)
-  {
-    constexpr int kFW = 5;
-    constexpr int kFH = 7;
-    constexpr int kGap = 1;
-    int x0 = static_cast<int>(std::round(px));
-    const int y0 = static_cast<int>(std::round(py));
-    for (const char* p = s; *p; ++p)
-    {
-      const auto g = glyph5x7(static_cast<char>(std::toupper(static_cast<unsigned char>(*p))));
-      for (int fy = 0; fy < kFH; ++fy)
-        for (int fx = 0; fx < kFW; ++fx)
-        {
-          if (g[fy][fx] != '1')
-            continue;
-          const int xx = x0 + fx;
-          const int yy = y0 + fy;
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = color;
-        }
-      x0 += kFW + kGap;
-    }
-  };
-
   runFrames(
       renderer,
       w,
@@ -60,28 +587,13 @@ void effectKenney(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
       [&](float t, std::vector<Rgb>& dst)
       {
         // Cool blue-grey scrapbook backdrop so the cartoon colours pop.
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            dst[static_cast<std::size_t>(y) * w + x] =
-                Rgb{u8(40 + l * 0.20F), u8(60 + l * 0.22F), u8(95 + l * 0.20F), false};
-          }
+        shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+          const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+          return Rgb{u8(40 + l * 0.20F), u8(60 + l * 0.22F), u8(95 + l * 0.20F), false};
+        });
         // Thin grid dividers.
         const Rgb divCol{20, 30, 50, false};
-        for (int c = 1; c < cols; ++c)
-        {
-          const int xx = static_cast<int>(c * cellW);
-          for (int yy = 0; yy < h; ++yy)
-            dst[static_cast<std::size_t>(yy) * w + xx] = divCol;
-        }
-        for (int r = 1; r < rows; ++r)
-        {
-          const int yy = static_cast<int>(r * cellH);
-          for (int xx = 0; xx < w; ++xx)
-            dst[static_cast<std::size_t>(yy) * w + xx] = divCol;
-        }
+        drawGridDividers(dst, w, h, cols, rows, cellW, cellH, divCol);
 
         for (int idx = 0; idx < kKenneyMotionCount; ++idx)
         {
@@ -110,13 +622,13 @@ void effectKenney(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
           const float capW = llen * 6.0F;
           const float capX = cx - capW * 0.5F;
           const float capY = (r + 1) * cellH - cellH * 0.10F;
-          drawText(dst, label, capX, capY, Rgb{230, 240, 250, false});
+          drawPixelText(dst, w, h, label, capX, capY, Rgb{230, 240, 250, false});
         }
 
         const char* title = "KENNEY.NL PLATFORMER PACK (CC0)";
         const std::size_t tlen = std::strlen(title);
         const float tw = tlen * 6.0F;
-        drawText(dst, title, w * 0.5F - tw * 0.5F, 4.0F, Rgb{240, 250, 255, false});
+        drawPixelText(dst, w, h, title, w * 0.5F - tw * 0.5F, 4.0F, Rgb{240, 250, 255, false});
       });
 }
 
@@ -179,91 +691,6 @@ void effectFoot(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
   const float sy = std::min(sx / ya, 0.43F * h);
   const float footBottom = 1.02F * sy;  // the heel reaches this far below centre
 
-  // Five toes (sole view): big toe to little toe, in a shallow arc above the
-  // ball. {centre x, centre y, radius} in foot-local coords.
-  struct Toe
-  {
-    float x, y, r;
-  };
-  static const Toe kToes[5] = {{-0.34F, -0.82F, 0.170F},
-                               {-0.11F, -0.93F, 0.135F},
-                               {0.10F, -0.96F, 0.120F},
-                               {0.29F, -0.93F, 0.105F},
-                               {0.46F, -0.86F, 0.090F}};
-
-  auto inEllipse = [](float nx, float ny, float cx, float cy, float rx, float ry)
-  {
-    const float dx = (nx - cx) / rx;
-    const float dy = (ny - cy) / ry;
-    return dx * dx + dy * dy <= 1.0F;
-  };
-  // Solid foot silhouette in local coords (nx across, ny along; -1 ~ toe tips,
-  // +1 ~ heel): a wide ball, a full (flat-footed) arch, a rounded heel, toes.
-  auto inFoot = [&](float nx, float ny)
-  {
-    if (inEllipse(nx, ny, 0.0F, -0.42F, 0.60F, 0.46F))
-      return true;
-    if (inEllipse(nx, ny, 0.0F, 0.60F, 0.52F, 0.42F))
-      return true;
-    if (ny > -0.42F && ny < 0.60F && std::fabs(nx) <= 0.52F)  // filled arch (flat-footed)
-      return true;
-    for (const auto& toe : kToes)
-    {
-      const float dx = nx - toe.x;
-      const float dy = ny - toe.y;
-      if (dx * dx + dy * dy <= toe.r * toe.r)
-        return true;
-    }
-    return false;
-  };
-
-  const Rgb skin{226, 190, 158, false};
-  const Rgb pad{240, 205, 188, false};  // fleshy sole / toe pads (pinker, lighter)
-  const Rgb rim{150, 112, 84, false};   // darkened outline
-  // Paint the foot at (cx,cy) with half-extents (sx,sy); `alpha` fades it out.
-  auto drawFoot = [&](std::vector<Rgb>& dst, float cx, float cy, float sx, float sy, float alpha)
-  {
-    const int x0 = std::max(0, static_cast<int>(std::floor(cx - 0.66F * sx)));
-    const int x1 = std::min(w - 1, static_cast<int>(std::ceil(cx + 0.66F * sx)));
-    const int y0 = std::max(0, static_cast<int>(std::floor(cy - 1.14F * sy)));
-    const int y1 = std::min(h - 1, static_cast<int>(std::ceil(cy + 1.07F * sy)));
-    constexpr float e = 0.05F;  // neighbour offset for the rim test
-    for (int y = y0; y <= y1; ++y)
-      for (int x = x0; x <= x1; ++x)
-      {
-        const float nx = (x - cx) / sx;
-        const float ny = (y - cy) / sy;
-        if (!inFoot(nx, ny))
-          continue;
-        Rgb c = skin;
-        // Fleshy pads (ball, heel, toe tips) read as a sole.
-        bool isPad = inEllipse(nx, ny, 0.0F, -0.40F, 0.42F, 0.30F) ||
-                     inEllipse(nx, ny, 0.0F, 0.58F, 0.34F, 0.26F);
-        if (!isPad)
-          for (const auto& toe : kToes)
-            if (inEllipse(nx, ny, toe.x, toe.y, toe.r * 0.72F, toe.r * 0.72F))
-            {
-              isPad = true;
-              break;
-            }
-        if (isPad)
-          c = pad;
-        // Top-lit roundness, and a darkened rim where a neighbour falls outside.
-        float lit = 0.82F + 0.18F * (1.0F - std::min(1.0F, std::fabs(nx) / 0.62F));
-        if (!inFoot(nx - e, ny) || !inFoot(nx + e, ny) || !inFoot(nx, ny - e) ||
-            !inFoot(nx, ny + e))
-        {
-          c = rim;
-          lit = 1.0F;
-        }
-        const float k = lit * alpha;
-        dst[static_cast<std::size_t>(y) * w + x] = Rgb{static_cast<std::uint8_t>(c.r * k),
-                                                       static_cast<std::uint8_t>(c.g * k),
-                                                       static_cast<std::uint8_t>(c.b * k),
-                                                       false};
-      }
-  };
-
   constexpr float tDown = 0.5F;  // the sole slams to the floor by here
   runFrames(renderer,
             w,
@@ -283,7 +710,7 @@ void effectFoot(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
                   dst[static_cast<std::size_t>(y) * w + x] =
                       src[static_cast<std::size_t>(row) * w + x];
               }
-              drawFoot(dst, fcx, contactY - footBottom, sx, sy, 1.0F);
+              drawSoleFoot(dst, w, h, fcx, contactY - footBottom, sx, sy, 1.0F);
             });
 }
 
@@ -375,59 +802,6 @@ void effectPacmanDuel(const Renderer& renderer, const std::vector<Rgb>& src, int
   const float mn = std::min(static_cast<float>(w), h * ya);
   const float smallR = 0.055F * mn;  // a small regular Pac-Man
   const float bigR = 0.22F * mn;     // ...much larger
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  auto angdiff = [](float a, float b)
-  {
-    float d = a - b;
-    while (d > 3.14159F)
-      d -= 6.28318F;
-    while (d < -3.14159F)
-      d += 6.28318F;
-    return d;
-  };
-  auto drawPac = [&](std::vector<Rgb>& dst,
-                     float cx,
-                     float cy,
-                     float r,
-                     float dir,
-                     float mouth,
-                     bool textured,
-                     float alpha)
-  {
-    const int x0 = std::max(0, static_cast<int>(cx - r));
-    const int x1 = std::min(w - 1, static_cast<int>(cx + r));
-    const int y0 = std::max(0, static_cast<int>(cy - r / ya));
-    const int y1 = std::min(h - 1, static_cast<int>(cy + r / ya));
-    for (int y = y0; y <= y1; ++y)
-      for (int x = x0; x <= x1; ++x)
-      {
-        const float dx = x - cx;
-        const float dy = (y - cy) * ya;
-        const float rr = std::sqrt(dx * dx + dy * dy);
-        if (rr > r)
-          continue;
-        if (std::fabs(angdiff(std::atan2(dy, dx), dir)) < mouth)
-          continue;  // the open mouth wedge
-        const float z = std::sqrt(std::max(0.0F, 1.0F - (rr / r) * (rr / r)));
-        float yr = 255.0F;
-        float yg = 225.0F;
-        float yb = 45.0F;
-        if (textured)
-        {
-          const Rgb v = sample(src, w, h, static_cast<float>(x), static_cast<float>(y));
-          yr = (v.transparent ? 200.0F : v.r) * 0.4F + 255.0F * 0.6F;
-          yg = (v.transparent ? 200.0F : v.g) * 0.4F + 225.0F * 0.6F;
-          yb = (v.transparent ? 60.0F : v.b) * 0.4F + 45.0F * 0.6F;
-        }
-        const float sh = 0.55F + 0.45F * z;
-        const std::size_t idx = static_cast<std::size_t>(y) * w + x;
-        const Rgb cur = dst[idx];  // alpha-blend so the giant fades in as it forms
-        dst[idx] = Rgb{u8(cur.r * (1.0F - alpha) + yr * sh * alpha),
-                       u8(cur.g * (1.0F - alpha) + yg * sh * alpha),
-                       u8(cur.b * (1.0F - alpha) + yb * sh * alpha),
-                       false};
-      }
-  };
   const float bx = w * 0.70F;
   const float by = (h - 1) * 0.5F;
   runFrames(
@@ -439,76 +813,20 @@ void effectPacmanDuel(const Renderer& renderer, const std::vector<Rgb>& src, int
       {
         const float mouth =
             0.08F + 0.42F * (0.5F + 0.5F * std::sin(t * 180.0F));  // very fast chomp
-        float sx = 0;
-        float sy = (h - 1) * 0.5F;
-        float sr = smallR;
-        float sdir = 0.0F;
-        float eatFront = 0;
-        float gather = 0.0F;  // data-implosion progress
-        float bigAlpha = 0.0F;
-        float blx = bx;  // big Pac-Man x (lunges in the duel)
-        const float eatEnd = 0.42F * w;
-        if (t < 0.18F)  // eat across (~1 s before the giant forms)
-        {
-          const float p = t / 0.18F;
-          sx = -smallR + p * (eatEnd + smallR);
-          eatFront = sx;
-        }
-        else if (t < 0.32F)  // SUDDEN: the leftover data flies together into the giant
-        {
-          const float p = (t - 0.18F) / 0.14F;
-          sx = eatEnd;
-          eatFront = eatEnd;
-          gather = p;
-          bigAlpha = std::clamp(p * 1.3F, 0.0F, 1.0F);
-        }
-        else  // the duel: giant lunges, little one flees
-        {
-          const float p = (t - 0.32F) / 0.68F;
-          eatFront = eatEnd;
-          gather = 1.0F;
-          bigAlpha = 1.0F;
-          const float lunge = 0.5F + 0.5F * std::sin(t * 14.0F);
-          blx = bx - p * 0.16F * w - lunge * 0.04F * w;               // advance + menacing snaps
-          sx = eatEnd - p * p * (0.7F * w);                           // flee left, accelerating
-          sy = (h - 1) * 0.5F + std::sin(t * 34.0F) * h * 0.05F * p;  // terror wobble
-          sr = smallR * (1.0F - 0.25F * p);
-          sdir = 3.14159F;
-        }
+        const PacDuelState st = pacDuelState(t, w, h, smallR, bx);
         for (int y = 0; y < h; ++y)
           for (int x = 0; x < w; ++x)
-          {
-            const std::size_t idx = static_cast<std::size_t>(y) * w + x;
-            if (x < eatFront)
-            {
-              dst[idx] = Rgb{0, 0, 0, false};  // eaten
-              continue;
-            }
-            if (gather <= 0.0F)
-            {
-              const Rgb& s0 = src[idx];  // intact data ahead of the eater
-              dst[idx] = s0.transparent ? Rgb{0, 0, 0, false} : s0;
-              continue;
-            }
-            // The leftover data implodes toward the giant's centre.
-            const float k = std::max(0.05F, 1.0F - 0.85F * gather);
-            const float ssx = bx + (x - bx) / k;
-            const float ssy = by + (y - by) / k;
-            if (ssx < eatFront)
-            {
-              dst[idx] = Rgb{0, 0, 0, false};
-              continue;
-            }
-            const Rgb v = sample(src, w, h, ssx, ssy);
-            const float dd = 1.0F - 0.55F * gather;  // loose data dims as it gathers
-            dst[idx] = v.transparent ? Rgb{0, 0, 0, false}
-                                     : Rgb{u8(v.r * dd), u8(v.g * dd), u8(v.b * dd), false};
-          }
-        if (bigAlpha > 0.01F)
-          drawPac(
-              dst, blx, by, bigR, 3.14159F, mouth * 1.15F, true, bigAlpha);  // giant, faces left
-        if (sr > 1.0F)
-          drawPac(dst, sx, sy, sr, sdir, mouth, false, 1.0F);
+            dst[static_cast<std::size_t>(y) * w + x] =
+                pacDuelPixel(src, w, h, x, y, st.eatFront, st.gather, bx, by);
+        if (st.bigAlpha > 0.01F)
+          drawPacDisc(dst,
+                      src,
+                      w,
+                      h,
+                      ya,
+                      {st.blx, by, bigR, 3.14159F, mouth * 1.15F, true, st.bigAlpha});  // giant, faces left
+        if (st.sr > 1.0F)
+          drawPacDisc(dst, src, w, h, ya, {st.sx, st.sy, st.sr, st.sdir, mouth, false, 1.0F});
       });
 }
 
@@ -535,36 +853,20 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
     effectBoneCut(renderer, src, w, h);
     return;
   }
-  // Skin-tone chroma key for the renaissance-background fallback.
-  auto isFootColour = [](const Rgb& c)
-  { return !c.transparent && c.r > c.g + 12 && c.r > c.b + 24 && c.r > 110; };
-  auto drawCapsule =
-      [&](std::vector<Rgb>& dst, float cx, float cy, float L, float R, float ang, const Rgb& col)
-  {
-    const float dx = std::cos(ang) * L * 0.5F;
-    const float dy = std::sin(ang) * L * 0.5F;
-    drawSeg(dst, w, h, cx - dx, cy - dy, cx + dx, cy + dy, R, ya, col);
-    plotDot(dst, w, h, cx - dx, cy - dy, R * 1.25F, ya, col);
-    plotDot(dst, w, h, cx + dx, cy + dy, R * 1.25F, ya, col);
-  };
   runFrames(
       renderer, w, h, 5400,
       [&](float t, std::vector<Rgb>& dst)
       {
         if (t < cutT)  // savanna throw — copied from Bone Cut so the cut is exact
         {
-          for (int y = 0; y < h; ++y)
-            for (int x = 0; x < w; ++x)
-            {
-              const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-              const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-              const float sf = static_cast<float>(y) / h;
-              dst[static_cast<std::size_t>(y) * w + x] =
-                  (y > h * 0.78F)
-                      ? Rgb{u8(60 + l * 0.22F), u8(40 + l * 0.16F), u8(28 + l * 0.10F), false}
-                      : Rgb{u8(140 + 60 * sf + l * 0.15F), u8(95 + 60 * sf + l * 0.12F),
-                            u8(70 + 40 * sf + l * 0.10F), false};
-            }
+          shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+            const float sf = static_cast<float>(y) / h;
+            return (y > h * 0.78F)
+                     ? Rgb{u8(60 + l * 0.22F), u8(40 + l * 0.16F), u8(28 + l * 0.10F), false}
+                     : Rgb{u8(140 + 60 * sf + l * 0.15F), u8(95 + 60 * sf + l * 0.12F),
+                     u8(70 + 40 * sf + l * 0.10F), false};
+          });
           // The bone rises monotonically to its apex right at the cut, so
           // its on-screen position is the match point for the foot. (The
           // original Bone Cut's parabola lands back on the ground at p=1 —
@@ -576,7 +878,7 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
           const float ang = p * 18.0F + 0.6F;
           const float L = mn * 0.22F;
           const float R = mn * 0.022F;
-          drawCapsule(dst, bx, by, L, R, ang, Rgb{240, 235, 222, false});
+          drawBoneShaft(dst, w, h, ya, bx, by, L, R, ang, Rgb{240, 235, 222, false});
           plotDot(dst, w, h, bx + std::cos(ang) * L * 0.5F, by + std::sin(ang) * L * 0.5F,
                   R * 1.6F, ya, Rgb{240, 235, 222, false});
           plotDot(dst, w, h, bx - std::cos(ang) * L * 0.5F, by - std::sin(ang) * L * 0.5F,
@@ -584,22 +886,9 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
         }
         else  // the cut: foot tumbles in space where the bone reached apex
         {
-          for (int y = 0; y < h; ++y)
-            for (int x = 0; x < w; ++x)
-              dst[static_cast<std::size_t>(y) * w + x] = Rgb{2, 3, 7, false};
+          std::fill(dst.begin(), dst.end(), Rgb{2, 3, 7, false});
           // Stars seeded from data so the field still carries weather pixels.
-          for (int i = 0; i < 120; ++i)
-          {
-            const int sx = static_cast<int>(hash(i * 2) * w);
-            const int sy = static_cast<int>(hash(i * 2 + 1) * h);
-            if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
-            const Rgb& s = src[static_cast<std::size_t>(sy) * w + sx];
-            const float l = s.transparent ? 100.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            if (l < 90.0F) continue;
-            const float tw = 0.5F + 0.5F * std::sin(t * 6.0F + i);
-            dst[static_cast<std::size_t>(sy) * w + sx] =
-                Rgb{u8(190 + tw * 50), u8(190 + tw * 50), u8(210 + tw * 40), false};
-          }
+          drawDataStars(dst, src, w, h, t, hash);
           // The foot picks up exactly where the bone reached apex.
           // Bone end-point: bx = w*0.70, by = h*0.23 (sin(π/2)=1, with the
           // multipliers above). Drift gently toward screen centre afterwards.
@@ -619,31 +908,7 @@ void effectPythonCut(const Renderer& renderer, const std::vector<Rgb>& src, int 
           const float scaleH = mn * 0.45F;
           const float aspect = (fh > 0) ? static_cast<float>(fw) / static_cast<float>(fh) : 1.5F;
           const float scaleW = scaleH * aspect;
-          const float cs = std::cos(-ang);
-          const float sn = std::sin(-ang);
-          // Bounding circle of the rotated sprite (longest half-diagonal).
-          const float halfDiag = 0.5F * std::sqrt(scaleW * scaleW + scaleH * scaleH);
-          const int x0 = static_cast<int>(std::max(0.0F, cx - halfDiag));
-          const int x1 = static_cast<int>(std::min(static_cast<float>(w - 1), cx + halfDiag));
-          const int y0 = static_cast<int>(std::max(0.0F, cy - halfDiag / ya));
-          const int y1 = static_cast<int>(std::min(static_cast<float>(h - 1), cy + halfDiag / ya));
-          for (int yy = y0; yy <= y1; ++yy)
-            for (int xx = x0; xx <= x1; ++xx)
-            {
-              const float dx = static_cast<float>(xx) - cx;
-              const float dy = (static_cast<float>(yy) - cy) * ya;
-              // Rotate into image-local axes.
-              const float lx = dx * cs - dy * sn;
-              const float lyL = dx * sn + dy * cs;
-              const float u = lx / scaleW + 0.5F;
-              const float v = lyL / scaleH + 0.5F;
-              if (u < 0.0F || u > 1.0F || v < 0.0F || v > 1.0F) continue;
-              const Rgb pix = foot->pixelAtUV(std::clamp(u, 0.0F, 0.999F),
-                                              std::clamp(v, 0.0F, 0.999F));
-              if (pix.transparent) continue;
-              if (needChromaKey && !isFootColour(pix)) continue;
-              dst[static_cast<std::size_t>(yy) * w + xx] = pix;
-            }
+          drawSpinningFoot(dst, w, h, ya, *foot, needChromaKey, cx, cy, scaleW, scaleH, ang);
         }
       });
 }
@@ -658,15 +923,11 @@ void effectPinkPanther(const Renderer& renderer, const std::vector<Rgb>& src, in
       [&](float t, std::vector<Rgb>& dst)
       {
         const float dim = 0.45F;
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 90.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            dst[static_cast<std::size_t>(y) * w + x] =
-                Rgb{u8(190 + l * 0.15F * dim), u8(160 + l * 0.13F * dim),
-                    u8(190 + l * 0.15F * dim), false};
-          }
+        shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+          const float l = s.transparent ? 90.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+          return Rgb{u8(190 + l * 0.15F * dim), u8(160 + l * 0.13F * dim),
+                     u8(190 + l * 0.15F * dim), false};
+        });
         const float walkY = h * 0.78F;
         const float cx = w * 1.15F - t * w * 1.4F;  // right -> left
         const Rgb pink{232, 92, 168, false};
@@ -682,19 +943,9 @@ void effectPinkPanther(const Renderer& renderer, const std::vector<Rgb>& src, in
           const float s = mn * 0.10F;
           const float bobY = walkY + std::sin(t * 18.0F) * mn * 0.012F;
           // Body — elongated horizontal oval.
-          for (int yo = -static_cast<int>(s * 0.4F); yo <= static_cast<int>(s * 0.4F); ++yo)
-            for (int xo = -static_cast<int>(s * 0.95F); xo <= static_cast<int>(s * 0.95F); ++xo)
-            {
-              const float nx = xo / (s * 0.95F);
-              const float ny = yo / (s * 0.4F);
-              if (nx * nx + ny * ny <= 1.0F)
-              {
-                const int xx = static_cast<int>(cx + xo);
-                const int yy = static_cast<int>(bobY + yo);
-                if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                  dst[static_cast<std::size_t>(yy) * w + xx] = pink;
-              }
-            }
+          fillEllipse(dst, w, h, cx, bobY, s * 0.95F, s * 0.4F, -static_cast<int>(s * 0.95F),
+                      static_cast<int>(s * 0.95F), -static_cast<int>(s * 0.4F),
+                      static_cast<int>(s * 0.4F), pink);
           // Tail — sweeping curl above the body.
           for (int k = 0; k < 18; ++k)
           {
@@ -733,10 +984,7 @@ void effectAcmeAnvil(const Renderer& renderer, const std::vector<Rgb>& src, int 
   runFrames(renderer, w, h, 4400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      src[static_cast<std::size_t>(y) * w + x];
+              std::copy(src.begin(), src.begin() + static_cast<std::ptrdiff_t>(w) * h, dst.begin());
               const float dropT = 0.62F;
               const float p = std::clamp(t / dropT, 0.0F, 1.0F);
               const float fall = p * p;
@@ -747,28 +995,8 @@ void effectAcmeAnvil(const Renderer& renderer, const std::vector<Rgb>& src, int 
               const float squash = t > dropT ? std::clamp((t - dropT) / 0.06F, 0.0F, 1.0F) : 0.0F;
               const float aWf = anvilW * (1.0F + 0.45F * squash);
               const float aHf = anvilH * (1.0F - 0.5F * squash);
-              const Rgb steel{55, 58, 68, false};
-              const Rgb dark{16, 18, 22, false};
               // Anvil silhouette: classic hourglass-ish profile, dark outline.
-              for (int yo = -static_cast<int>(aHf * 0.5F); yo <= static_cast<int>(aHf * 0.5F);
-                   ++yo)
-              {
-                const int yy = static_cast<int>(anvilCy + yo);
-                if (yy < 0 || yy >= h) continue;
-                const float yf = static_cast<float>(yo) / (aHf * 0.5F);
-                float scale = NAN;
-                if (yf < -0.6F) scale = 1.05F + 0.15F * (-yf - 0.6F);  // top crown
-                else if (yf < 0.1F) scale = 0.55F + 0.3F * (yf + 0.6F);  // narrow waist
-                else scale = 0.85F + 0.20F * yf;  // base
-                const int half = static_cast<int>(aWf * 0.5F * scale);
-                for (int xo = -half; xo <= half; ++xo)
-                {
-                  const int xx = static_cast<int>(anvilCx + xo);
-                  if (xx < 0 || xx >= w) continue;
-                  const float xf = std::fabs(xo) / static_cast<float>(std::max(1, half));
-                  dst[static_cast<std::size_t>(yy) * w + xx] = (xf > 0.93F) ? dark : steel;
-                }
-              }
+              drawAnvil(dst, w, h, anvilCx, anvilCy, aWf, aHf);
               // "ACME" centred on the body (5x7 stencil glyphs via glyph5x7).
               if (anvilCy > -mn * 0.05F)
               {
@@ -777,31 +1005,14 @@ void effectAcmeAnvil(const Renderer& renderer, const std::vector<Rgb>& src, int 
                 const int W = (5 + 1) * 4 - 1;
                 const float startX = anvilCx - W * sc * 0.5F;
                 const float startY = anvilCy - aHf * 0.18F;
-                for (int ci = 0; ci < 4; ++ci)
-                {
-                  const auto g = glyph5x7(str[ci]);
-                  for (int fy = 0; fy < 7; ++fy)
-                    for (int fx = 0; fx < 5; ++fx)
-                      if (g[fy][fx] == '1')
-                        plotDot(dst, w, h, startX + (ci * 6 + fx) * sc, startY + fy * sc,
-                                std::max(1.0F, static_cast<float>(sc) * 0.55F), ya,
-                                Rgb{210, 210, 220, false});
-                }
+                drawDotText(dst, w, h, str, 4, startX, startY, sc,
+                            std::max(1.0F, static_cast<float>(sc) * 0.55F), ya,
+                            Rgb{210, 210, 220, false});
               }
               // Dust kick-up on impact.
               if (t > dropT)
-              {
-                const float du = std::clamp((t - dropT) / 0.30F, 0.0F, 1.0F);
-                const Rgb dust{190, 178, 156, false};
-                for (int i = 0; i < 28; ++i)
-                {
-                  const float a = i / 28.0F * 6.2832F + hash(i) * 0.3F;
-                  const float rr = du * mn * 0.35F * (0.7F + 0.6F * hash(i * 3));
-                  plotDot(dst, w, h, anvilCx + std::cos(a) * rr,
-                          anvilCy + aHf * 0.5F + std::sin(a) * rr * 0.25F,
-                          mn * 0.028F * (1.0F - du), ya, dust);
-                }
-              }
+                drawImpactDust(dst, w, h, anvilCx, anvilCy + aHf * 0.5F,
+                               std::clamp((t - dropT) / 0.30F, 0.0F, 1.0F), mn, ya, hash);
             });
 }
 
@@ -831,47 +1042,7 @@ void effectSillyWalk(const Renderer& renderer, const std::vector<Rgb>& src, int 
       walkOk = true;
       // For each non-root joint we know the channelStart and the
       // channels string (e.g. "ZYX"). Apply per-joint, per-axis scales.
-      auto applyScale = [&](const char* jointName, char axis, double scale)
-      {
-        const int ji = walk.jointIndex(jointName);
-        if (ji < 0) return;
-        const auto& j = walk.joints[ji];
-        for (std::size_t k = 0; k < j.channels.size(); ++k)
-          if (j.channels[k] == axis)
-            for (int f = 0; f < walk.frameCount; ++f)
-              walk.frames[static_cast<std::size_t>(f) * walk.totalChannels +
-                          j.channelStart + k] *= scale;
-      };
-      auto applyOffset = [&](const char* jointName, char axis, double bias)
-      {
-        const int ji = walk.jointIndex(jointName);
-        if (ji < 0) return;
-        const auto& j = walk.joints[ji];
-        for (std::size_t k = 0; k < j.channels.size(); ++k)
-          if (j.channels[k] == axis)
-            for (int f = 0; f < walk.frameCount; ++f)
-              walk.frames[static_cast<std::size_t>(f) * walk.totalChannels +
-                          j.channelStart + k] += bias;
-      };
-      // High-kick amplification on the forward swing axis (X) — the
-      // CMU convention makes X the side axis, which controls
-      // thigh-forward angle. Knees too, doubled.
-      applyScale("LeftUpLeg",  'X', 2.6);
-      applyScale("RightUpLeg", 'X', 2.6);
-      applyScale("LeftLeg",    'X', 1.8);
-      applyScale("RightLeg",   'X', 1.8);
-      // Splay sideways too (Z) for the goose-step splay.
-      applyScale("LeftUpLeg",  'Z', 1.5);
-      applyScale("RightUpLeg", 'Z', 1.5);
-      // Arms: kill the natural swing so they hang stiffly. Setting
-      // all three channels to zero pins each arm to its rest pose
-      // pointing down beside the body.
-      for (const char* arm : {"LeftArm", "LeftForeArm", "RightArm", "RightForeArm"})
-        for (char ax : {'X', 'Y', 'Z'}) applyScale(arm, ax, 0.0);
-      // A tiny chin-up bias on the spine so the body holds itself
-      // pompously upright while the legs go nuts.
-      applyOffset("Spine",  'X', -8.0);
-      applyOffset("Spine1", 'X', -4.0);
+      makeWalkSilly(walk);
       walkRefH = bvhReferenceHeight(walk);
     }
     catch (const std::exception&) { walkOk = false; }
@@ -882,15 +1053,11 @@ void effectSillyWalk(const Renderer& renderer, const std::vector<Rgb>& src, int 
       [&](float t, std::vector<Rgb>& dst)
       {
         const float dim = 0.35F;
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            dst[static_cast<std::size_t>(y) * w + x] =
-                Rgb{u8(180 + l * 0.10F * dim), u8(170 + l * 0.10F * dim),
-                    u8(150 + l * 0.10F * dim), false};
-          }
+        shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+          const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+          return Rgb{u8(180 + l * 0.10F * dim), u8(170 + l * 0.10F * dim),
+                     u8(150 + l * 0.10F * dim), false};
+        });
         const float groundY = h * 0.90F;
         for (int x = 0; x < w; ++x)
           dst[static_cast<std::size_t>(groundY) * w + x] = Rgb{50, 40, 30, false};
@@ -920,51 +1087,11 @@ void effectSillyWalk(const Renderer& renderer, const std::vector<Rgb>& src, int 
         {
           const int headI = walk.jointIndex("Head");
           const int rWristI = walk.jointIndex("RightHand");
-          if (headI >= 0 && headI < static_cast<int>(joints.size()))
-          {
-            const double hx = joints[headI][0];
-            const double hy = joints[headI][1];
-            const double bodyUnit = std::max(1.0, static_cast<double>(figH) / 30.0);
-            // Brim: a thin horizontal slab just above the head disc.
-            const double brimY = hy - bodyUnit * 2.0;
-            const double brimHalfW = bodyUnit * 2.6;
-            drawCapsule(dst, w, h, ya,
-                        hx - brimHalfW, brimY, hx + brimHalfW, brimY,
-                        bodyUnit * 0.35, bodyUnit * 0.35, ink);
-            // Crown: a rounded dome above the brim.
-            for (int yo = -static_cast<int>(bodyUnit * 2.4); yo <= 0; ++yo)
-            {
-              const int yy = static_cast<int>(brimY) + yo;
-              const double w0 = bodyUnit * 1.6 *
-                                std::sqrt(std::max(0.0, 1.0 - std::pow(yo / (bodyUnit * 2.4), 2)));
-              for (int xo = -static_cast<int>(w0); xo <= static_cast<int>(w0); ++xo)
-              {
-                const int xx = static_cast<int>(hx) + xo;
-                if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                  dst[static_cast<std::size_t>(yy) * w + xx] = ink;
-              }
-            }
-          }
-          if (rWristI >= 0 && rWristI < static_cast<int>(joints.size()))
-          {
-            // Briefcase dangles below the right hand.
-            const double bx = joints[rWristI][0];
-            const double by = joints[rWristI][1];
-            const double bodyUnit = std::max(1.0, static_cast<double>(figH) / 30.0);
-            const Rgb leather{80, 60, 40, false};
-            const double caseH = bodyUnit * 2.2;
-            const double caseW = bodyUnit * 1.6;
-            for (int yo = 0; yo < static_cast<int>(caseH / ya); ++yo)
-            {
-              const int yy = static_cast<int>(by) + yo + static_cast<int>(bodyUnit * 0.5);
-              for (int xo = -static_cast<int>(caseW); xo <= static_cast<int>(caseW); ++xo)
-              {
-                const int xx = static_cast<int>(bx) + xo;
-                if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                  dst[static_cast<std::size_t>(yy) * w + xx] = leather;
-              }
-            }
-          }
+          if (hasJoint(headI, joints))
+            drawBowlerHat(dst, w, h, ya, joints[headI][0], joints[headI][1], figH, ink);
+          // Briefcase dangles below the right hand.
+          if (hasJoint(rWristI, joints))
+            drawBriefcase(dst, w, h, ya, joints[rWristI][0], joints[rWristI][1], figH);
         }
       });
 }
@@ -973,7 +1100,6 @@ void effectThatsAllFolks(const Renderer& renderer, const std::vector<Rgb>& src, 
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(
       renderer,
       w,
@@ -986,42 +1112,21 @@ void effectThatsAllFolks(const Renderer& renderer, const std::vector<Rgb>& src, 
         const float maxR =
             std::hypot(std::max(cx, w - cx), std::max(cy * ya, (h - cy) * ya));
         const float irisR = std::max(0.0F, (1.0F - t * 1.05F) * maxR);
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const float gd = std::hypot(x - cx, (y - cy) * ya);
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            if (gd > irisR)
-              dst[static_cast<std::size_t>(y) * w + x] =
-                  Rgb{u8(s.r * 0.20F), u8(s.g * 0.20F + 4), u8(s.b * 0.20F + 12), false};
-            else
-            {
-              const float wob = std::sin(t * 8.0F + std::atan2((y - cy) * ya, x - cx) * 6.0F) * mn * 0.012F;
-              if (gd > irisR + wob - mn * 0.003F && gd < irisR + wob)
-                dst[static_cast<std::size_t>(y) * w + x] = Rgb{220, 180, 80, false};
-              else
-                dst[static_cast<std::size_t>(y) * w + x] = s;
-            }
-          }
-        const std::string text = "THAT'S ALL FOLKS!";
-        const int sc = std::max(2, static_cast<int>(mn / 60.0F));
-        const float lineW = static_cast<float>(text.size()) * 6 * sc;
+        shadePixels(dst,
+                    src,
+                    w,
+                    h,
+                    [&](const Rgb& s, int x, int y)
+                    {
+                      const float gd = std::hypot(x - cx, (y - cy) * ya);
+                      const float wob =
+                          gd > irisR ? 0.0F
+                                     : std::sin(t * 8.0F + std::atan2((y - cy) * ya, x - cx) * 6.0F) *
+                                           mn * 0.012F;
+                      return irisPixel(s, gd, irisR, wob, mn);
+                    });
         const float fadeT = std::clamp(t * 1.6F - 0.5F, 0.0F, 1.0F);
-        for (int ci = 0; ci < static_cast<int>(text.size()); ++ci)
-        {
-          const char ch = text[ci];
-          if (ch == ' ')
-            continue;
-          const auto g = glyph5x7(ch);
-          const float wobY = std::sin(ci * 1.1F + t * 6.0F) * mn * 0.015F;
-          for (int fy = 0; fy < 7; ++fy)
-            for (int fx = 0; fx < 5; ++fx)
-              if (g[fy][fx] == '1')
-                plotDot(dst, w, h, cx - lineW * 0.5F + (ci * 6 + fx) * sc,
-                        cy + fy * sc + wobY,
-                        std::max(1.0F, static_cast<float>(sc) * 0.6F * fadeT), ya,
-                        Rgb{u8(220 * fadeT), u8(40 * fadeT), u8(60 * fadeT), false});
-        }
+        drawFolksText(dst, w, h, cx, cy, t, fadeT, mn, ya);
       });
 }
 
@@ -1129,33 +1234,21 @@ void effectTrophy(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
   FootSprite f = loadPythonFootSprite();
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb d = sample(src, w, h, x, y);
-          const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(20 + dl * 0.15F), u8(20 + dl * 0.15F), u8(60 + dl * 0.20F), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& /*s*/, int x, int y) {
+        const Rgb d = sample(src, w, h, x, y);
+        const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+        return Rgb{u8(20 + dl * 0.15F), u8(20 + dl * 0.15F), u8(60 + dl * 0.20F), false};
+      });
       // Podium tiers (1, 2, 3).
       const float cx = w * 0.5F;
       const float baseY = h * 0.92F;
       const float tier1Y = h * 0.65F;
       const float tier1W = mn * 0.10F;
-      for (int yo = 0; yo <= static_cast<int>(baseY - tier1Y); ++yo)
-        for (int xo = -static_cast<int>(tier1W); xo <= static_cast<int>(tier1W); ++xo) {
-          const int xx = static_cast<int>(cx + xo);
-          const int yy = static_cast<int>(tier1Y + yo);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{200, 160, 60, false};
-        }
+      drawPodium(dst, w, h, cx, tier1Y, baseY, tier1W);
       // Tier "1" label.
       const int sc = std::max(2, static_cast<int>(mn / 30.0F));
-      const auto g1 = glyph5x7('1');
-      for (int fy = 0; fy < 7; ++fy)
-        for (int fx = 0; fx < 5; ++fx)
-          if (g1[fy][fx] == '1')
-            plotDot(dst, w, h, cx - 2 * sc + fx * sc, tier1Y + mn * 0.06F + fy * sc,
-                    std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, Rgb{40, 30, 10, false});
+      drawDotText(dst, w, h, "1", 1, cx - 2 * sc, tier1Y + mn * 0.06F, sc,
+                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, Rgb{40, 30, 10, false});
       // Winner silhouette on podium.
       const float wy = tier1Y - mn * 0.10F;
       drawSeg(dst, w, h, cx, wy, cx, tier1Y, mn * 0.030F, ya, Rgb{30, 30, 60, false});
