@@ -101,6 +101,97 @@ GridFilesSource::GridFilesSource(const std::string& filename)
 
 GridFilesSource::~GridFilesSource() = default;
 
+namespace
+{
+// Resolve a message's parameter via its NAME (see indexMessages)
+int resolveMessageParamId(NFmiEnumConverter& conv, SmartMet::GRID::Message* m)
+{
+  auto tryName = [&](const char* s) -> int
+  {
+    if (s == nullptr || *s == '\0')
+      return kFmiBadParameter;
+    const int id = conv.ToEnum(s);
+    return id;
+  };
+  // Prefer the GRIB-native parameter name straight from the file (the
+  // parameterName / shortName field) — that's what tools like grib_dump
+  // report and what the file producer intended. Fall through to FMI/
+  // newbase mappings only if that doesn't resolve, since those depend on
+  // grid-files' CSV tables which can mis-map unconfigured (discipline,
+  // category, number) tuples to unrelated FMI parameters.
+  int id = tryName(m->getGribParameterName());
+  if (id == kFmiBadParameter)
+    id = tryName(m->getNewbaseParameterName());
+  if (id == kFmiBadParameter)
+    id = tryName(m->getFmiParameterName());
+  if (id == kFmiBadParameter)
+  {
+    // Last-resort fallback: numeric FMI ID. Likely wrong but at least
+    // makes the parameter pickable.
+    id = static_cast<int>(m->getFmiParameterId());
+  }
+  return id;
+}
+
+// The FMI units of the message's parameter, or an empty string
+std::string messageUnits(SmartMet::GRID::Message* m)
+{
+  if (const char* u = m->getFmiParameterUnits(); u != nullptr)
+    return u;
+  return {};
+}
+
+// The first non-empty string of the list, or an empty string
+std::string firstNonEmpty(std::initializer_list<const char*> ss)
+{
+  for (const char* s : ss)
+    if (s != nullptr && *s != '\0')
+      return s;
+  return {};
+}
+
+// Level group of one level type, values sorted naturally for the type
+DataSource::LevelGroup makeLevelGroup(int typeId, const std::set<float>& valSet)
+{
+  DataSource::LevelGroup g;
+  g.typeId = typeId;
+  g.typeName = DataSource::levelTypeName(typeId);
+  g.values.assign(valSet.begin(), valSet.end());
+  // Pressure (100) and Depth (160) are conventionally listed from the
+  // surface inward — biggest value first. Everything else (hybrid,
+  // height, altitude, flight level, hybrid 1 = surface) reads bottom
+  // -> top with increasing value.
+  g.ascendsWithValue = (typeId != 100 && typeId != 160);
+  if (!g.ascendsWithValue)
+    std::sort(g.values.begin(), g.values.end(), std::greater<float>());
+  else
+    std::sort(g.values.begin(), g.values.end());
+  return g;
+}
+
+// UTC time of a unix timestamp
+NFmiMetTime utcMetTime(long ts)
+{
+  std::tm utc{};
+  gmtime_r(&ts, &utc);
+  return NFmiMetTime(static_cast<short>(utc.tm_year + 1900),
+                     static_cast<short>(utc.tm_mon + 1),
+                     static_cast<short>(utc.tm_mday),
+                     static_cast<short>(utc.tm_hour),
+                     static_cast<short>(utc.tm_min),
+                     static_cast<short>(utc.tm_sec));
+}
+
+// Index of the group of level type typeId, or -1
+int levelGroupIndex(const std::vector<DataSource::LevelGroup>& groups, int typeId)
+{
+  for (std::size_t g = 0; g < groups.size(); ++g)
+    if (groups[g].typeId == typeId)
+      return static_cast<int>(g);
+  return -1;
+}
+}  // namespace
+
 void GridFilesSource::indexMessages()
 {
   // Resolve each message's parameter via its NAME (preferring the explicit
@@ -110,40 +201,7 @@ void GridFilesSource::indexMessages()
   // the table doesn't match, the numeric ID can collide with a totally
   // unrelated FMI parameter (e.g. Temperature ↦ RadiationOutSW2).
   NFmiEnumConverter conv;
-  auto resolveId = [&](SmartMet::GRID::Message* m) -> int
-  {
-    auto tryName = [&](const char* s) -> int
-    {
-      if (s == nullptr || *s == '\0')
-        return kFmiBadParameter;
-      const int id = conv.ToEnum(s);
-      return id;
-    };
-    // Prefer the GRIB-native parameter name straight from the file (the
-    // parameterName / shortName field) — that's what tools like grib_dump
-    // report and what the file producer intended. Fall through to FMI/
-    // newbase mappings only if that doesn't resolve, since those depend on
-    // grid-files' CSV tables which can mis-map unconfigured (discipline,
-    // category, number) tuples to unrelated FMI parameters.
-    int id = tryName(m->getGribParameterName());
-    if (id == kFmiBadParameter)
-      id = tryName(m->getNewbaseParameterName());
-    if (id == kFmiBadParameter)
-      id = tryName(m->getFmiParameterName());
-    if (id == kFmiBadParameter)
-    {
-      // Last-resort fallback: numeric FMI ID. Likely wrong but at least
-      // makes the parameter pickable.
-      id = static_cast<int>(m->getFmiParameterId());
-    }
-    return id;
-  };
-  auto resolveUnits = [](SmartMet::GRID::Message* m) -> std::string
-  {
-    if (const char* u = m->getFmiParameterUnits(); u != nullptr)
-      return u;
-    return {};
-  };
+  auto resolveId = [&](SmartMet::GRID::Message* m) { return resolveMessageParamId(conv, m); };
 
   std::map<int, std::string> idToUnits;   // remember units for each id
   std::map<int, std::string> idToNative;  // first non-empty native name
@@ -156,14 +214,6 @@ void GridFilesSource::indexMessages()
   // can never mix them.
   std::map<std::pair<int, int>, std::set<float>> perParamType;
 
-  auto firstNonEmpty = [](std::initializer_list<const char*> ss) -> std::string
-  {
-    for (const char* s : ss)
-      if (s != nullptr && *s != '\0')
-        return s;
-    return {};
-  };
-
   const std::size_t n = itsFile->getNumberOfMessages();
   for (std::size_t i = 0; i < n; ++i)
   {
@@ -172,7 +222,7 @@ void GridFilesSource::indexMessages()
     const int typeId = static_cast<int>(m->getGridParameterLevelId());
     paramSet.insert(id);
     if (idToUnits.find(id) == idToUnits.end())
-      idToUnits[id] = resolveUnits(m);
+      idToUnits[id] = messageUnits(m);
     if (idToNative.find(id) == idToNative.end())
       idToNative[id] = firstNonEmpty({m->getNewbaseParameterName(),
                                       m->getFmiParameterName(),
@@ -200,19 +250,7 @@ void GridFilesSource::indexMessages()
   {
     const int paramId = key.first;
     const int typeId = key.second;
-    LevelGroup g;
-    g.typeId = typeId;
-    g.typeName = DataSource::levelTypeName(typeId);
-    g.values.assign(valSet.begin(), valSet.end());
-    // Pressure (100) and Depth (160) are conventionally listed from the
-    // surface inward — biggest value first. Everything else (hybrid,
-    // height, altitude, flight level, hybrid 1 = surface) reads bottom
-    // -> top with increasing value.
-    g.ascendsWithValue = (typeId != 100 && typeId != 160);
-    if (!g.ascendsWithValue)
-      std::sort(g.values.begin(), g.values.end(), std::greater<float>());
-    else
-      std::sort(g.values.begin(), g.values.end());
+    LevelGroup g = makeLevelGroup(typeId, valSet);
     itsLevelGroups[paramId].push_back(std::move(g));
   }
   for (auto& [paramId, groups] : itsLevelGroups)
@@ -225,14 +263,7 @@ void GridFilesSource::indexMessages()
   itsTimes.reserve(itsTimesT.size());
   for (long ts : itsTimesT)
   {
-    std::tm utc{};
-    gmtime_r(&ts, &utc);
-    itsTimes.emplace_back(static_cast<short>(utc.tm_year + 1900),
-                          static_cast<short>(utc.tm_mon + 1),
-                          static_cast<short>(utc.tm_mday),
-                          static_cast<short>(utc.tm_hour),
-                          static_cast<short>(utc.tm_min),
-                          static_cast<short>(utc.tm_sec));
+    itsTimes.push_back(utcMetTime(ts));
   }
 
   // Build the lookup index, now keyed on (paramId, typeId, timeIdx,
@@ -255,13 +286,7 @@ void GridFilesSource::indexMessages()
     const auto gIt = itsLevelGroups.find(pId);
     if (gIt == itsLevelGroups.end())
       continue;
-    int gIdx = -1;
-    for (std::size_t g = 0; g < gIt->second.size(); ++g)
-      if (gIt->second[g].typeId == typeId)
-      {
-        gIdx = static_cast<int>(g);
-        break;
-      }
+    const int gIdx = levelGroupIndex(gIt->second, typeId);
     if (gIdx < 0)
       continue;
     const auto& vals = gIt->second[gIdx].values;
