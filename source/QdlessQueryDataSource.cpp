@@ -573,6 +573,44 @@ bool QueryDataSource::sampleVolume(const std::function<void(const VolumeSample&)
   return true;
 }
 
+namespace
+{
+// Horizontal stride keeping the cell count of an nx * ny * nz volume under
+// targetMaxCells (0 = no limit)
+std::size_t volumeStride(std::size_t fullNx,
+                         std::size_t fullNy,
+                         std::size_t nLevels,
+                         std::size_t targetMaxCells)
+{
+  std::size_t stride = 1;
+  if (targetMaxCells > 0)
+  {
+    const double full = static_cast<double>(fullNx) * fullNy * nLevels;
+    if (full > static_cast<double>(targetMaxCells))
+      stride = static_cast<std::size_t>(std::ceil(std::sqrt(full / targetMaxCells)));
+    stride = std::max<std::size_t>(stride, 1);
+  }
+  return stride;
+}
+
+// Call store(j2, i2, value) for every valid value of the current param and
+// level on the strided nx * ny lattice; srcLoc maps (i2, j2) to the location index
+template <typename SrcLoc, typename Store>
+void forStridedValues(
+    NFmiFastQueryInfo& info, std::size_t nx, std::size_t ny, SrcLoc&& srcLoc, Store&& store)
+{
+  for (std::size_t j2 = 0; j2 < ny; ++j2)
+    for (std::size_t i2 = 0; i2 < nx; ++i2)
+    {
+      info.LocationIndex(static_cast<unsigned long>(srcLoc(i2, j2)));
+      const float val = info.FloatValue();
+      if (val == kFloatMissing || !std::isfinite(val))
+        continue;
+      store(j2, i2, val);
+    }
+}
+}  // namespace
+
 bool QueryDataSource::sampleVolumeGrid(std::size_t& nx,
                                        std::size_t& ny,
                                        std::size_t& nz,
@@ -597,14 +635,7 @@ bool QueryDataSource::sampleVolumeGrid(std::size_t& nx,
   // merge-tree cost (and this read) scale with the cell count, so on a big
   // hybrid volume a stride of a few keeps the extrema view interactive.
   // Vertical resolution is preserved (levels carry the air-mass structure).
-  std::size_t stride = 1;
-  if (targetMaxCells > 0)
-  {
-    const double full = static_cast<double>(fullNx) * fullNy * nLevels;
-    if (full > static_cast<double>(targetMaxCells))
-      stride = static_cast<std::size_t>(std::ceil(std::sqrt(full / targetMaxCells)));
-    stride = std::max<std::size_t>(stride, 1);
-  }
+  const std::size_t stride = volumeStride(fullNx, fullNy, nLevels, targetMaxCells);
   nx = (fullNx + stride - 1) / stride;
   ny = (fullNy + stride - 1) / stride;
   nz = nLevels;
@@ -650,19 +681,18 @@ bool QueryDataSource::sampleVolumeGrid(std::size_t& nx,
     {
       itsInfo->ParamIndex(pass == 0 ? heightParamIndex : savedParam);
       itsInfo->LevelIndex(static_cast<unsigned long>(li));
-      for (std::size_t j2 = 0; j2 < ny; ++j2)
-        for (std::size_t i2 = 0; i2 < nx; ++i2)
-        {
-          itsInfo->LocationIndex(static_cast<unsigned long>(srcLoc(i2, j2)));
-          const float val = itsInfo->FloatValue();
-          if (val == kFloatMissing || !std::isfinite(val))
-            continue;
-          const std::size_t d = base + j2 * nx + i2;
-          if (pass == 0)
-            heights[d] = static_cast<float>(val * heightScale);
-          else
-            values[d] = val;
-        }
+      forStridedValues(*itsInfo,
+                       nx,
+                       ny,
+                       srcLoc,
+                       [&](std::size_t j2, std::size_t i2, float val)
+                       {
+                         const std::size_t d = base + j2 * nx + i2;
+                         if (pass == 0)
+                           heights[d] = static_cast<float>(val * heightScale);
+                         else
+                           values[d] = val;
+                       });
     }
   }
 
