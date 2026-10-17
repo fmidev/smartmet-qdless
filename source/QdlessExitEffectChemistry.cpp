@@ -135,6 +135,359 @@ void effectBuckyball(const Renderer& renderer, const std::vector<Rgb>& src, int 
             });
 }
 
+namespace
+{
+// Clamp a channel value to 0..255
+std::uint8_t clampU8(float v)
+{
+  return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F));
+}
+
+// Fill the rectangle x0..x1, y0..y1 clipped to the image
+void fillClippedBox(std::vector<Rgb>& dst, int w, int h, int x0, int x1, int y0, int y1, const Rgb& c)
+{
+  for (int yy = y0; yy <= y1; ++yy)
+    for (int xx = x0; xx <= x1; ++xx)
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = c;
+}
+
+// Number of characters in a one- or two-letter element symbol
+int symbolLength(const char* sym)
+{
+  return sym[0] == '\0' ? 0 : (sym[1] == '\0' ? 1 : 2);
+}
+
+// One periodic table cell: data-tinted square with the element symbol
+void drawElementCell(std::vector<Rgb>& dst,
+                     const std::vector<Rgb>& src,
+                     int w,
+                     int h,
+                     float ya,
+                     const char* sym,
+                     float xa,
+                     float yya,
+                     float cellW,
+                     float cellH)
+{
+  const float xb = xa + cellW * 0.94F;
+  const float yyb = yya + cellH * 0.94F;
+  // Tint: sample the data at the cell's anchor and blend with
+  // a per-group hue.
+  const Rgb d = sample(src, w, h, (xa + xb) * 0.5F, (yya + yyb) * 0.5F);
+  const float dr = d.transparent ? 80.0F : d.r;
+  const float dg = d.transparent ? 80.0F : d.g;
+  const float db = d.transparent ? 120.0F : d.b;
+  const Rgb fill{clampU8(80 + dr * 0.45F), clampU8(80 + dg * 0.45F), clampU8(110 + db * 0.40F),
+                 false};
+  fillClippedBox(dst, w, h, static_cast<int>(xa), static_cast<int>(xb), static_cast<int>(yya),
+                 static_cast<int>(yyb), fill);
+  // Symbol text (1-2 chars).
+  const int sc = std::max(1, static_cast<int>(cellW / 14.0F));
+  drawDotText(dst, w, h, sym, symbolLength(sym), xa + cellW * 0.15F, yya + cellH * 0.25F, sc,
+              std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, Rgb{240, 240, 240, false});
+}
+
+// Teardrop flame above the burner: the data sampled inside, tinted with flameCol
+void drawTintedFlame(std::vector<Rgb>& dst,
+                     const std::vector<Rgb>& src,
+                     int w,
+                     int h,
+                     float burnerCx,
+                     float burnerTop,
+                     float flameH,
+                     float flameW,
+                     float t,
+                     const Rgb& flameCol)
+{
+  for (int yy = static_cast<int>(burnerTop - flameH); yy < static_cast<int>(burnerTop); ++yy)
+  {
+    const float yf = (burnerTop - yy) / flameH;  // 0 at base, 1 at tip
+    const float half = flameW * std::sin(yf * 3.14159F) * (0.9F + 0.1F * std::sin(t * 30.0F + yf * 6.0F));
+    for (int xo = -static_cast<int>(half); xo <= static_cast<int>(half); ++xo)
+    {
+      const int xx = static_cast<int>(burnerCx + xo);
+      if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 100.0F : d.r;
+      const float dg = d.transparent ? 100.0F : d.g;
+      const float db = d.transparent ? 100.0F : d.b;
+      const float mix = 0.60F;
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          Rgb{clampU8(flameCol.r * mix + dr * (1 - mix) * 0.7F),
+              clampU8(flameCol.g * mix + dg * (1 - mix) * 0.7F),
+              clampU8(flameCol.b * mix + db * (1 - mix) * 0.7F), false};
+    }
+  }
+}
+
+// pH strip colour at relative height yf: the dye ramp below the dye front, pale paper above
+Rgb phStripTint(const std::array<Rgb, 7>& ramp, float yy, float yf, float dyeFront)
+{
+  if (yy > dyeFront)
+  {
+    const float seg = yf * 6.0F;
+    const int i = std::clamp(static_cast<int>(seg), 0, 5);
+    const float f = seg - i;
+    const Rgb& a = ramp[i];
+    const Rgb& b = ramp[i + 1];
+    return Rgb{clampU8(a.r + (b.r - a.r) * f), clampU8(a.g + (b.g - a.g) * f),
+               clampU8(a.b + (b.b - a.b) * f), false};
+  }
+  return Rgb{240, 232, 200, false};
+}
+
+// Darken the paper below the wavy solvent front
+void drawSolventFront(std::vector<Rgb>& dst,
+                      int w,
+                      int h,
+                      float paperLeft,
+                      float paperRight,
+                      float frontY,
+                      float startY,
+                      float t,
+                      float mn)
+{
+  for (int x = static_cast<int>(paperLeft); x <= static_cast<int>(paperRight); ++x)
+  {
+    const float yf = frontY + std::sin(x * 0.4F + t * 5.0F) * mn * 0.005F;
+    for (int yy = static_cast<int>(yf); yy <= static_cast<int>(startY); ++yy)
+      if (yy >= 0 && yy < h)
+      {
+        Rgb& c = dst[static_cast<std::size_t>(yy) * w + x];
+        c = Rgb{clampU8(c.r * 0.8F), clampU8(c.g * 0.85F), clampU8(c.b * 0.95F + 30), false};
+      }
+  }
+}
+
+// One vertical slice of the glow stick tube, glowing with the data once activated
+void drawTubeColumn(std::vector<Rgb>& dst,
+                    const std::vector<Rgb>& src,
+                    int w,
+                    int h,
+                    float xx,
+                    float yLo,
+                    float yHi,
+                    bool inGlow)
+{
+  for (int iy = static_cast<int>(yLo); iy <= static_cast<int>(yHi); ++iy)
+  {
+    if (iy < 0 || iy >= h) continue;
+    const int ix = static_cast<int>(xx);
+    if (ix < 0 || ix >= w) continue;
+    if (inGlow)
+    {
+      const Rgb d = sample(src, w, h, xx, iy);
+      const float dg = d.transparent ? 200.0F : d.g;
+      dst[static_cast<std::size_t>(iy) * w + ix] =
+          Rgb{clampU8(120 + dg * 0.20F), clampU8(255), clampU8(140 + dg * 0.20F), false};
+    }
+    else
+    {
+      dst[static_cast<std::size_t>(iy) * w + ix] = Rgb{200, 200, 210, false};
+    }
+  }
+}
+
+// Data-filled cola bottle widening downwards, with its red cap
+void drawColaBottle(std::vector<Rgb>& dst,
+                    const std::vector<Rgb>& src,
+                    int w,
+                    int h,
+                    float cxw,
+                    float bottleTop,
+                    float bottleBot,
+                    float mn)
+{
+  for (int yy = static_cast<int>(bottleTop); yy <= static_cast<int>(bottleBot); ++yy)
+  {
+    const float yf = (yy - bottleTop) / (bottleBot - bottleTop);
+    const int half = static_cast<int>(mn * (0.05F + 0.04F * yf));
+    for (int xo = -half; xo <= half; ++xo)
+    {
+      const int xx = static_cast<int>(cxw + xo);
+      if (xx < 0 || xx >= w || yy >= h) continue;
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 90.0F : d.r;
+      const float dg = d.transparent ? 40.0F : d.g;
+      const float db = d.transparent ? 30.0F : d.b;
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          Rgb{clampU8(90 + dr * 0.30F), clampU8(40 + dg * 0.20F), clampU8(30 + db * 0.15F), false};
+    }
+  }
+  // Bottle cap.
+  for (int yy = static_cast<int>(bottleTop - mn * 0.04F); yy < static_cast<int>(bottleTop);
+       ++yy)
+  {
+    const int half = static_cast<int>(mn * 0.04F);
+    for (int xo = -half; xo <= half; ++xo)
+    {
+      const int xx = static_cast<int>(cxw + xo);
+      if (xx >= 0 && xx < w && yy >= 0)
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{160, 30, 30, false};
+    }
+  }
+}
+
+// Foam fountain erupting from the bottle mouth, ft = 0..1
+template <typename Hash>
+void drawFoamFountain(std::vector<Rgb>& dst,
+                      const std::vector<Rgb>& src,
+                      int w,
+                      int h,
+                      float cxw,
+                      float bottleTop,
+                      float ft,
+                      float t,
+                      float mn,
+                      float ya,
+                      Hash&& hash)
+{
+  const Rgb foam{220, 220, 230, false};
+  for (int i = 0; i < 40; ++i)
+  {
+    const float ph = hash(i) * 6.2832F;
+    const float vx = std::cos(ph) * mn * 0.04F;
+    const float vy = -mn * (0.20F + hash(i * 3) * 0.30F);
+    const float fx = cxw + vx * ft * 5.0F;
+    const float fy = bottleTop + vy * ft + 9.8F * mn * 0.5F * ft * ft;
+    if (fy < bottleTop + mn * 0.05F)
+      drawDataDisk(dst, w, h, src, fx, fy, mn * 0.015F, ya, 0.85F, t + i, foam);
+  }
+}
+
+// A pale sign centred on (cxw, signY) carrying the line of text
+void drawSign(std::vector<Rgb>& dst,
+              int w,
+              int h,
+              const std::string& line,
+              float cxw,
+              float signY,
+              int sc,
+              float ya)
+{
+  const float lineW = static_cast<float>(line.size()) * 6 * sc;
+  const float signX = cxw - lineW * 0.5F;
+  for (int xo = -static_cast<int>(lineW * 0.55F); xo <= static_cast<int>(lineW * 0.55F); ++xo)
+    for (int yo = -static_cast<int>(sc * 5); yo <= static_cast<int>(sc * 5); ++yo)
+    {
+      const int xx = static_cast<int>(cxw + xo);
+      const int yy = static_cast<int>(signY + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{240, 235, 200, false};
+    }
+  drawDotText(dst, w, h, line.c_str(), static_cast<int>(line.size()), signX, signY - sc * 3, sc,
+              std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, Rgb{40, 30, 20, false});
+}
+
+// Two vertical electrode bars at cxl and cxr from 20% height down to botY
+void drawElectrodes(std::vector<Rgb>& dst, int w, int h, float cxl, float cxr, float botY)
+{
+  for (int yy = static_cast<int>(h * 0.20F); yy <= static_cast<int>(botY); ++yy)
+  {
+    for (int xo = -2; xo <= 2; ++xo)
+    {
+      const int xL = static_cast<int>(cxl + xo);
+      const int xR = static_cast<int>(cxr + xo);
+      if (yy >= 0 && yy < h)
+      {
+        if (xL >= 0 && xL < w) dst[static_cast<std::size_t>(yy) * w + xL] = Rgb{220, 220, 220, false};
+        if (xR >= 0 && xR < w) dst[static_cast<std::size_t>(yy) * w + xR] = Rgb{220, 220, 220, false};
+      }
+    }
+  }
+}
+
+// n gas bubbles rising from the electrode at cx; the seeds pick the hash streams
+template <typename Hash>
+void drawElectrodeBubbles(std::vector<Rgb>& dst,
+                          const std::vector<Rgb>& src,
+                          int w,
+                          int h,
+                          int n,
+                          int lifeSeed,
+                          int xSeed,
+                          float cx,
+                          float botY,
+                          float t,
+                          float mn,
+                          float ya,
+                          Hash&& hash)
+{
+  for (int i = 0; i < n; ++i)
+  {
+    const float lifetime = hash(i * lifeSeed) * 2.0F;
+    const float bt = std::fmod(t + lifetime, 1.0F);
+    const float bx = cx + (hash(i * xSeed) - 0.5F) * mn * 0.04F;
+    const float by = botY - bt * (botY - h * 0.15F);
+    drawDataDisk(dst, w, h, src, bx, by, mn * 0.014F, ya, 0.50F, t + i,
+                 Rgb{220, 220, 240, false});
+  }
+}
+
+// The '-' label above the cathode at cxl and '+' above the anode at cxr
+void drawElectrodeLabels(std::vector<Rgb>& dst, int w, int h, float cxl, float cxr, float mn, float ya)
+{
+  const int sc = std::max(2, static_cast<int>(mn / 40.0F));
+  const auto gp = glyph5x7('+');
+  const auto gm = glyph5x7('-');
+  for (int fy = 0; fy < 7; ++fy)
+    for (int fx = 0; fx < 5; ++fx)
+    {
+      if (gm[fy][fx] == '1')
+        plotDot(dst, w, h, cxl + (fx - 2.5F) * sc, h * 0.10F + fy * sc,
+                std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                Rgb{240, 240, 240, false});
+      if (gp[fy][fx] == '1')
+        plotDot(dst, w, h, cxr + (fx - 2.5F) * sc, h * 0.10F + fy * sc,
+                std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                Rgb{240, 240, 240, false});
+    }
+}
+
+// Soap bubble interior: sampled data with iridescent fringes, fading as it pops
+void drawSoapFilm(std::vector<Rgb>& dst,
+                  const std::vector<Rgb>& src,
+                  int w,
+                  int h,
+                  float cx,
+                  float cy,
+                  float R,
+                  float pop,
+                  float t,
+                  float mn,
+                  float ya)
+{
+  for (int yy = static_cast<int>(cy - R / ya); yy <= static_cast<int>(cy + R / ya); ++yy)
+  {
+    if (yy < 0 || yy >= h) continue;
+    for (int xx = static_cast<int>(cx - R); xx <= static_cast<int>(cx + R); ++xx)
+    {
+      if (xx < 0 || xx >= w) continue;
+      const float dx = xx - cx;
+      const float dy = (yy - cy) * ya;
+      const float r = std::hypot(dx, dy);
+      if (r > R) continue;
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 200.0F : d.r;
+      const float dg = d.transparent ? 200.0F : d.g;
+      const float db = d.transparent ? 220.0F : d.b;
+      const float fringe = std::sin(r / mn * 30.0F + t * 6.0F);
+      const float hue = fringe * 0.5F + 0.5F;
+      const float fr = (std::sin(hue * 6.2832F) + 1) * 60;
+      const float fg = (std::sin(hue * 6.2832F + 2.094F) + 1) * 60;
+      const float fb = (std::sin(hue * 6.2832F + 4.189F) + 1) * 60;
+      const float edge = 1.0F - std::clamp((R - r) / (R * 0.20F), 0.0F, 1.0F);
+      const float alpha = 1.0F - pop;
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          Rgb{clampU8((dr * 0.55F + fr + edge * 80) * alpha + dr * (1 - alpha)),
+              clampU8((dg * 0.55F + fg + edge * 80) * alpha + dg * (1 - alpha)),
+              clampU8((db * 0.55F + fb + edge * 80) * alpha + db * (1 - alpha)), false};
+    }
+  }
+}
+}  // namespace
+
 void effectPeriodicTable(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
@@ -155,14 +508,10 @@ void effectPeriodicTable(const Renderer& renderer, const std::vector<Rgb>& src, 
             [&](float t, std::vector<Rgb>& dst)
             {
               const float dim = 0.10F;
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      s.transparent ? Rgb{16, 16, 22, false}
-                                    : Rgb{u8(s.r * dim), u8(s.g * dim + 4), u8(s.b * dim + 8), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                return s.transparent ? Rgb{16, 16, 22, false}
+                                           : Rgb{u8(s.r * dim), u8(s.g * dim + 4), u8(s.b * dim + 8), false};
+              });
               const float cellW = std::min(w * 0.9F / kCols, h * 0.78F / kRows);
               const float cellH = cellW;
               const float startX = (w - cellW * kCols) * 0.5F;
@@ -176,35 +525,8 @@ void effectPeriodicTable(const Renderer& renderer, const std::vector<Rgb>& src, 
                   if (idx >= revealed) continue;
                   const char* sym = kSyms[r][c];
                   if (sym[0] == '\0') continue;
-                  const float xa = startX + c * cellW;
-                  const float xb = xa + cellW * 0.94F;
-                  const float yya = startY + r * cellH;
-                  const float yyb = yya + cellH * 0.94F;
-                  // Tint: sample the data at the cell's anchor and blend with
-                  // a per-group hue.
-                  const Rgb d = sample(src, w, h, (xa + xb) * 0.5F, (yya + yyb) * 0.5F);
-                  const float dr = d.transparent ? 80.0F : d.r;
-                  const float dg = d.transparent ? 80.0F : d.g;
-                  const float db = d.transparent ? 120.0F : d.b;
-                  const Rgb fill{u8(80 + dr * 0.45F), u8(80 + dg * 0.45F), u8(110 + db * 0.40F),
-                                 false};
-                  for (int yy = static_cast<int>(yya); yy <= static_cast<int>(yyb); ++yy)
-                    for (int xx = static_cast<int>(xa); xx <= static_cast<int>(xb); ++xx)
-                      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                        dst[static_cast<std::size_t>(yy) * w + xx] = fill;
-                  // Symbol text (1-2 chars).
-                  const int sc = std::max(1, static_cast<int>(cellW / 14.0F));
-                  for (int ci = 0; ci < 2 && sym[ci]; ++ci)
-                  {
-                    const auto g = glyph5x7(sym[ci]);
-                    for (int fy = 0; fy < 7; ++fy)
-                      for (int fx = 0; fx < 5; ++fx)
-                        if (g[fy][fx] == '1')
-                          plotDot(dst, w, h, xa + cellW * 0.15F + (ci * 6 + fx) * sc,
-                                  yya + cellH * 0.25F + fy * sc,
-                                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                                  Rgb{240, 240, 240, false});
-                  }
+                  drawElementCell(dst, src, w, h, ya, sym, startX + c * cellW, startY + r * cellH,
+                                  cellW, cellH);
                 }
             });
 }
@@ -213,7 +535,6 @@ void effectFlameTest(const Renderer& renderer, const std::vector<Rgb>& src, int 
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   static const std::array<Rgb, 5> kFlames = {Rgb{230, 60, 70, false},
                                              Rgb{255, 220, 60, false},
                                              Rgb{200, 100, 220, false},
@@ -224,61 +545,27 @@ void effectFlameTest(const Renderer& renderer, const std::vector<Rgb>& src, int 
       renderer, w, h, 5600,
       [&](float t, std::vector<Rgb>& dst)
       {
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-            dst[static_cast<std::size_t>(y) * w + x] = Rgb{12, 14, 22, false};
+        std::fill(dst.begin(), dst.end(), Rgb{12, 14, 22, false});
         const int stage = std::min(4, static_cast<int>(t * 5.0F));
         const float local = t * 5.0F - stage;
         const Rgb& flameCol = kFlames[stage];
         const float burnerCx = w * 0.5F;
         const float burnerTop = h * 0.78F;
         // Burner shaft
-        for (int yy = static_cast<int>(burnerTop); yy <= static_cast<int>(h * 0.95F); ++yy)
-        {
-          const int half = static_cast<int>(mn * 0.020F);
-          for (int xo = -half; xo <= half; ++xo)
-          {
-            const int xx = static_cast<int>(burnerCx + xo);
-            if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-              dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{60, 60, 70, false};
-          }
-        }
+        const int half = static_cast<int>(mn * 0.020F);
+        fillClippedBox(dst, w, h, static_cast<int>(burnerCx - half), static_cast<int>(burnerCx + half),
+                       static_cast<int>(burnerTop), static_cast<int>(h * 0.95F),
+                       Rgb{60, 60, 70, false});
         // Flame: a teardrop shape with the data sampled inside and tinted.
         const float flameH = mn * 0.50F;
         const float flameW = mn * 0.18F;
-        for (int yy = static_cast<int>(burnerTop - flameH); yy < static_cast<int>(burnerTop); ++yy)
-        {
-          const float yf = (burnerTop - yy) / flameH;  // 0 at base, 1 at tip
-          const float half = flameW * std::sin(yf * 3.14159F) * (0.9F + 0.1F * std::sin(t * 30.0F + yf * 6.0F));
-          for (int xo = -static_cast<int>(half); xo <= static_cast<int>(half); ++xo)
-          {
-            const int xx = static_cast<int>(burnerCx + xo);
-            if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-            const Rgb d = sample(src, w, h, xx, yy);
-            const float dr = d.transparent ? 100.0F : d.r;
-            const float dg = d.transparent ? 100.0F : d.g;
-            const float db = d.transparent ? 100.0F : d.b;
-            const float mix = 0.60F;
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(flameCol.r * mix + dr * (1 - mix) * 0.7F),
-                    u8(flameCol.g * mix + dg * (1 - mix) * 0.7F),
-                    u8(flameCol.b * mix + db * (1 - mix) * 0.7F), false};
-          }
-        }
+        drawTintedFlame(dst, src, w, h, burnerCx, burnerTop, flameH, flameW, t, flameCol);
         // Label
         const std::string lab(kLabels[stage]);
         const int sc = std::max(3, static_cast<int>(mn / 25.0F));
         const float lineW = static_cast<float>(lab.size()) * 6 * sc;
-        for (int ci = 0; ci < static_cast<int>(lab.size()); ++ci)
-        {
-          const auto g = glyph5x7(lab[ci]);
-          for (int fy = 0; fy < 7; ++fy)
-            for (int fx = 0; fx < 5; ++fx)
-              if (g[fy][fx] == '1')
-                plotDot(dst, w, h, burnerCx - lineW * 0.5F + (ci * 6 + fx) * sc,
-                        h * 0.12F + fy * sc, std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                        flameCol);
-        }
+        drawDotText(dst, w, h, lab.c_str(), static_cast<int>(lab.size()), burnerCx - lineW * 0.5F,
+                    h * 0.12F, sc, std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, flameCol);
         (void)local;
       });
 }
@@ -329,22 +616,12 @@ void effectLavaLamp(const Renderer& renderer, const std::vector<Rgb>& src, int w
                 drawDataDisk(dst, w, h, src, bx, by, bR, ya, 0.85F, t * 0.5F + i, wax);
               }
               // Lamp cap + base.
-              for (int yy = 0; yy <= static_cast<int>(mn * 0.03F); ++yy)
-              {
-                const int xa = static_cast<int>(cxw - lampW * 1.05F);
-                const int xb = static_cast<int>(cxw + lampW * 1.05F);
-                for (int xx = xa; xx <= xb; ++xx)
-                  if (xx >= 0 && xx < w && yy < h)
-                    dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{60, 50, 40, false};
-              }
-              for (int yy = h - static_cast<int>(mn * 0.04F); yy < h; ++yy)
-              {
-                const int xa = static_cast<int>(cxw - lampW * 1.05F);
-                const int xb = static_cast<int>(cxw + lampW * 1.05F);
-                for (int xx = xa; xx <= xb; ++xx)
-                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                    dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{60, 50, 40, false};
-              }
+              const int xa = static_cast<int>(cxw - lampW * 1.05F);
+              const int xb = static_cast<int>(cxw + lampW * 1.05F);
+              fillClippedBox(dst, w, h, xa, xb, 0, static_cast<int>(mn * 0.03F),
+                             Rgb{60, 50, 40, false});
+              fillClippedBox(dst, w, h, xa, xb, h - static_cast<int>(mn * 0.04F), h - 1,
+                             Rgb{60, 50, 40, false});
             });
 }
 
@@ -433,14 +710,10 @@ void effectPhStrip(const Renderer& renderer, const std::vector<Rgb>& src, int w,
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(40 + l * 0.20F), u8(40 + l * 0.20F), u8(48 + l * 0.20F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(40 + l * 0.20F), u8(40 + l * 0.20F), u8(48 + l * 0.20F), false};
+              });
               const float cxw = w * 0.5F;
               const float stripW = mn * 0.18F;
               const float stripTop = h * 0.10F;
@@ -450,21 +723,7 @@ void effectPhStrip(const Renderer& renderer, const std::vector<Rgb>& src, int w,
               {
                 // Strip colour: dyed below dyeFront, pale above.
                 const float yf = (yy - stripTop) / (stripBot - stripTop);
-                Rgb tint;
-                if (static_cast<float>(yy) > dyeFront)
-                {
-                  const float seg = yf * 6.0F;
-                  const int i = std::clamp(static_cast<int>(seg), 0, 5);
-                  const float f = seg - i;
-                  const Rgb& a = kRamp[i];
-                  const Rgb& b = kRamp[i + 1];
-                  tint = Rgb{u8(a.r + (b.r - a.r) * f), u8(a.g + (b.g - a.g) * f),
-                             u8(a.b + (b.b - a.b) * f), false};
-                }
-                else
-                {
-                  tint = Rgb{240, 232, 200, false};
-                }
+                const Rgb tint = phStripTint(kRamp, static_cast<float>(yy), yf, dyeFront);
                 for (int xo = -static_cast<int>(stripW * 0.5F);
                      xo <= static_cast<int>(stripW * 0.5F); ++xo)
                 {
@@ -497,37 +756,21 @@ void effectChromatography(const Renderer& renderer, const std::vector<Rgb>& src,
               const float paperRight = w * 0.70F;
               const float paperTop = h * 0.05F;
               const float paperBot = h * 0.92F;
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const bool onPaper = x >= paperLeft && x <= paperRight && y >= paperTop &&
-                                       y <= paperBot;
-                  const Rgb d = sample(src, w, h, x, y);
-                  const float dr = d.transparent ? 220.0F : d.r;
-                  const float dg = d.transparent ? 220.0F : d.g;
-                  const float db = d.transparent ? 200.0F : d.b;
-                  if (onPaper)
-                    dst[static_cast<std::size_t>(y) * w + x] =
-                        Rgb{u8(220 + dr * 0.10F), u8(212 + dg * 0.10F),
-                            u8(190 + db * 0.10F), false};
-                  else
-                    dst[static_cast<std::size_t>(y) * w + x] =
-                        Rgb{u8(30 + dr * 0.10F), u8(30 + dg * 0.10F),
-                            u8(38 + db * 0.10F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& /*s*/, int x, int y) {
+                const bool onPaper = x >= paperLeft && x <= paperRight && y >= paperTop &&
+                                     y <= paperBot;
+                const Rgb d = sample(src, w, h, x, y);
+                const float dr = d.transparent ? 220.0F : d.r;
+                const float dg = d.transparent ? 220.0F : d.g;
+                const float db = d.transparent ? 200.0F : d.b;
+                if (onPaper)
+                  return Rgb{u8(220 + dr * 0.10F), u8(212 + dg * 0.10F), u8(190 + db * 0.10F), false};
+                return Rgb{u8(30 + dr * 0.10F), u8(30 + dg * 0.10F), u8(38 + db * 0.10F), false};
+              });
               // Solvent front rises from the bottom.
               const float startY = paperBot - mn * 0.04F;
               const float frontY = startY - (startY - paperTop) * std::clamp(t * 1.1F, 0.0F, 1.0F);
-              for (int x = static_cast<int>(paperLeft); x <= static_cast<int>(paperRight); ++x)
-              {
-                const float yf = frontY + std::sin(x * 0.4F + t * 5.0F) * mn * 0.005F;
-                for (int yy = static_cast<int>(yf); yy <= static_cast<int>(startY); ++yy)
-                  if (yy >= 0 && yy < h)
-                  {
-                    Rgb& c = dst[static_cast<std::size_t>(yy) * w + x];
-                    c = Rgb{u8(c.r * 0.8F), u8(c.g * 0.85F), u8(c.b * 0.95F + 30), false};
-                  }
-              }
+              drawSolventFront(dst, w, h, paperLeft, paperRight, frontY, startY, t, mn);
               // Three dye spots, each with its own Rf.
               static const std::array<Rgb, 3> kDyes = {Rgb{200, 30, 30, false},
                                                        Rgb{220, 200, 30, false},
@@ -675,15 +918,11 @@ void effectGlowStick(const Renderer& renderer, const std::vector<Rgb>& src, int 
             [&](float t, std::vector<Rgb>& dst)
             {
               const float dim = 0.15F;
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(14 + l * 0.06F * dim), u8(18 + l * 0.08F * dim),
-                          u8(20 + l * 0.06F * dim), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(14 + l * 0.06F * dim), u8(18 + l * 0.08F * dim),
+                           u8(20 + l * 0.06F * dim), false};
+              });
               const float midY = h * 0.5F;
               const float tubeLen = w * 0.7F;
               const float tubeR = mn * 0.04F;
@@ -700,23 +939,7 @@ void effectGlowStick(const Renderer& renderer, const std::vector<Rgb>& src, int 
                 const float yLo = yy - tubeR;
                 const float yHi = yy + tubeR;
                 const bool inGlow = std::fabs(xx - snapX) / L < spread;
-                for (int iy = static_cast<int>(yLo); iy <= static_cast<int>(yHi); ++iy)
-                {
-                  if (iy < 0 || iy >= h) continue;
-                  const int ix = static_cast<int>(xx);
-                  if (ix < 0 || ix >= w) continue;
-                  if (inGlow)
-                  {
-                    const Rgb d = sample(src, w, h, xx, iy);
-                    const float dg = d.transparent ? 200.0F : d.g;
-                    dst[static_cast<std::size_t>(iy) * w + ix] =
-                        Rgb{u8(120 + dg * 0.20F), u8(255), u8(140 + dg * 0.20F), false};
-                  }
-                  else
-                  {
-                    dst[static_cast<std::size_t>(iy) * w + ix] = Rgb{200, 200, 210, false};
-                  }
-                }
+                drawTubeColumn(dst, src, w, h, xx, yLo, yHi, inGlow);
               }
             });
 }
@@ -731,46 +954,15 @@ void effectMentos(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(16 + l * 0.10F), u8(20 + l * 0.10F), u8(24 + l * 0.10F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(16 + l * 0.10F), u8(20 + l * 0.10F), u8(24 + l * 0.10F), false};
+              });
               const float cxw = w * 0.5F;
               const float bottleTop = h * 0.40F;
               const float bottleBot = h * 0.92F;
-              // Bottle body (data-filled).
-              for (int yy = static_cast<int>(bottleTop); yy <= static_cast<int>(bottleBot); ++yy)
-              {
-                const float yf = (yy - bottleTop) / (bottleBot - bottleTop);
-                const int half = static_cast<int>(mn * (0.05F + 0.04F * yf));
-                for (int xo = -half; xo <= half; ++xo)
-                {
-                  const int xx = static_cast<int>(cxw + xo);
-                  if (xx < 0 || xx >= w || yy >= h) continue;
-                  const Rgb d = sample(src, w, h, xx, yy);
-                  const float dr = d.transparent ? 90.0F : d.r;
-                  const float dg = d.transparent ? 40.0F : d.g;
-                  const float db = d.transparent ? 30.0F : d.b;
-                  dst[static_cast<std::size_t>(yy) * w + xx] =
-                      Rgb{u8(90 + dr * 0.30F), u8(40 + dg * 0.20F), u8(30 + db * 0.15F), false};
-                }
-              }
-              // Bottle cap.
-              for (int yy = static_cast<int>(bottleTop - mn * 0.04F); yy < static_cast<int>(bottleTop);
-                   ++yy)
-              {
-                const int half = static_cast<int>(mn * 0.04F);
-                for (int xo = -half; xo <= half; ++xo)
-                {
-                  const int xx = static_cast<int>(cxw + xo);
-                  if (xx >= 0 && xx < w && yy >= 0)
-                    dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{160, 30, 30, false};
-                }
-              }
+              // Bottle body (data-filled) and cap.
+              drawColaBottle(dst, src, w, h, cxw, bottleTop, bottleBot, mn);
               // Drop a few Mentos in early.
               if (t < 0.25F)
               {
@@ -783,20 +975,8 @@ void effectMentos(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
               }
               // Erupting foam fountain.
               if (t > 0.25F)
-              {
-                const float ft = (t - 0.25F) / 0.75F;
-                const Rgb foam{220, 220, 230, false};
-                for (int i = 0; i < 40; ++i)
-                {
-                  const float ph = hash(i) * 6.2832F;
-                  const float vx = std::cos(ph) * mn * 0.04F;
-                  const float vy = -mn * (0.20F + hash(i * 3) * 0.30F);
-                  const float fx = cxw + vx * ft * 5.0F;
-                  const float fy = bottleTop + vy * ft + 9.8F * mn * 0.5F * ft * ft;
-                  if (fy < bottleTop + mn * 0.05F)
-                    drawDataDisk(dst, w, h, src, fx, fy, mn * 0.015F, ya, 0.85F, t + i, foam);
-                }
-              }
+                drawFoamFountain(dst, src, w, h, cxw, bottleTop, (t - 0.25F) / 0.75F, t, mn, ya,
+                                 hash);
             });
 }
 
@@ -808,21 +988,15 @@ void effectAvogadro(const Renderer& renderer, const std::vector<Rgb>& src, int w
   runFrames(renderer, w, h, 5200,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  const float sf = static_cast<float>(y) / h;
-                  if (y > h * 0.78F)
-                    dst[static_cast<std::size_t>(y) * w + x] =
-                        Rgb{u8(80 + l * 0.10F), u8(60 + l * 0.08F), u8(40 + l * 0.06F), false};
-                  else
-                    dst[static_cast<std::size_t>(y) * w + x] =
-                        Rgb{u8(140 + 50 * (1 - sf) + l * 0.10F),
-                            u8(180 + 50 * (1 - sf) + l * 0.10F),
-                            u8(220 - 30 * sf + l * 0.10F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int /*x*/, int y) {
+                const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                const float sf = static_cast<float>(y) / h;
+                if (y > h * 0.78F)
+                  return Rgb{u8(80 + l * 0.10F), u8(60 + l * 0.08F), u8(40 + l * 0.06F), false};
+                return Rgb{u8(140 + 50 * (1 - sf) + l * 0.10F),
+                           u8(180 + 50 * (1 - sf) + l * 0.10F),
+                           u8(220 - 30 * sf + l * 0.10F), false};
+              });
               const float groundY = h * 0.78F;
               const float cxw = w * 0.5F;
               // Hole — dark ellipse.
@@ -844,29 +1018,7 @@ void effectAvogadro(const Renderer& renderer, const std::vector<Rgb>& src, int w
               {
                 const std::string line = "6.022 X 10^23";
                 const int sc = std::max(2, static_cast<int>(mn / 60.0F));
-                const float lineW = static_cast<float>(line.size()) * 6 * sc;
-                const float signX = cxw - lineW * 0.5F;
-                const float signY = my - mn * 0.20F;
-                for (int xo = -static_cast<int>(lineW * 0.55F);
-                     xo <= static_cast<int>(lineW * 0.55F); ++xo)
-                  for (int yo = -static_cast<int>(sc * 5); yo <= static_cast<int>(sc * 5); ++yo)
-                  {
-                    const int xx = static_cast<int>(cxw + xo);
-                    const int yy = static_cast<int>(signY + yo);
-                    if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                      dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{240, 235, 200, false};
-                  }
-                for (int ci = 0; ci < static_cast<int>(line.size()); ++ci)
-                {
-                  const auto g = glyph5x7(line[ci]);
-                  for (int fy = 0; fy < 7; ++fy)
-                    for (int fx = 0; fx < 5; ++fx)
-                      if (g[fy][fx] == '1')
-                        plotDot(dst, w, h, signX + (ci * 6 + fx) * sc,
-                                signY - sc * 3 + fy * sc,
-                                std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                                Rgb{40, 30, 20, false});
-                }
+                drawSign(dst, w, h, line, cxw, my - mn * 0.20F, sc, ya);
               }
             });
 }
@@ -891,14 +1043,10 @@ void effectMendeleev(const Renderer& renderer, const std::vector<Rgb>& src, int 
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(20 + l * 0.10F), u8(22 + l * 0.10F), u8(36 + l * 0.14F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(20 + l * 0.10F), u8(22 + l * 0.10F), u8(36 + l * 0.14F), false};
+              });
               const float cellW = std::min(w * 0.9F / kCols, h * 0.78F / kRows);
               const float cellH = cellW;
               const float startX = (w - cellW * kCols) * 0.5F;
@@ -919,18 +1067,10 @@ void effectMendeleev(const Renderer& renderer, const std::vector<Rgb>& src, int 
                   const float py = startSy + (ty - startSy) * ease;
                   if (dropT <= 0.0F) continue;
                   const int sc = std::max(1, static_cast<int>(cellW / 12.0F));
-                  for (int ci = 0; ci < 2 && sym[ci]; ++ci)
-                  {
-                    const auto g = glyph5x7(sym[ci]);
-                    for (int fy = 0; fy < 7; ++fy)
-                      for (int fx = 0; fx < 5; ++fx)
-                        if (g[fy][fx] == '1')
-                          plotDot(dst, w, h, px - sc * 3 + (ci * 6 + fx) * sc,
-                                  py - sc * 3 + fy * sc,
-                                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                                  Rgb{u8(180 + 75 * dropT), u8(180 + 60 * dropT),
-                                      u8(120 + 40 * dropT), false});
-                  }
+                  drawDotText(dst, w, h, sym, symbolLength(sym), px - sc * 3, py - sc * 3, sc,
+                              std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                              Rgb{u8(180 + 75 * dropT), u8(180 + 60 * dropT),
+                                  u8(120 + 40 * dropT), false});
                 }
             });
 }
@@ -946,66 +1086,20 @@ void effectElectrolysis(const Renderer& renderer, const std::vector<Rgb>& src, i
             [&](float t, std::vector<Rgb>& dst)
             {
               // Solution: data dimmed and shifted toward sky-blue.
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(20 + l * 0.18F), u8(40 + l * 0.20F), u8(80 + l * 0.30F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(20 + l * 0.18F), u8(40 + l * 0.20F), u8(80 + l * 0.30F), false};
+              });
               const float cxl = w * 0.35F;
               const float cxr = w * 0.65F;
               const float botY = h * 0.85F;
               // Electrodes (vertical bars).
-              for (int yy = static_cast<int>(h * 0.20F); yy <= static_cast<int>(botY); ++yy)
-              {
-                for (int xo = -2; xo <= 2; ++xo)
-                {
-                  const int xL = static_cast<int>(cxl + xo);
-                  const int xR = static_cast<int>(cxr + xo);
-                  if (yy >= 0 && yy < h)
-                  {
-                    if (xL >= 0 && xL < w) dst[static_cast<std::size_t>(yy) * w + xL] = Rgb{220, 220, 220, false};
-                    if (xR >= 0 && xR < w) dst[static_cast<std::size_t>(yy) * w + xR] = Rgb{220, 220, 220, false};
-                  }
-                }
-              }
+              drawElectrodes(dst, w, h, cxl, cxr, botY);
               // Bubbles: more from left (cathode → H2), fewer from right (anode → O2).
-              for (int i = 0; i < 40; ++i)
-              {
-                const float lifetime = hash(i) * 2.0F;
-                const float bt = std::fmod(t + lifetime, 1.0F);
-                const float bx = cxl + (hash(i * 3) - 0.5F) * mn * 0.04F;
-                const float by = botY - bt * (botY - h * 0.15F);
-                drawDataDisk(dst, w, h, src, bx, by, mn * 0.014F, ya, 0.50F, t + i,
-                             Rgb{220, 220, 240, false});
-              }
-              for (int i = 0; i < 20; ++i)
-              {
-                const float lifetime = hash(i * 17) * 2.0F;
-                const float bt = std::fmod(t + lifetime, 1.0F);
-                const float bx = cxr + (hash(i * 5) - 0.5F) * mn * 0.04F;
-                const float by = botY - bt * (botY - h * 0.15F);
-                drawDataDisk(dst, w, h, src, bx, by, mn * 0.014F, ya, 0.50F, t + i,
-                             Rgb{220, 220, 240, false});
-              }
+              drawElectrodeBubbles(dst, src, w, h, 40, 1, 3, cxl, botY, t, mn, ya, hash);
+              drawElectrodeBubbles(dst, src, w, h, 20, 17, 5, cxr, botY, t, mn, ya, hash);
               // + / - labels.
-              const int sc = std::max(2, static_cast<int>(mn / 40.0F));
-              const auto gp = glyph5x7('+');
-              const auto gm = glyph5x7('-');
-              for (int fy = 0; fy < 7; ++fy)
-                for (int fx = 0; fx < 5; ++fx)
-                {
-                  if (gm[fy][fx] == '1')
-                    plotDot(dst, w, h, cxl + (fx - 2.5F) * sc, h * 0.10F + fy * sc,
-                            std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                            Rgb{240, 240, 240, false});
-                  if (gp[fy][fx] == '1')
-                    plotDot(dst, w, h, cxr + (fx - 2.5F) * sc, h * 0.10F + fy * sc,
-                            std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                            Rgb{240, 240, 240, false});
-                }
+              drawElectrodeLabels(dst, w, h, cxl, cxr, mn, ya);
             });
 }
 
@@ -1018,47 +1112,17 @@ void effectSoapBubble(const Renderer& renderer, const std::vector<Rgb>& src, int
       renderer, w, h, 5400,
       [&](float t, std::vector<Rgb>& dst)
       {
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            dst[static_cast<std::size_t>(y) * w + x] =
-                Rgb{u8(20 + l * 0.10F), u8(22 + l * 0.10F), u8(30 + l * 0.10F), false};
-          }
+        shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+          const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+          return Rgb{u8(20 + l * 0.10F), u8(22 + l * 0.10F), u8(30 + l * 0.10F), false};
+        });
         const float pop = std::clamp((t - 0.85F) / 0.15F, 0.0F, 1.0F);
         const float cx = w * 0.5F + std::sin(t * 1.5F) * mn * 0.04F;
         const float cy = h * 0.5F + std::cos(t * 1.3F) * mn * 0.03F;
         const float R = mn * 0.35F * (1.0F + pop * 0.3F);
         // Fill the bubble interior with sampled data, modulated by iridescent
         // fringes.
-        for (int yy = static_cast<int>(cy - R / ya); yy <= static_cast<int>(cy + R / ya); ++yy)
-        {
-          if (yy < 0 || yy >= h) continue;
-          for (int xx = static_cast<int>(cx - R); xx <= static_cast<int>(cx + R); ++xx)
-          {
-            if (xx < 0 || xx >= w) continue;
-            const float dx = xx - cx;
-            const float dy = (yy - cy) * ya;
-            const float r = std::hypot(dx, dy);
-            if (r > R) continue;
-            const Rgb d = sample(src, w, h, xx, yy);
-            const float dr = d.transparent ? 200.0F : d.r;
-            const float dg = d.transparent ? 200.0F : d.g;
-            const float db = d.transparent ? 220.0F : d.b;
-            const float fringe = std::sin(r / mn * 30.0F + t * 6.0F);
-            const float hue = fringe * 0.5F + 0.5F;
-            const float fr = (std::sin(hue * 6.2832F) + 1) * 60;
-            const float fg = (std::sin(hue * 6.2832F + 2.094F) + 1) * 60;
-            const float fb = (std::sin(hue * 6.2832F + 4.189F) + 1) * 60;
-            const float edge = 1.0F - std::clamp((R - r) / (R * 0.20F), 0.0F, 1.0F);
-            const float alpha = 1.0F - pop;
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8((dr * 0.55F + fr + edge * 80) * alpha + dr * (1 - alpha)),
-                    u8((dg * 0.55F + fg + edge * 80) * alpha + dg * (1 - alpha)),
-                    u8((db * 0.55F + fb + edge * 80) * alpha + db * (1 - alpha)), false};
-          }
-        }
+        drawSoapFilm(dst, src, w, h, cx, cy, R, pop, t, mn, ya);
         // Specular highlight.
         if (pop < 0.5F)
           plotDot(dst, w, h, cx - R * 0.35F, cy - R * 0.40F / ya, R * 0.08F, ya,
@@ -1123,15 +1187,11 @@ void effectPhaseTransition(const Renderer& renderer, const std::vector<Rgb>& src
             [&](float t, std::vector<Rgb>& dst)
             {
               const float dim = 0.20F;
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(20 + l * 0.10F * dim), u8(20 + l * 0.10F * dim),
-                          u8(30 + l * 0.10F * dim), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 50.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(20 + l * 0.10F * dim), u8(20 + l * 0.10F * dim),
+                           u8(30 + l * 0.10F * dim), false};
+              });
               const float gasT = 0.35F;
               const float liqT = 0.65F;
               for (int i = 0; i < N; ++i)
@@ -1165,16 +1225,9 @@ void effectPhaseTransition(const Renderer& renderer, const std::vector<Rgb>& src
               const int sc = std::max(3, static_cast<int>(mn / 25.0F));
               const std::string s(lab);
               const float lineW = static_cast<float>(s.size()) * 6 * sc;
-              for (int ci = 0; ci < static_cast<int>(s.size()); ++ci)
-              {
-                const auto g = glyph5x7(s[ci]);
-                for (int fy = 0; fy < 7; ++fy)
-                  for (int fx = 0; fx < 5; ++fx)
-                    if (g[fy][fx] == '1')
-                      plotDot(dst, w, h, w * 0.5F - lineW * 0.5F + (ci * 6 + fx) * sc,
-                              h * 0.85F + fy * sc, std::max(1.0F, static_cast<float>(sc) * 0.5F),
-                              ya, Rgb{240, 240, 240, false});
-              }
+              drawDotText(dst, w, h, s.c_str(), static_cast<int>(s.size()), w * 0.5F - lineW * 0.5F,
+                          h * 0.85F, sc, std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                          Rgb{240, 240, 240, false});
             });
 }
 

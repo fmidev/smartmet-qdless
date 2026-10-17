@@ -369,6 +369,30 @@ inline void plotDot(
     }
 }
 
+// Draws the first n characters of text in the 5x7 dot font: dot (fx, fy) of
+// character ci lands at (x0 + (ci * 6 + fx) * sc, y0 + fy * sc).
+inline void drawDotText(std::vector<Rgb>& dst,
+                        int w,
+                        int h,
+                        const char* text,
+                        int n,
+                        float x0,
+                        float y0,
+                        int sc,
+                        float dotR,
+                        float ya,
+                        const Rgb& col)
+{
+  for (int ci = 0; ci < n; ++ci)
+  {
+    const auto g = glyph5x7(text[ci]);
+    for (int fy = 0; fy < 7; ++fy)
+      for (int fx = 0; fx < 5; ++fx)
+        if (g[fy][fx] == '1')
+          plotDot(dst, w, h, x0 + (ci * 6 + fx) * sc, y0 + fy * sc, dotR, ya, col);
+  }
+}
+
 inline void drawOcean(std::vector<Rgb>& dst, int w, int h, float waterY, float fade)
 {
   for (int x = 0; x < w; ++x)
