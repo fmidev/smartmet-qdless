@@ -184,6 +184,144 @@ PhenomenonHint detectTropicalConvection(const Grid& g, const std::string& units)
 }
 
 // Detector 2: cyclones / hurricanes --------------------------------------
+// FMI stores pressure either in Pa (~100000) or hPa (~1000). Normalise to hPa.
+float pressureHPa(float v)
+{
+  return (v > 5000.0F) ? v * 0.01F : v;
+}
+
+// The lowest pressure (hPa) on the grid and its cell; minIx < 0 if there is no valid value
+float findPressureMinimum(const Grid& g, int& minIx, int& minIy)
+{
+  float globalMin = std::numeric_limits<float>::infinity();
+  minIx = -1;
+  minIy = -1;
+  for (int iy = 0; iy < Grid::H; ++iy)
+    for (int ix = 0; ix < Grid::W; ++ix)
+    {
+      const float v = g.at(ix, iy);
+      if (!valid(v)) continue;
+      const float p = pressureHPa(v);
+      if (p < globalMin)
+      {
+        globalMin = p;
+        minIx = ix;
+        minIy = iy;
+      }
+    }
+  return globalMin;
+}
+
+// Pressure minimum located to a fraction of a cell
+struct RefinedMinimum
+{
+  double lat;
+  double lon;
+  float value;
+};
+
+// Sub-cell refinement: fit a 2D parabola to the 3×3 neighbourhood of
+// the minimum cell to estimate the true minimum location to a
+// fraction of a cell. This bridges the gap between the discrete
+// sampling grid and the cyclone's actual centre.
+RefinedMinimum refineMinimum(const Grid& g, int minIx, int minIy, float globalMin)
+{
+  RefinedMinimum r{g.latAt(minIx, minIy), g.lonAt(minIx, minIy), globalMin};
+  const int ixL = (minIx + Grid::W - 1) % Grid::W;
+  const int ixR = (minIx + 1) % Grid::W;
+  const int iyU = std::max(0, minIy - 1);
+  const int iyD = std::min(Grid::H - 1, minIy + 1);
+  auto norm = [&](int ix, int iy) -> float {
+    const float v = g.at(ix, iy);
+    if (!valid(v)) return std::numeric_limits<float>::quiet_NaN();
+    return pressureHPa(v);
+  };
+  const float pC = norm(minIx, minIy);
+  const float pL = norm(ixL, minIy);
+  const float pR = norm(ixR, minIy);
+  const float pU = norm(minIx, iyU);
+  const float pD = norm(minIx, iyD);
+  if (!std::isfinite(pL) || !std::isfinite(pR) || !std::isfinite(pU) || !std::isfinite(pD))
+    return r;
+  auto fit = [&](float lo, float hi) -> float {
+    const float denom = lo - 2 * pC + hi;
+    if (!std::isfinite(denom) || std::fabs(denom) < 1e-6F) return 0.0F;
+    return std::clamp((lo - hi) / (2 * denom), -0.5F, 0.5F);
+  };
+  const float fx = fit(pL, pR);
+  const float fy = fit(pU, pD);
+  // We can't call src.uvToLatLon here — caller doesn't pass src —
+  // but linear interpolation of the surrounding cells' lat/lon
+  // is accurate enough for displaying an anchor point.
+  const double latL = g.latAt(ixL, minIy);
+  const double latR = g.latAt(ixR, minIy);
+  const double latU = g.latAt(minIx, iyU);
+  const double latD = g.latAt(minIx, iyD);
+  const double latC = g.latAt(minIx, minIy);
+  const double lonL = g.lonAt(ixL, minIy);
+  const double lonR = g.lonAt(ixR, minIy);
+  const double lonU = g.lonAt(minIx, iyU);
+  const double lonD = g.lonAt(minIx, iyD);
+  const double lonC = g.lonAt(minIx, minIy);
+  r.lat = latC + fx * (latR - latL) * 0.5 + fy * (latD - latU) * 0.5;
+  r.lon = lonC + fx * (lonR - lonL) * 0.5 + fy * (lonD - lonU) * 0.5;
+  // Parabolic estimate of the actual minimum value at the refined
+  // position (always ≤ pC by construction since pC is the lowest).
+  r.value = pC - 0.25F * fx * (pR - pL) - 0.25F * fy * (pD - pU);
+  return r;
+}
+
+// Maximum pressure in each of 8 angular sectors (45° each) of the ring
+// around the minimum cell
+void collectSectorMaxima(const Grid& g,
+                         int minIx,
+                         int minIy,
+                         int searchX,
+                         int searchY,
+                         std::array<float, 8>& sectorMax,
+                         std::array<int, 8>& sectorCount)
+{
+  sectorMax.fill(-std::numeric_limits<float>::infinity());
+  sectorCount.fill(0);
+  for (int dy = -searchY; dy <= searchY; ++dy)
+    for (int dx = -searchX; dx <= searchX; ++dx)
+    {
+      if (dx * dx + dy * dy < (searchX * searchY) / 4) continue;
+      const int ix = std::clamp(minIx + dx, 0, Grid::W - 1);
+      const int iy = std::clamp(minIy + dy, 0, Grid::H - 1);
+      const float v = g.at(ix, iy);
+      if (!valid(v)) continue;
+      const float p = pressureHPa(v);
+      // Sector index: angle from centre, 0 = +x (East), counter-clockwise.
+      const double ang = std::atan2(static_cast<double>(-dy), static_cast<double>(dx));
+      int s = static_cast<int>(std::floor((ang + M_PI) * 4.0 / M_PI));
+      s = std::max(s, 0);
+      s = std::min(s, 7);
+      sectorMax[s] = std::max(p, sectorMax[s]);
+      ++sectorCount[s];
+    }
+}
+
+// Pressure rise in each populated sector. Min across sectors is the
+// gradient floor; only when even the weakest direction shows a strong
+// climb is this a properly cyclonic feature. False when fewer than 6 of
+// the 8 sectors have data — the centre is then too close to the data
+// boundary to call this a cyclone.
+bool minimumSectorRise(const std::array<float, 8>& sectorMax,
+                       const std::array<int, 8>& sectorCount,
+                       float refinedMin,
+                       float& minDelta)
+{
+  const auto populated = std::count_if(
+      sectorCount.begin(), sectorCount.end(), [](int count) { return count > 0; });
+  if (populated < 6) return false;
+  minDelta = std::numeric_limits<float>::infinity();
+  for (int s = 0; s < 8; ++s)
+    if (sectorCount[s] > 0)
+      minDelta = std::min(sectorMax[s] - refinedMin, minDelta);
+  return true;
+}
+
 PhenomenonHint detectCyclone(const Grid& g)
 {
   // Find the deepest pressure minimum on the sampled grid, then measure
@@ -192,81 +330,16 @@ PhenomenonHint detectCyclone(const Grid& g)
   // cells-based ring would be tiny on a high-resolution regional file
   // and miss the cyclone's outer pressure rim — so we walk a haversine
   // distance instead, regardless of grid resolution.
-  float globalMin = std::numeric_limits<float>::infinity();
   int minIx = -1;
   int minIy = -1;
-  for (int iy = 0; iy < Grid::H; ++iy)
-    for (int ix = 0; ix < Grid::W; ++ix)
-    {
-      const float v = g.at(ix, iy);
-      if (!valid(v)) continue;
-      // FMI stores pressure either in Pa (~100000) or hPa (~1000).
-      // Normalise so 'globalMin' is always in hPa.
-      const float p = (v > 5000.0F) ? v * 0.01F : v;
-      if (p < globalMin)
-      {
-        globalMin = p;
-        minIx = ix;
-        minIy = iy;
-      }
-    }
+  float globalMin = findPressureMinimum(g, minIx, minIy);
   if (minIx < 0) return {};
 
-  // Sub-cell refinement: fit a 2D parabola to the 3×3 neighbourhood of
-  // the minimum cell to estimate the true minimum location to a
-  // fraction of a cell. This bridges the gap between the discrete
-  // sampling grid and the cyclone's actual centre.
-  double refinedLat = g.latAt(minIx, minIy);
-  double refinedLon = g.lonAt(minIx, minIy);
-  float refinedMin = globalMin;
-  {
-    const int ixL = (minIx + Grid::W - 1) % Grid::W;
-    const int ixR = (minIx + 1) % Grid::W;
-    const int iyU = std::max(0, minIy - 1);
-    const int iyD = std::min(Grid::H - 1, minIy + 1);
-    auto norm = [&](int ix, int iy) -> float {
-      const float v = g.at(ix, iy);
-      if (!valid(v)) return std::numeric_limits<float>::quiet_NaN();
-      return (v > 5000.0F) ? v * 0.01F : v;
-    };
-    const float pC = norm(minIx, minIy);
-    const float pL = norm(ixL, minIy);
-    const float pR = norm(ixR, minIy);
-    const float pU = norm(minIx, iyU);
-    const float pD = norm(minIx, iyD);
-    auto fit = [&](float lo, float hi) -> float {
-      const float denom = lo - 2 * pC + hi;
-      if (!std::isfinite(denom) || std::fabs(denom) < 1e-6F) return 0.0F;
-      return std::clamp((lo - hi) / (2 * denom), -0.5F, 0.5F);
-    };
-    if (std::isfinite(pL) && std::isfinite(pR) && std::isfinite(pU) && std::isfinite(pD))
-    {
-      const float fx = fit(pL, pR);
-      const float fy = fit(pU, pD);
-      // Recompute lat/lon at the refined u,v position.
-      const double u = (minIx + 0.5 + fx) / Grid::W;
-      const double v = (minIy + 0.5 + fy) / Grid::H;
-      // We can't call src.uvToLatLon here — caller doesn't pass src —
-      // but linear interpolation of the surrounding cells' lat/lon
-      // is accurate enough for displaying an anchor point.
-      const double latL = g.latAt(ixL, minIy);
-      const double latR = g.latAt(ixR, minIy);
-      const double latU = g.latAt(minIx, iyU);
-      const double latD = g.latAt(minIx, iyD);
-      const double latC = g.latAt(minIx, minIy);
-      const double lonL = g.lonAt(ixL, minIy);
-      const double lonR = g.lonAt(ixR, minIy);
-      const double lonU = g.lonAt(minIx, iyU);
-      const double lonD = g.lonAt(minIx, iyD);
-      const double lonC = g.lonAt(minIx, minIy);
-      refinedLat = latC + fx * (latR - latL) * 0.5 + fy * (latD - latU) * 0.5;
-      refinedLon = lonC + fx * (lonR - lonL) * 0.5 + fy * (lonD - lonU) * 0.5;
-      // Parabolic estimate of the actual minimum value at the refined
-      // position (always ≤ pC by construction since pC is the lowest).
-      refinedMin = pC - 0.25F * fx * (pR - pL) - 0.25F * fy * (pD - pU);
-      (void)u; (void)v;
-    }
-  }
+  // Sub-cell refinement of the minimum.
+  const RefinedMinimum refined = refineMinimum(g, minIx, minIy, globalMin);
+  const double refinedLat = refined.lat;
+  const double refinedLon = refined.lon;
+  const float refinedMin = refined.value;
 
   // Ring radius: 500 km haversine. Walk only as many grid cells as
   // needed to cover that distance in any direction.
@@ -296,50 +369,13 @@ PhenomenonHint detectCyclone(const Grid& g)
   // i.e. every direction has to show a real pressure climb, not just
   // the side facing a neighbouring high.
   std::array<float, 8> sectorMax{};
-  sectorMax.fill(-std::numeric_limits<float>::infinity());
   std::array<int, 8> sectorCount{};
-  sectorCount.fill(0);
-  for (int dy = -searchY; dy <= searchY; ++dy)
-    for (int dx = -searchX; dx <= searchX; ++dx)
-    {
-      if (dx * dx + dy * dy < (searchX * searchY) / 4) continue;
-      const int ix = std::clamp(minIx + dx, 0, Grid::W - 1);
-      const int iy = std::clamp(minIy + dy, 0, Grid::H - 1);
-      const float v = g.at(ix, iy);
-      if (!valid(v)) continue;
-      const float p = (v > 5000.0F) ? v * 0.01F : v;
-      // Sector index: angle from centre, 0 = +x (East), counter-clockwise.
-      const double ang = std::atan2(static_cast<double>(-dy), static_cast<double>(dx));
-      int s = static_cast<int>(std::floor((ang + M_PI) * 4.0 / M_PI));
-      s = std::max(s, 0);
-      s = std::min(s, 7);
-      sectorMax[s] = std::max(p, sectorMax[s]);
-      ++sectorCount[s];
-    }
+  collectSectorMaxima(g, minIx, minIy, searchX, searchY, sectorMax, sectorCount);
 
   // Need data in at least 6 of the 8 sectors so the symmetry test is
-  // meaningful — fewer than that and the centre is too close to the
-  // data boundary to call this a cyclone.
-  int populated = 0;
-  for (int s = 0; s < 8; ++s) if (sectorCount[s] > 0) ++populated;
-  if (populated < 6) return {};
-
-  // Pressure rise in each populated sector. Min across sectors is the
-  // gradient floor; only when even the weakest direction shows a
-  // strong climb is this a properly cyclonic feature.
-  float minDelta = std::numeric_limits<float>::infinity();
-  float sumDelta = 0;
-  int validDeltas = 0;
-  for (int s = 0; s < 8; ++s)
-  {
-    if (sectorCount[s] == 0) continue;
-    const float delta = sectorMax[s] - refinedMin;
-    minDelta = std::min(delta, minDelta);
-    sumDelta += delta;
-    ++validDeltas;
-  }
-  if (validDeltas == 0) return {};
-  const float meanDelta = sumDelta / validDeltas;
+  // meaningful, and take the minimum pressure rise across the sectors.
+  float minDelta = 0.0F;
+  if (!minimumSectorRise(sectorMax, sectorCount, refinedMin, minDelta)) return {};
 
   // Cyclone thresholds, expressed as min-sector pressure rise over
   // ~500 km. This translates to geostrophic wind speed:
@@ -360,7 +396,6 @@ PhenomenonHint detectCyclone(const Grid& g)
     sev = "Hurricane-strength";
   else if (dropHPa > 15.0F)
     sev = "Strong cyclone";
-  (void)meanDelta;  // available for a future "mean-vs-min" symmetry check
   char buf[160];
   std::snprintf(buf, sizeof(buf),
                 "%s low %d hPa near %d°%c %d°%c (Δ %d hPa)",
