@@ -222,6 +222,8 @@ class App
   // pick a different palette per layer (precip / fog / cloud) without
   // disturbing the active panel's palette.
   std::optional<Palette> loadPaletteByName(const std::string& name) const;
+  // Built-in ramp spanning the values of the current slice on a coarse lattice
+  Palette sampledBuiltinRamp() const;
   // subPixelsW / subPixelsH are the sub-pixel dimensions the coastline
   // will be rendered into (cellW*2, cellH*4 for Braille — the finest
   // path). Pass 0 to derive them from the current terminal size — used

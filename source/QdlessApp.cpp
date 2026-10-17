@@ -1718,48 +1718,20 @@ void App::loadPalette()
   if (paletteName.empty())
     paletteName = guess.palette;
 
-  if (!paletteName.empty())
+  // Try several palette locations so the tool works without `make install`
+  // and regardless of cwd (see loadPaletteByName).
+  if (auto pal = loadPaletteByName(paletteName))
   {
-    // Try several palette locations so the tool works without `make install`
-    // and regardless of cwd:
-    //   1. --palette-dir (default QDLESS_DATA_DIR/palettes)
-    //   2. palettes/ next to the binary (build-tree layout)
-    //   3. ../share/smartmet/qdless/palettes/ relative to binary (install)
-    //   4. $HOME/.config/qdless/palettes/
-    std::vector<std::filesystem::path> candidates{
-        std::filesystem::path(itsOpts.paletteDir) / (paletteName + ".json"),
-    };
-    try
-    {
-      // Cross-platform exe path: Linux /proc, macOS _NSGetExecutablePath, etc.
-      const std::filesystem::path exeDir = boost::dll::program_location().parent_path().string();
-      candidates.push_back(exeDir / "palettes" / (paletteName + ".json"));
-      candidates.push_back(exeDir / ".." / "share" / "smartmet" / "qdless" / "palettes" /
-                           (paletteName + ".json"));
-    }
-    catch (const std::exception&)
-    {
-      // exe path not resolvable (no /proc on Linux, dyld lookup failed, …)
-    }
-    if (const char* home = std::getenv("HOME"))
-      candidates.push_back(std::filesystem::path(home) / ".config" / "qdless" / "palettes" /
-                           (paletteName + ".json"));
-
-    for (const auto& path : candidates)
-    {
-      try
-      {
-        panel.palette = Palette::loadFromFile(path.string());
-        return;
-      }
-      catch (const std::exception&)
-      {
-        // try next candidate
-      }
-    }
+    panel.palette = *pal;
+    return;
   }
   // Derive a built-in ramp by sampling the current slice on a coarse lattice
   // in the source's native (u, v) coordinates. Cheap (~O(40*40) calls).
+  panel.palette = sampledBuiltinRamp();
+}
+
+Palette App::sampledBuiltinRamp() const
+{
   float lo = std::numeric_limits<float>::infinity();
   float hi = -std::numeric_limits<float>::infinity();
   constexpr int N = 40;
@@ -1774,7 +1746,7 @@ void App::loadPalette()
       hi = std::max(hi, v);
     }
   }
-  panel.palette = Palette::builtinRamp(lo, hi);
+  return Palette::builtinRamp(lo, hi);
 }
 
 void App::loadCoastlines(int subPixelsW, int subPixelsH)
