@@ -131,6 +131,64 @@ ShapeSource::ShapeSource(OGRLayer* layer, std::string displayName, Options opts)
   init(layer);
 }
 
+namespace
+{
+// Transformation from the layer SRS to dstSrs, null if they are the same
+std::unique_ptr<OGRCoordinateTransformation> layerTransformation(OGRLayer* layer,
+                                                                 OGRSpatialReference& dstSrs)
+{
+  // OGR returns const OGRSpatialReference*; we need a mutable one only
+  // to call SetAxisMappingStrategy. Clone the layer SRS to a writable
+  // copy below.
+  const OGRSpatialReference* srcSrs = layer->GetSpatialRef();
+  std::unique_ptr<OGRCoordinateTransformation> ct;
+  if (srcSrs != nullptr && !srcSrs->IsSame(&dstSrs))
+  {
+    auto* clone = srcSrs->Clone();
+    clone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    ct.reset(OGRCreateCoordinateTransformation(clone, &dstSrs));
+    OGRSpatialReference::DestroySpatialReference(clone);
+    if (!ct)
+      throw std::runtime_error("ShapeSource: cannot transform from layer SRS to WGS84");
+  }
+  return ct;
+}
+
+// Raster dimensions with the longer side M (at least 64 cells either way)
+void rasterGridSize(double aspect, int M, std::size_t& nx, std::size_t& ny)
+{
+  if (aspect >= 1.0)
+  {
+    nx = static_cast<std::size_t>(M);
+    ny = static_cast<std::size_t>(std::max(64, static_cast<int>(M / aspect)));
+  }
+  else
+  {
+    ny = static_cast<std::size_t>(M);
+    nx = static_cast<std::size_t>(std::max(64, static_cast<int>(M * aspect)));
+  }
+}
+
+// The .dbf attributes of the feature verbatim (no type conversion) so the
+// click-popup shows the file's own representation
+std::vector<std::pair<std::string, std::string>> featureFieldStrings(OGRLayer* layer,
+                                                                   OGRFeature* feat)
+{
+  std::vector<std::pair<std::string, std::string>> attrs;
+  if (auto* defn = layer->GetLayerDefn())
+  {
+    attrs.reserve(static_cast<std::size_t>(defn->GetFieldCount()));
+    for (int i = 0; i < defn->GetFieldCount(); ++i)
+    {
+      const char* name = defn->GetFieldDefn(i)->GetNameRef();
+      const char* val = feat->GetFieldAsString(i);
+      attrs.emplace_back(name ? name : "", val ? val : "");
+    }
+  }
+  return attrs;
+}
+}  // namespace
+
 void ShapeSource::init(OGRLayer* layer)
 {
   itsLayerName = layer->GetName();
@@ -160,17 +218,7 @@ void ShapeSource::init(OGRLayer* layer)
   // OGR returns const OGRSpatialReference*; we need a mutable one only
   // to call SetAxisMappingStrategy. Clone the layer SRS to a writable
   // copy below.
-  const OGRSpatialReference* srcSrs = layer->GetSpatialRef();
-  std::unique_ptr<OGRCoordinateTransformation> ct;
-  if (srcSrs != nullptr && !srcSrs->IsSame(&dstSrs))
-  {
-    auto* clone = srcSrs->Clone();
-    clone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    ct.reset(OGRCreateCoordinateTransformation(clone, &dstSrs));
-    OGRSpatialReference::DestroySpatialReference(clone);
-    if (!ct)
-      throw std::runtime_error("ShapeSource: cannot transform from layer SRS to WGS84");
-  }
+  const std::unique_ptr<OGRCoordinateTransformation> ct = layerTransformation(layer, dstSrs);
 
   // Envelope in WGS84. layer->GetExtent gives source SRS; reproject
   // its corners through `ct` to get a usable lat/lon bbox.
@@ -191,17 +239,7 @@ void ShapeSource::init(OGRLayer* layer)
   // pixels are roughly square in lat/lon (good enough for visual
   // sanity even though degrees of longitude vary with latitude).
   const double aspect = (maxLon - minLon) / (maxLat - minLat);
-  const int M = std::max(64, itsOpts.rasterMax);
-  if (aspect >= 1.0)
-  {
-    itsNx = static_cast<std::size_t>(M);
-    itsNy = static_cast<std::size_t>(std::max(64, static_cast<int>(M / aspect)));
-  }
-  else
-  {
-    itsNy = static_cast<std::size_t>(M);
-    itsNx = static_cast<std::size_t>(std::max(64, static_cast<int>(M * aspect)));
-  }
+  rasterGridSize(aspect, std::max(64, itsOpts.rasterMax), itsNx, itsNy);
 
   // GeoTransform: (originX, dx, 0, originY, 0, dy). Row 0 = top = max
   // latitude (pixelH negative).
@@ -233,23 +271,6 @@ void ShapeSource::init(OGRLayer* layer)
   // tied up in OGRGeometry copies; for huge PostGIS tables the
   // caching alternative was untenable.
 
-  std::function<void(OGRGeometry*, int)> registerLeaves =
-      [&](OGRGeometry* geom, int featureIdx)
-  {
-    if (geom == nullptr) return;
-    const auto t = wkbFlatten(geom->getGeometryType());
-    if (t == wkbPolygon || t == wkbLineString || t == wkbPoint)
-    {
-      itsBurnToFeature.push_back(featureIdx);
-      ++itsBurnIdCount;
-    }
-    else if (auto* gc = geom->toGeometryCollection(); gc != nullptr)
-    {
-      for (int i = 0; i < gc->getNumGeometries(); ++i)
-        registerLeaves(gc->getGeometryRef(i), featureIdx);
-    }
-  };
-
   while (auto* feat = layer->GetNextFeature())
   {
     struct FeatGuard
@@ -263,30 +284,16 @@ void ShapeSource::init(OGRLayer* layer)
     OGRGeometry* g = feat->GetGeometryRef();
     if (g == nullptr) continue;
     OGRGeometry* clone = g->clone();
-    if (ct)
+    if (ct && clone->transform(ct.get()) != OGRERR_NONE)
     {
-      if (clone->transform(ct.get()) != OGRERR_NONE)
-      {
-        OGRGeometryFactory::destroyGeometry(clone);
-        continue;
-      }
+      OGRGeometryFactory::destroyGeometry(clone);
+      continue;
     }
     collectOutlines(clone, /*ct already applied*/ nullptr, itsOutlines);
 
     // Capture .dbf attributes verbatim (no type conversion) so the
     // click-popup shows the file's own representation.
-    std::vector<std::pair<std::string, std::string>> attrs;
-    if (auto* defn = layer->GetLayerDefn())
-    {
-      attrs.reserve(static_cast<std::size_t>(defn->GetFieldCount()));
-      for (int i = 0; i < defn->GetFieldCount(); ++i)
-      {
-        const char* name = defn->GetFieldDefn(i)->GetNameRef();
-        const char* val = feat->GetFieldAsString(i);
-        attrs.emplace_back(name ? name : "", val ? val : "");
-      }
-    }
-    itsAttributes.push_back(std::move(attrs));
+    itsAttributes.push_back(featureFieldStrings(layer, feat));
     // Capture the feature's bbox centre (already in WGS84 after the
     // optional reproject) as the centroid for marker placement. True
     // centroid via OGR_G_Centroid would be accurate but expensive on
@@ -297,13 +304,31 @@ void ShapeSource::init(OGRLayer* layer)
     itsCentroids.emplace_back((env.MinY + env.MaxY) / 2.0,
                               (env.MinX + env.MaxX) / 2.0);
     const int featureIdx = itsFeatureCount++;
-    registerLeaves(clone, featureIdx);
+    registerBurnLeaves(clone, featureIdx);
     OGRGeometryFactory::destroyGeometry(clone);
   }
 
   // Build the base raster covering the entire envelope. The same
   // helper is reused by prepareViewport() for zoom-time refinement.
   itsGrid = rasterise(itsNx, itsNy, minLon, minLat, maxLon, maxLat);
+}
+
+// Give every leaf Polygon / LineString / Point of the geometry tree its own
+// burn id mapped to the feature
+void ShapeSource::registerBurnLeaves(OGRGeometry* geom, int featureIdx)
+{
+  if (geom == nullptr) return;
+  const auto t = wkbFlatten(geom->getGeometryType());
+  if (t == wkbPolygon || t == wkbLineString || t == wkbPoint)
+  {
+    itsBurnToFeature.push_back(featureIdx);
+    ++itsBurnIdCount;
+  }
+  else if (auto* gc = geom->toGeometryCollection(); gc != nullptr)
+  {
+    for (int i = 0; i < gc->getNumGeometries(); ++i)
+      registerBurnLeaves(gc->getGeometryRef(i), featureIdx);
+  }
 }
 
 ShapeSource::~ShapeSource() = default;

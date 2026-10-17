@@ -9,6 +9,7 @@
 #include <vector>
 
 class NFmiArea;
+class OGRGeometry;
 class OGRLayer;
 
 namespace Qdless
@@ -193,6 +194,8 @@ class ShapeSource : public DataSource
   // attributes/centroids/outlines) shared by both ctors. The caller
   // owns the OGRDataset that hosts `layer`.
   void init(OGRLayer* layer);
+  // Assign burn ids to the leaf geometries of a feature (see init)
+  void registerBurnLeaves(OGRGeometry* geom, int featureIdx);
   // Rasterise itsCachedGeoms into a fresh uint16 grid with the
   // given dimensions and bbox-in-WGS84. Common helper used by
   // init() (for the base raster) and prepareViewport() (zoom).
