@@ -21,26 +21,52 @@ int parseIntField(const std::string& s, std::size_t off, std::size_t len)
 }
 }  // namespace
 
+namespace
+{
+// Parse a YYYYMMDDHHMM reference time; false if it is not a plausible time
+bool parseReftime(const std::string& rt, NFmiMetTime& origin)
+{
+  if (rt.size() != 12)
+    return false;
+  const short yy = static_cast<short>(parseIntField(rt, 0, 4));
+  const short mo = static_cast<short>(parseIntField(rt, 4, 2));
+  const short dd = static_cast<short>(parseIntField(rt, 6, 2));
+  const short hh = static_cast<short>(parseIntField(rt, 8, 2));
+  const short mi = static_cast<short>(parseIntField(rt, 10, 2));
+  if (yy > 1900 && mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31)
+  {
+    origin = NFmiMetTime(yy, mo, dd, hh, mi);
+    return true;
+  }
+  return false;
+}
+
+// Any existing file of the parameter, or an empty string
+std::string representativeFile(const MasalaCube& cube, const MasalaCube::Param& p)
+{
+  for (const auto& ax : p.levels)
+  {
+    if (ax.levelStrs.empty())
+      continue;
+    for (int lead : cube.leadHours())
+    {
+      std::string repr = cube.pathFor(p.name, ax.typeToken, ax.levelStrs.front(), lead);
+      if (!repr.empty())
+        return repr;
+    }
+  }
+  return {};
+}
+}  // namespace
+
 MasalaSource::MasalaSource(MasalaCube cube) : itsCube(std::move(cube))
 {
   if (itsCube.empty())
     throw std::runtime_error("masala: no renderable data in " + itsCube.dir());
 
   // Reference time → origin. Format YYYYMMDDHHMM.
-  const std::string& rt = itsCube.reftime();
-  if (rt.size() == 12)
-  {
-    const short yy = static_cast<short>(parseIntField(rt, 0, 4));
-    const short mo = static_cast<short>(parseIntField(rt, 4, 2));
-    const short dd = static_cast<short>(parseIntField(rt, 6, 2));
-    const short hh = static_cast<short>(parseIntField(rt, 8, 2));
-    const short mi = static_cast<short>(parseIntField(rt, 10, 2));
-    if (yy > 1900 && mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31)
-    {
-      itsOrigin = NFmiMetTime(yy, mo, dd, hh, mi);
-      itsHasOrigin = true;
-    }
-  }
+  if (parseReftime(itsCube.reftime(), itsOrigin))
+    itsHasOrigin = true;
 
   // Resolve per-parameter metadata by opening one representative file each.
   // Real newbase ids are used where they resolve (so -p / palette lookup work
@@ -57,20 +83,7 @@ MasalaSource::MasalaSource(MasalaCube cube) : itsCube(std::move(cube))
     int id = 0;
 
     // Find any existing file for this parameter.
-    std::string repr;
-    for (const auto& ax : p.levels)
-    {
-      if (ax.levelStrs.empty())
-        continue;
-      for (int lead : itsCube.leadHours())
-      {
-        repr = itsCube.pathFor(p.name, ax.typeToken, ax.levelStrs.front(), lead);
-        if (!repr.empty())
-          break;
-      }
-      if (!repr.empty())
-        break;
-    }
+    const std::string repr = representativeFile(itsCube, p);
     if (!repr.empty())
     {
       if (DataSource* d = openCached(repr))
