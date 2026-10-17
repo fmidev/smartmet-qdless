@@ -179,6 +179,201 @@ int labelToParamId(const std::string& label)
     return kFmiReflectivity;
   return 0;
 }
+
+// The first non-empty value among the candidate metadata keys
+std::string firstMetadataItem(GDALDataset* ds, std::initializer_list<const char*> keys)
+{
+  for (const char* k : keys)
+    if (const char* v = ds->GetMetadataItem(k); v != nullptr && *v != '\0')
+      return v;
+  return {};
+}
+
+// Parse a double into out and set has, leave both untouched if the text is
+// empty or not a number
+void parseDoubleInto(const std::string& text, double& out, bool& has)
+{
+  if (text.empty())
+    return;
+  try
+  {
+    out = std::stod(text);
+    has = true;
+  }
+  catch (...)
+  {
+  }
+}
+
+// Forecast reference (origin) time, when the producer records it
+// separately from the valid time (ODIM `Timestamp`, or the first of two
+// leading filename stamps)
+std::optional<NFmiMetTime> originTimeOf(const std::string& timestamp, const std::string& filename)
+{
+  if (auto ot = parseUtcStamp(timestamp))
+    return ot;
+  const std::string base = std::filesystem::path(filename).filename().string();
+  static const boost::regex re2(R"(^(\d{12,14})_(\d{12,14})_)");
+  boost::smatch m2;
+  if (boost::regex_search(base, m2, re2))
+    return parseUtcStamp(m2[1]);
+  return std::nullopt;
+}
+
+// Parameter id from the filename label: the label table, then the newbase name
+int labelParamId(const std::string& label)
+{
+  int paramId = labelToParamId(label);
+  if (paramId == 0)
+  {
+    NFmiEnumConverter conv;
+    int id = conv.ToEnum(label.c_str());
+    if (id != 0) paramId = id;
+  }
+  return paramId;
+}
+
+// Parameter name: the newbase name of the id, else the label, else "Value"
+std::string paramNameOf(int paramId, const std::string& label)
+{
+  if (paramId != 0)
+  {
+    NFmiEnumConverter conv;
+    return conv.ToString(paramId);
+  }
+  return label.empty() ? std::string{"Value"} : label;
+}
+
+// Gain / offset / nodata / undetect from the GDAL_METADATA items, then the
+// ODIM flat metadata, then the band nodata value
+void readValueScaling(GDALDataset* ds,
+                      const std::map<std::string, MetaItem>& meta,
+                      double& gain,
+                      double& offset,
+                      double& nodata,
+                      bool& hasNodata,
+                      double& undetect,
+                      bool& hasUndetect)
+{
+  auto metaItem = [&](std::initializer_list<const char*> keys)
+  { return firstMetadataItem(ds, keys); };
+  auto fetchDouble = [&](const char* key, double& out, bool& has)
+  {
+    if (auto it = meta.find(key); it != meta.end())
+      parseDoubleInto(it->second.value, out, has);
+  };
+  bool hasGain = false;
+  bool hasOffset = false;
+  fetchDouble("Gain", gain, hasGain);
+  fetchDouble("Offset", offset, hasOffset);
+  fetchDouble("Nodata", nodata, hasNodata);
+  fetchDouble("Undetect", undetect, hasUndetect);
+  // ODIM flat-metadata fallback (FMI-PPN radar): apply gain/offset linear
+  // scaling and nodata/undetect sentinels so values come out in physical
+  // units (e.g. rain rate mm/h) rather than raw packed integers.
+  auto fetchMetaDouble = [&](std::initializer_list<const char*> keys, double& out, bool& has)
+  {
+    if (!has)
+      parseDoubleInto(metaItem(keys), out, has);
+  };
+  fetchMetaDouble({"dataset1_data1_what_gain", "what_gain"}, gain, hasGain);
+  fetchMetaDouble({"dataset1_data1_what_offset", "what_offset"}, offset, hasOffset);
+  fetchMetaDouble({"dataset1_data1_what_nodata", "what_nodata"}, nodata, hasNodata);
+  fetchMetaDouble({"dataset1_data1_what_undetect", "what_undetect"}, undetect,
+                  hasUndetect);
+  if (!hasGain) gain = 1.0;
+  if (!hasOffset) offset = 0.0;
+
+  // Fall back to band-level GDAL nodata if metadata didn't supply one.
+  if (!hasNodata)
+  {
+    int has = 0;
+    double v = ds->GetRasterBand(1)->GetNoDataValue(&has);
+    if (has)
+    {
+      nodata = v;
+      hasNodata = true;
+    }
+  }
+}
+
+// Raw values scaled to physical units, nodata and undetect as NaN
+std::vector<float> scaledValues(const std::vector<float>& raw,
+                                double gain,
+                                double offset,
+                                bool hasNodata,
+                                double nodata,
+                                bool hasUndetect,
+                                double undetect)
+{
+  std::vector<float> values(raw.size());
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  for (std::size_t i = 0; i < raw.size(); ++i)
+  {
+    const double v = raw[i];
+    if ((hasNodata && v == nodata) || (hasUndetect && v == undetect))
+      values[i] = nan;
+    else
+      values[i] = static_cast<float>(gain * v + offset);
+  }
+  return values;
+}
+
+// Param naming: prefer the "Quantity" attribute (human-readable, with an
+// explicit unit), then the ODIM quantity, fall back to filename label, fall
+// back to "Value". units is left untouched unless "Quantity" gives one.
+void resolveParamNaming(const std::map<std::string, MetaItem>& meta,
+                        const std::string& odimQuantity,
+                        const std::string& label,
+                        std::string& name,
+                        std::string& units,
+                        int& id)
+{
+  if (auto it = meta.find("Quantity"); it != meta.end())
+  {
+    name = it->second.value;
+    units = it->second.unit;
+    id = quantityToParamId(name);
+  }
+  else if (!odimQuantity.empty())
+  {
+    name = odimQuantity;
+    id = quantityToParamId(odimQuantity);
+  }
+  else
+  {
+    id = labelParamId(label);
+    name = paramNameOf(id, label);
+  }
+}
+
+// The raster's own spatial reference, or WGS84 (set into assumedWgs84) for a
+// plainly geographic extent without one
+const OGRSpatialReference* rasterSpatialRef(GDALDataset* ds,
+                                            OGRSpatialReference& assumedWgs84,
+                                            double minX,
+                                            double maxX,
+                                            double minY,
+                                            double maxY,
+                                            const std::string& filename)
+{
+  const OGRSpatialReference* osr = ds->GetSpatialRef();
+  if (!osr)
+  {
+    // CF NetCDF (and some bare GeoTIFFs) carry only a lon/lat geotransform
+    // with no embedded CRS. If the extent is plainly geographic (degrees),
+    // assume WGS84 so the regular lat/lon grid still renders; otherwise we
+    // have no way to georeference it.
+    const bool geographic =
+        minX >= -360.0 && maxX <= 360.0 && minY >= -90.001 && maxY <= 90.001;
+    if (!geographic)
+      throw std::runtime_error("no projection and non-geographic extent: " + filename);
+    assumedWgs84.SetWellKnownGeogCS("WGS84");
+    assumedWgs84.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    return &assumedWgs84;
+  }
+  return osr;
+}
 }  // namespace
 
 GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(filename)
@@ -222,22 +417,9 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   const double minY = std::min(y0, y1);
   const double maxY = std::max(y0, y1);
 
-  const OGRSpatialReference* osr = ds->GetSpatialRef();
   OGRSpatialReference assumedWgs84;
-  if (!osr)
-  {
-    // CF NetCDF (and some bare GeoTIFFs) carry only a lon/lat geotransform
-    // with no embedded CRS. If the extent is plainly geographic (degrees),
-    // assume WGS84 so the regular lat/lon grid still renders; otherwise we
-    // have no way to georeference it.
-    const bool geographic =
-        minX >= -360.0 && maxX <= 360.0 && minY >= -90.001 && maxY <= 90.001;
-    if (!geographic)
-      throw std::runtime_error("no projection and non-geographic extent: " + filename);
-    assumedWgs84.SetWellKnownGeogCS("WGS84");
-    assumedWgs84.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    osr = &assumedWgs84;
-  }
+  const OGRSpatialReference* osr =
+      rasterSpatialRef(ds, assumedWgs84, minX, maxX, minY, maxY, filename);
   char* wkt = nullptr;
   osr->exportToWkt(&wkt);
   if (wkt) { itsWkt = wkt; CPLFree(wkt); }
@@ -264,13 +446,8 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   // GDAL_METADATA XML blob; they expose flat ODIM-style metadata items
   // (`dataset1_data1_what_gain`, `ForecastTimestamp`, ...). Helper to read
   // the first non-empty value among a list of candidate keys.
-  auto metaItem = [&](std::initializer_list<const char*> keys) -> std::string
-  {
-    for (const char* k : keys)
-      if (const char* v = ds->GetMetadataItem(k); v != nullptr && *v != '\0')
-        return v;
-    return {};
-  };
+  auto metaItem = [&](std::initializer_list<const char*> keys)
+  { return firstMetadataItem(ds, keys); };
 
   // Reading order for valid time:
   //   1. <Item name="Observation time"> — preferred, authoritative
@@ -286,22 +463,10 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   // Forecast reference (origin) time, when the producer records it
   // separately from the valid time (ODIM `Timestamp`, or the first of two
   // leading filename stamps). Otherwise originTime() reports the valid time.
-  if (auto ot = parseUtcStamp(metaItem({"Timestamp"})))
+  if (auto ot = originTimeOf(metaItem({"Timestamp"}), filename))
   {
     itsOriginTime = *ot;
     itsHasOriginTime = true;
-  }
-  else
-  {
-    const std::string base = std::filesystem::path(filename).filename().string();
-    static const boost::regex re2(R"(^(\d{12,14})_(\d{12,14})_)");
-    boost::smatch m2;
-    if (boost::regex_search(base, m2, re2))
-      if (auto o = parseUtcStamp(m2[1]))
-      {
-        itsOriginTime = *o;
-        itsHasOriginTime = true;
-      }
   }
 
   itsLabel = extractLabel(filename);
@@ -310,85 +475,11 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
   // an explicit unit), then the ODIM quantity, fall back to filename label,
   // fall back to "Value".
   std::string odimQuantity = metaItem({"dataset1_data1_what_quantity", "what_quantity"});
-  if (auto it = meta.find("Quantity"); it != meta.end())
-  {
-    itsParamName = it->second.value;
-    itsParamUnits = it->second.unit;
-    itsParamId = quantityToParamId(itsParamName);
-  }
-  else if (!odimQuantity.empty())
-  {
-    itsParamName = odimQuantity;
-    itsParamId = quantityToParamId(odimQuantity);
-  }
-  else
-  {
-    itsParamId = labelToParamId(itsLabel);
-    if (itsParamId == 0)
-    {
-      NFmiEnumConverter conv;
-      int id = conv.ToEnum(itsLabel.c_str());
-      if (id != 0) itsParamId = id;
-    }
-    if (itsParamId != 0)
-    {
-      NFmiEnumConverter conv;
-      itsParamName = conv.ToString(itsParamId);
-    }
-    else
-    {
-      itsParamName = itsLabel.empty() ? std::string{"Value"} : itsLabel;
-    }
-  }
+  resolveParamNaming(meta, odimQuantity, itsLabel, itsParamName, itsParamUnits, itsParamId);
 
   // Gain / offset / nodata / undetect.
-  auto fetchDouble = [&](const char* key, double& out, bool& has) {
-    auto it = meta.find(key);
-    if (it == meta.end()) return;
-    try
-    {
-      out = std::stod(it->second.value);
-      has = true;
-    }
-    catch (...)
-    {
-    }
-  };
-  bool hasGain = false;
-  bool hasOffset = false;
-  fetchDouble("Gain", itsGain, hasGain);
-  fetchDouble("Offset", itsOffset, hasOffset);
-  fetchDouble("Nodata", itsNodata, itsHasNodata);
-  fetchDouble("Undetect", itsUndetect, itsHasUndetect);
-  // ODIM flat-metadata fallback (FMI-PPN radar): apply gain/offset linear
-  // scaling and nodata/undetect sentinels so values come out in physical
-  // units (e.g. rain rate mm/h) rather than raw packed integers.
-  auto fetchMetaDouble = [&](std::initializer_list<const char*> keys, double& out, bool& has)
-  {
-    if (has) return;
-    const std::string v = metaItem(keys);
-    if (v.empty()) return;
-    try { out = std::stod(v); has = true; } catch (...) {}
-  };
-  fetchMetaDouble({"dataset1_data1_what_gain", "what_gain"}, itsGain, hasGain);
-  fetchMetaDouble({"dataset1_data1_what_offset", "what_offset"}, itsOffset, hasOffset);
-  fetchMetaDouble({"dataset1_data1_what_nodata", "what_nodata"}, itsNodata, itsHasNodata);
-  fetchMetaDouble({"dataset1_data1_what_undetect", "what_undetect"}, itsUndetect,
-                  itsHasUndetect);
-  if (!hasGain) itsGain = 1.0;
-  if (!hasOffset) itsOffset = 0.0;
-
-  // Fall back to band-level GDAL nodata if metadata didn't supply one.
-  if (!itsHasNodata)
-  {
-    int has = 0;
-    double v = ds->GetRasterBand(1)->GetNoDataValue(&has);
-    if (has)
-    {
-      itsNodata = v;
-      itsHasNodata = true;
-    }
-  }
+  readValueScaling(
+      ds, meta, itsGain, itsOffset, itsNodata, itsHasNodata, itsUndetect, itsHasUndetect);
 
   // Optional descriptive fields for the metadata popup.
   if (auto it = meta.find("Temporal type"); it != meta.end())
@@ -405,16 +496,7 @@ GdalRasterSource::GdalRasterSource(const std::string& filename) : itsFilename(fi
                               GDT_Float32, 0, 0);
   if (err != CE_None) throw std::runtime_error("RasterIO failed: " + filename);
 
-  itsValues.resize(raw.size());
-  const float nan = std::numeric_limits<float>::quiet_NaN();
-  for (std::size_t i = 0; i < raw.size(); ++i)
-  {
-    const double v = raw[i];
-    if ((itsHasNodata && v == itsNodata) || (itsHasUndetect && v == itsUndetect))
-      itsValues[i] = nan;
-    else
-      itsValues[i] = static_cast<float>(itsGain * v + itsOffset);
-  }
+  itsValues = scaledValues(raw, itsGain, itsOffset, itsHasNodata, itsNodata, itsHasUndetect, itsUndetect);
 }
 
 GdalRasterSource::~GdalRasterSource() = default;
