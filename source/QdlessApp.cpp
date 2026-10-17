@@ -438,6 +438,107 @@ struct UnitGuess
 // Detection is conservative: we only propose a palette when the unit AND
 // the name agree on the parameter's nature, so e.g. a m/s ocean current
 // doesn't accidentally pick up the atmospheric wind palette.
+// Sea-temperature names take priority over the generic temperature
+// palette so the realistic −2…+25 °C ramp is used instead of the
+// atmospheric −50…+50 °C one.
+bool isSeaTempName(const std::string& shortName, const std::string& both)
+{
+  return nameContains(both,
+                      {"sea_surface_temperature",
+                       "sea surface temperature",
+                       "sea_temperature",
+                       "sea temperature",
+                       "temperaturesea"}) ||
+         shortName == "TSEA" || shortName == "TSEA-C" || shortName == "SST";
+}
+
+// Temperature: K → °C
+void guessKelvin(UnitGuess& g, const std::string& shortName, const std::string& both)
+{
+  if (isSeaTempName(shortName, both))
+  {
+    g.offset = -273.15F;
+    g.palette = "seatemperature";
+    g.units = "\u00b0C";
+  }
+  else if (nameContains(both, {"temperature", "dewpoint", "dew point"}) || shortName == "T" ||
+           shortName == "T-K" || shortName == "TD" || shortName == "TD-K" || shortName == "T2m")
+  {
+    g.offset = -273.15F;
+    g.palette = "temperature";
+    g.units = "\u00b0C";
+  }
+}
+
+// Wind speed in m/s: gusts, wind components or plain wind speed
+void guessWindSpeed(UnitGuess& g, const std::string& shortName, const std::string& both)
+{
+  if (nameContains(both, {"gust"}))
+    g.palette = "windgust";
+  else if (shortName == "WindUMS" || shortName == "WindVMS" ||
+           nameContains(both,
+                        {"u-component of wind",
+                         "v-component of wind",
+                         "u component of wind",
+                         "v component of wind"}))
+    g.palette = "wind_component";
+  else if (nameContains(both, {"wind"}) || shortName == "WS" || shortName == "FF")
+    g.palette = "wind";
+}
+
+// Percent: humidity / cloud cover / probability — name disambiguates.
+void guessPercent(UnitGuess& g, const std::string& both)
+{
+  if (nameContains(both, {"humidity"}))
+    g.palette = "humidity";
+  else if (nameContains(both, {"cloud"}))
+    g.palette = "totalcloudcover_color";
+  else if (nameContains(both, {"probability", "pop", "thunderstorm"}))
+    g.palette = "probability";
+}
+
+// Fraction (0..1): scale by 100 to become percent.
+void guessFraction(UnitGuess& g, const std::string& both)
+{
+  if (nameContains(both, {"humidity"}))
+    g.palette = "humidity";
+  else if (nameContains(both, {"cloud"}))
+    g.palette = "totalcloudcover_color";
+  else if (nameContains(both, {"probability"}))
+    g.palette = "probability";
+  else
+    return;
+  g.scale = 100.0F;
+  g.units = "%";
+}
+
+// Name-only fallback: when the file's units string is missing or the
+// unit didn't match any unit class, but the parameter name strongly
+// suggests a known type, propose the palette anyway with no transform.
+// The user can override with --palette.
+std::string paletteFromName(const std::string& shortName, const std::string& both)
+{
+  if (isSeaTempName(shortName, both))
+    return "seatemperature";
+  if (nameContains(both, {"temperature", "dewpoint", "dew_point"}))
+    return "temperature";
+  if (nameContains(both, {"gust"}))
+    return "windgust";
+  if (nameContains(both, {"wind"}) &&
+      !nameContains(
+          both, {"u-component", "v-component", "u_component", "v_component", "windums", "windvms"}))
+    return "wind";
+  if (nameContains(both, {"humidity"}))
+    return "humidity";
+  if (nameContains(both, {"cloud_cover", "cloudcover", "cloudiness"}))
+    return "totalcloudcover_color";
+  if (nameContains(both, {"precipitation", "rainfall", "snowfall"}))
+    return "precipitation";
+  if (nameContains(both, {"pressure"}))
+    return "pressure";
+  return {};
+}
+
 UnitGuess guessFromUnits(const std::string& shortName,
                          const std::string& longName,
                          const std::string& units)
@@ -445,37 +546,8 @@ UnitGuess guessFromUnits(const std::string& shortName,
   UnitGuess g;
   const std::string both = shortName + " " + longName;
 
-  // Sea-temperature names take priority over the generic temperature
-  // palette so the realistic −2…+25 °C ramp is used instead of the
-  // atmospheric −50…+50 °C one.
-  auto isSeaTempName = [&]
-  {
-    return nameContains(both,
-                        {"sea_surface_temperature",
-                         "sea surface temperature",
-                         "sea_temperature",
-                         "sea temperature",
-                         "temperaturesea"}) ||
-           shortName == "TSEA" || shortName == "TSEA-C" || shortName == "SST";
-  };
-
-  // Temperature: K → °C
   if (units == "K" || units == "Kelvin" || units == "kelvin")
-  {
-    if (isSeaTempName())
-    {
-      g.offset = -273.15F;
-      g.palette = "seatemperature";
-      g.units = "\u00b0C";
-    }
-    else if (nameContains(both, {"temperature", "dewpoint", "dew point"}) || shortName == "T" ||
-             shortName == "T-K" || shortName == "TD" || shortName == "TD-K" || shortName == "T2m")
-    {
-      g.offset = -273.15F;
-      g.palette = "temperature";
-      g.units = "\u00b0C";
-    }
-  }
+    guessKelvin(g, shortName, both);
   // Pressure: Pa → hPa (palette is in hPa)
   else if (units == "Pa" || units == "pascal" || units == "Pascal")
   {
@@ -486,54 +558,13 @@ UnitGuess guessFromUnits(const std::string& shortName,
       g.units = "hPa";
     }
   }
-  // Wind speed: m/s
   else if (units == "m/s" || units == "m s-1" || units == "m s**-1" || units == "ms-1" ||
            units == "ms**-1")
-  {
-    if (nameContains(both, {"gust"}))
-      g.palette = "windgust";
-    else if (shortName == "WindUMS" || shortName == "WindVMS" ||
-             nameContains(both,
-                          {"u-component of wind",
-                           "v-component of wind",
-                           "u component of wind",
-                           "v component of wind"}))
-      g.palette = "wind_component";
-    else if (nameContains(both, {"wind"}) || shortName == "WS" || shortName == "FF")
-      g.palette = "wind";
-  }
-  // Percent: humidity / cloud cover / probability — name disambiguates.
+    guessWindSpeed(g, shortName, both);
   else if (units == "%" || units == "percent")
-  {
-    if (nameContains(both, {"humidity"}))
-      g.palette = "humidity";
-    else if (nameContains(both, {"cloud"}))
-      g.palette = "totalcloudcover_color";
-    else if (nameContains(both, {"probability", "pop", "thunderstorm"}))
-      g.palette = "probability";
-  }
-  // Fraction (0..1): scale by 100 to become percent.
+    guessPercent(g, both);
   else if (units == "1" || units == "0-1" || units == "fraction" || units == "(0 - 1)")
-  {
-    if (nameContains(both, {"humidity"}))
-    {
-      g.scale = 100.0F;
-      g.palette = "humidity";
-      g.units = "%";
-    }
-    else if (nameContains(both, {"cloud"}))
-    {
-      g.scale = 100.0F;
-      g.palette = "totalcloudcover_color";
-      g.units = "%";
-    }
-    else if (nameContains(both, {"probability"}))
-    {
-      g.scale = 100.0F;
-      g.palette = "probability";
-      g.units = "%";
-    }
-  }
+    guessFraction(g, both);
   // Precipitation: mm, mm/h, kg/m² (1 kg/m² ≈ 1 mm rain)
   else if (units == "mm" || units == "mm/h" || units == "mm/hr" || units == "kg/m^2" ||
            units == "kg m-2" || units == "kg m**-2" || units == "kg m^-2")
@@ -543,35 +574,8 @@ UnitGuess guessFromUnits(const std::string& shortName,
       g.palette = "precipitation";
   }
 
-  // Name-only fallback: when the file's units string is missing or the
-  // unit didn't match any branch above, but the parameter name strongly
-  // suggests a known type, propose the palette anyway with no transform.
-  // The user can override with --palette.
   if (g.palette.empty())
-  {
-    if (isSeaTempName())
-      g.palette = "seatemperature";
-    else if (nameContains(both, {"temperature", "dewpoint", "dew_point"}))
-      g.palette = "temperature";
-    else if (nameContains(both, {"gust"}))
-      g.palette = "windgust";
-    else if (nameContains(both, {"wind"}) && !nameContains(both,
-                                                           {"u-component",
-                                                            "v-component",
-                                                            "u_component",
-                                                            "v_component",
-                                                            "windums",
-                                                            "windvms"}))
-      g.palette = "wind";
-    else if (nameContains(both, {"humidity"}))
-      g.palette = "humidity";
-    else if (nameContains(both, {"cloud_cover", "cloudcover", "cloudiness"}))
-      g.palette = "totalcloudcover_color";
-    else if (nameContains(both, {"precipitation", "rainfall", "snowfall"}))
-      g.palette = "precipitation";
-    else if (nameContains(both, {"pressure"}))
-      g.palette = "pressure";
-  }
+    g.palette = paletteFromName(shortName, both);
 
   return g;
 }
