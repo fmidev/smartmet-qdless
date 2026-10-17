@@ -11,6 +11,101 @@ namespace ee_detail
 {
 using namespace kit;
 
+namespace
+{
+// A shed vortex of the Karman street
+struct KarmanVortex
+{
+  float x;
+  float y;  // screen rows
+  float gamma;
+  float rc2;
+};
+
+// Island of radius R at (xc, yc) in a uniform flow U, and the vortices shed behind it
+struct KarmanFlow
+{
+  float xc;
+  float yc;
+  float R;
+  float U;
+  float ya;
+  float ramp;
+  const std::vector<KarmanVortex>& active;
+};
+
+// Potential flow around the island plus the shed vortices
+void karmanVelocity(const KarmanFlow& kf, float x, float y, float& vx, float& vy)
+{
+  const float X = x - kf.xc;
+  const float Y = (y - kf.yc) * kf.ya;
+  const float r2 = X * X + Y * Y;
+  if (r2 < kf.R * kf.R)
+  {
+    vx = vy = 0.0F;
+    return;
+  }
+  const float R2 = kf.R * kf.R;
+  const float r4 = r2 * r2;
+  float ux = kf.U * (1.0F - R2 * (X * X - Y * Y) / r4);
+  float uy = -kf.U * 2.0F * R2 * X * Y / r4;
+  for (const auto& v : kf.active)
+  {
+    const float dx = x - v.x;
+    const float dy = (y - v.y) * kf.ya;
+    const float d2 = dx * dx + dy * dy + 1e-3F;
+    const float fac = v.gamma / (2.0F * kPi * d2) * (1.0F - std::exp(-d2 / v.rc2));
+    ux += -fac * dy;
+    uy += fac * dx;
+  }
+  vx = ux * kf.ramp;
+  vy = uy * kf.ramp / kf.ya;
+}
+
+// The island, with a ragged coast and an off-centre peak, lit from the upper left
+F3 karmanIsland(const std::vector<Rgb>& src,
+                int w,
+                int h,
+                const FlowMap& flow,
+                std::size_t i,
+                float X,
+                float Y,
+                float q2)
+{
+  const float lx = -0.55F;
+  const float ly = -0.55F;
+  const float lz = 0.63F;  // light from the upper left
+  const float q = std::sqrt(q2);
+  const float ca = X / std::max(q, 1e-3F);
+  const float sa = Y / std::max(q, 1e-3F);
+  const float coast = 0.8F + 0.25F * fbm(ca * 1.6F + 3.0F, sa * 1.6F + 3.0F, 3, 67);
+  const float px = X + 0.3F;  // the peak sits upwind of the centre
+  const float py = Y + 0.15F;
+  const float hq = std::sqrt(px * px + py * py) / coast;
+  const float ridge = fbm(X * 3.0F + 7.0F, Y * 3.0F, 3, 61);
+  if (q > coast)  // shallow water ringing the shore
+    return mix(bilinear(src, w, h, flow.u(i), flow.v(i)), F3{120, 200, 190}, 0.6F);
+  else
+  {
+    const float height = std::max(0.0F, 1.0F - hq) * (0.8F + 0.4F * ridge);
+    // Lambert light on the height field's local slope.
+    const float e = 0.05F;
+    const float hx =
+        (std::max(0.0F, 1.0F - std::hypot(px + e, py) / coast) - std::max(0.0F, 1.0F - hq)) / e;
+    const float hy =
+        (std::max(0.0F, 1.0F - std::hypot(px, py + e) / coast) - std::max(0.0F, 1.0F - hq)) / e;
+    const float nx = -hx * 0.8F;
+    const float ny = -hy * 0.8F;
+    const float lit =
+        std::clamp((nx * lx + ny * ly + lz) / std::sqrt(nx * nx + ny * ny + 1.0F), 0.1F, 1.0F);
+    F3 ground = mix(F3{175, 160, 110}, F3{65, 105, 55}, smooth01(0.0F, 0.12F, height));
+    ground = mix(ground, F3{100, 85, 70}, smooth01(0.35F, 0.6F, height));
+    ground = mix(ground, F3{245, 248, 255}, smooth01(0.62F, 0.75F, height + 0.1F * ridge));
+    return mul(ground, (0.6F + 0.6F * lit) * (0.85F + 0.3F * ridge));
+  }
+}
+}  // namespace
+
 // Kelvin-Helmholtz billows. The view shears along its midline (top half to
 // the right, bottom half to the left) and the interface rolls up into a row
 // of cat's-eye vortices: the Stuart vortex solution of the Euler equations,
@@ -90,14 +185,7 @@ void effectKarmanVortex(const Renderer& renderer, const std::vector<Rgb>& src, i
   FlowMap flow(w, h, Boundary::Wrap);
   int frame = 0;
 
-  struct Vortex
-  {
-    float x;
-    float y;  // screen rows
-    float gamma;
-    float rc2;
-  };
-  std::vector<Vortex> active;
+  std::vector<KarmanVortex> active;
 
   runFrames(
       renderer,
@@ -125,38 +213,10 @@ void effectKarmanVortex(const Renderer& renderer, const std::vector<Rgb>& src, i
           const float grow = std::min(1.0F, age / 10.0F);
           active.push_back({x, yc - sgn * off / ya, sgn * 6.5F * U * rc * grow, rc * rc});
         }
-        flow.step(
-            [&](float x, float y, float& vx, float& vy)
-            {
-              const float X = x - xc;
-              const float Y = (y - yc) * ya;
-              const float r2 = X * X + Y * Y;
-              if (r2 < R * R)
-              {
-                vx = vy = 0.0F;
-                return;
-              }
-              const float R2 = R * R;
-              const float r4 = r2 * r2;
-              float ux = U * (1.0F - R2 * (X * X - Y * Y) / r4);
-              float uy = -U * 2.0F * R2 * X * Y / r4;
-              for (const auto& v : active)
-              {
-                const float dx = x - v.x;
-                const float dy = (y - v.y) * ya;
-                const float d2 = dx * dx + dy * dy + 1e-3F;
-                const float fac = v.gamma / (2.0F * kPi * d2) * (1.0F - std::exp(-d2 / v.rc2));
-                ux += -fac * dy;
-                uy += fac * dx;
-              }
-              vx = ux * ramp;
-              vy = uy * ramp / ya;
-            });
+        const KarmanFlow kf{xc, yc, R, U, ya, ramp, active};
+        flow.step([&](float x, float y, float& vx, float& vy) { karmanVelocity(kf, x, y, vx, vy); });
 
         const float fade = 1.0F - smooth01(0.86F, 1.0F, t);
-        const float lx = -0.55F;
-        const float ly = -0.55F;
-        const float lz = 0.63F;  // light from the upper left
         for (int y = 0; y < h; ++y)
           for (int x = 0; x < w; ++x)
           {
@@ -167,37 +227,7 @@ void effectKarmanVortex(const Renderer& renderer, const std::vector<Rgb>& src, i
             F3 c;
             if (q2 < 1.0F)  // the island, with a ragged coast and an off-centre peak
             {
-              const float q = std::sqrt(q2);
-              const float ca = X / std::max(q, 1e-3F);
-              const float sa = Y / std::max(q, 1e-3F);
-              const float coast = 0.8F + 0.25F * fbm(ca * 1.6F + 3.0F, sa * 1.6F + 3.0F, 3, 67);
-              const float px = X + 0.3F;  // the peak sits upwind of the centre
-              const float py = Y + 0.15F;
-              const float hq = std::sqrt(px * px + py * py) / coast;
-              const float ridge = fbm(X * 3.0F + 7.0F, Y * 3.0F, 3, 61);
-              if (q > coast)  // shallow water ringing the shore
-                c = mix(bilinear(src, w, h, flow.u(i), flow.v(i)), F3{120, 200, 190}, 0.6F);
-              else
-              {
-                const float height = std::max(0.0F, 1.0F - hq) * (0.8F + 0.4F * ridge);
-                // Lambert light on the height field's local slope.
-                const float e = 0.05F;
-                const float hx = (std::max(0.0F, 1.0F - std::hypot(px + e, py) / coast) -
-                                  std::max(0.0F, 1.0F - hq)) /
-                                 e;
-                const float hy = (std::max(0.0F, 1.0F - std::hypot(px, py + e) / coast) -
-                                  std::max(0.0F, 1.0F - hq)) /
-                                 e;
-                const float nx = -hx * 0.8F;
-                const float ny = -hy * 0.8F;
-                const float lit = std::clamp(
-                    (nx * lx + ny * ly + lz) / std::sqrt(nx * nx + ny * ny + 1.0F), 0.1F, 1.0F);
-                F3 ground = mix(F3{175, 160, 110}, F3{65, 105, 55}, smooth01(0.0F, 0.12F, height));
-                ground = mix(ground, F3{100, 85, 70}, smooth01(0.35F, 0.6F, height));
-                ground =
-                    mix(ground, F3{245, 248, 255}, smooth01(0.62F, 0.75F, height + 0.1F * ridge));
-                c = mul(ground, (0.6F + 0.6F * lit) * (0.85F + 0.3F * ridge));
-              }
+              c = karmanIsland(src, w, h, flow, i, X, Y, q2);
             }
             else
             {
