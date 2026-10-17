@@ -187,6 +187,81 @@ void splitCell(const Rgb* q, int n, Rgb& fg, Rgb& bg, std::uint8_t& mask)
              static_cast<std::uint8_t>(sumG[1] / count[1]),
              static_cast<std::uint8_t>(sumB[1] / count[1])};
 }
+
+// The n = 2 * subRows sub-cells of terminal cell (cx, cy), missing outside the raster
+std::array<Rgb, 8> gatherCell(
+    const std::vector<Rgb>& pixels, int subWidth, int subRows, int cx, int cy, const Rgb& missing)
+{
+  std::array<Rgb, 8> q{};  // up to 8 sub-cells (octant); we use n of them
+  for (int sy = 0; sy < subRows; ++sy)
+  {
+    for (int sx = 0; sx < 2; ++sx)
+    {
+      int x = cx * 2 + sx;
+      int y = cy * subRows + sy;
+      int idx = y * subWidth + x;
+      q[sy * 2 + sx] = (idx >= 0 && idx < static_cast<int>(pixels.size())) ? pixels[idx] : missing;
+    }
+  }
+  return q;
+}
+
+// Mean colour of the opaque sub-cells, and their mask
+Rgb opaqueMean(const std::array<Rgb, 8>& q, int n, std::uint8_t& mixedMask)
+{
+  int sumR = 0;
+  int sumG = 0;
+  int sumB = 0;
+  int count = 0;
+  for (int i = 0; i < n; ++i)
+  {
+    if (!q[i].transparent)
+    {
+      mixedMask |= static_cast<std::uint8_t>(1U << i);
+      sumR += q[i].r;
+      sumG += q[i].g;
+      sumB += q[i].b;
+      ++count;
+    }
+  }
+  return Rgb{static_cast<std::uint8_t>(sumR / count),
+             static_cast<std::uint8_t>(sumG / count),
+             static_cast<std::uint8_t>(sumB / count)};
+}
+
+// Emit a fully opaque cell: split into two colours and pick the glyph of the style
+void renderOpaqueCell(
+    std::ostream& os, const std::array<Rgb, 8>& q, int n, CornerStyle style, bool truecolor)
+{
+  Rgb fg{};
+  Rgb bg{};
+  std::uint8_t mask = 0;
+  splitCell(q.data(), n, fg, bg, mask);
+
+  const char* glyph = nullptr;
+  bool swapColors = false;
+  if (style == CornerStyle::SmallTriangle)
+  {
+    glyph = kSmallTriangle[mask];
+    swapColors = (glyph != nullptr) && smallTriangleSwapsColors(mask);
+  }
+  if (glyph == nullptr)
+    glyph = (style == CornerStyle::Sextant) ? sextantTable()[mask] : kQuadrant[mask];
+
+  const Rgb& outFg = swapColors ? bg : fg;
+  const Rgb& outBg = swapColors ? fg : bg;
+  if (truecolor)
+  {
+    os << "\x1b[38;2;" << static_cast<int>(outFg.r) << ';' << static_cast<int>(outFg.g) << ';'
+       << static_cast<int>(outFg.b) << "m\x1b[48;2;" << static_cast<int>(outBg.r) << ';'
+       << static_cast<int>(outBg.g) << ';' << static_cast<int>(outBg.b) << 'm';
+  }
+  else
+  {
+    os << "\x1b[38;5;" << xterm256(outFg) << "m\x1b[48;5;" << xterm256(outBg) << 'm';
+  }
+  os << glyph;
+}
 }  // namespace
 
 CornerStyle defaultCornerStyle()
@@ -267,18 +342,7 @@ void Renderer::render(std::ostream& os,
     os << "\x1b[" << (originRow + cy + 1) << ';' << (originCol + 1) << 'H';
     for (int cx = 0; cx < cellW; ++cx)
     {
-      std::array<Rgb, 8> q{};  // up to 8 sub-cells (octant); we use n of them
-      for (int sy = 0; sy < subRows; ++sy)
-      {
-        for (int sx = 0; sx < 2; ++sx)
-        {
-          int x = cx * 2 + sx;
-          int y = cy * subRows + sy;
-          int idx = y * subWidth + x;
-          q[sy * 2 + sx] =
-              (idx >= 0 && idx < static_cast<int>(pixels.size())) ? pixels[idx] : missing;
-        }
-      }
+      const std::array<Rgb, 8> q = gatherCell(pixels, subWidth, subRows, cx, cy, missing);
       // Count transparent sub-cells: those render as the terminal's default
       // background (no colour), so we treat them differently from opaque
       // colours — never use them as a "real" colour in k-means.
@@ -298,56 +362,12 @@ void Renderer::render(std::ostream& os,
         // Mixed: opaque sub-cells become the foreground, transparent ones
         // are background (terminal default).
         std::uint8_t mixedMask = 0;
-        int sumR = 0;
-        int sumG = 0;
-        int sumB = 0;
-        int count = 0;
-        for (int i = 0; i < n; ++i)
-        {
-          if (!q[i].transparent)
-          {
-            mixedMask |= static_cast<std::uint8_t>(1U << i);
-            sumR += q[i].r;
-            sumG += q[i].g;
-            sumB += q[i].b;
-            ++count;
-          }
-        }
-        Rgb fgMean{static_cast<std::uint8_t>(sumR / count),
-                   static_cast<std::uint8_t>(sumG / count),
-                   static_cast<std::uint8_t>(sumB / count)};
+        const Rgb fgMean = opaqueMean(q, n, mixedMask);
         os << "\x1b[49m" << fgEscape(fgMean) << baseGlyph(mixedMask);
         continue;
       }
 
-      Rgb fg{};
-      Rgb bg{};
-      std::uint8_t mask = 0;
-      splitCell(q.data(), n, fg, bg, mask);
-
-      const char* glyph = nullptr;
-      bool swapColors = false;
-      if (itsCornerStyle == CornerStyle::SmallTriangle)
-      {
-        glyph = kSmallTriangle[mask];
-        swapColors = (glyph != nullptr) && smallTriangleSwapsColors(mask);
-      }
-      if (glyph == nullptr)
-        glyph = baseGlyph(mask);
-
-      const Rgb& outFg = swapColors ? bg : fg;
-      const Rgb& outBg = swapColors ? fg : bg;
-      if (itsTruecolor)
-      {
-        os << "\x1b[38;2;" << static_cast<int>(outFg.r) << ';' << static_cast<int>(outFg.g) << ';'
-           << static_cast<int>(outFg.b) << "m\x1b[48;2;" << static_cast<int>(outBg.r) << ';'
-           << static_cast<int>(outBg.g) << ';' << static_cast<int>(outBg.b) << 'm';
-      }
-      else
-      {
-        os << "\x1b[38;5;" << xterm256(outFg) << "m\x1b[48;5;" << xterm256(outBg) << 'm';
-      }
-      os << glyph;
+      renderOpaqueCell(os, q, n, itsCornerStyle, itsTruecolor);
     }
     os << "\x1b[0m";
   }
