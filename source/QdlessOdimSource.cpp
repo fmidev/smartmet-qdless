@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -24,50 +25,59 @@ namespace
 // caller can fall back to displaying the literal quantity string.
 int operaToNewbase(const std::string& product, const std::string& quantity)
 {
-  if (product == "PPI" || product == "CAPPI" || product == "PCAPPI")
-  {
-    if (quantity == "TH" || quantity == "DBZ") return kFmiReflectivity;
-    if (quantity == "DBZH") return kFmiCorrectedReflectivity;
-    if (quantity == "VRAD") return kFmiRadialVelocity;
-    if (quantity == "WRAD" || quantity == "W") return kFmiSpectralWidth;
-    if (quantity == "RATE") return kFmiPrecipitationRate;
-  }
-  else if (product == "ETOP")
-  {
-    if (quantity == "HGHT") return kFmiEchoTop;
-  }
-  else if (product == "MAX")
-  {
-    if (quantity == "TH") return kFmiReflectivity;
-    if (quantity == "DBZH") return kFmiCorrectedReflectivity;
-  }
-  else if (product == "RR")
-  {
-    if (quantity == "ACRR") return kFmiPrecipitationAmount;
-    if (quantity == "RATE") return kFmiPrecipitationRate;
-  }
-  else if (product == "VIL")
-  {
-    if (quantity == "ACRR") return kFmiPrecipitationAmount;
-  }
-  else if (product == "COMP")
-  {
-    if (quantity == "RATE") return kFmiPrecipitationRate;
-    if (quantity == "BRDR") return kFmiRadarBorder;
-    if (quantity == "TH") return kFmiReflectivity;
-    if (quantity == "DBZH") return kFmiCorrectedReflectivity;
-    if (quantity == "ACRR") return kFmiPrecipitationAmount;
-    if (quantity == "QIND") return kFmiSignalQualityIndex;
-  }
+  // Product-specific mappings
+  static const std::map<std::pair<std::string, std::string>, int> kByProduct = {
+      {{"PPI", "TH"}, kFmiReflectivity},
+      {{"PPI", "DBZ"}, kFmiReflectivity},
+      {{"PPI", "DBZH"}, kFmiCorrectedReflectivity},
+      {{"PPI", "VRAD"}, kFmiRadialVelocity},
+      {{"PPI", "WRAD"}, kFmiSpectralWidth},
+      {{"PPI", "W"}, kFmiSpectralWidth},
+      {{"PPI", "RATE"}, kFmiPrecipitationRate},
+      {{"CAPPI", "TH"}, kFmiReflectivity},
+      {{"CAPPI", "DBZ"}, kFmiReflectivity},
+      {{"CAPPI", "DBZH"}, kFmiCorrectedReflectivity},
+      {{"CAPPI", "VRAD"}, kFmiRadialVelocity},
+      {{"CAPPI", "WRAD"}, kFmiSpectralWidth},
+      {{"CAPPI", "W"}, kFmiSpectralWidth},
+      {{"CAPPI", "RATE"}, kFmiPrecipitationRate},
+      {{"PCAPPI", "TH"}, kFmiReflectivity},
+      {{"PCAPPI", "DBZ"}, kFmiReflectivity},
+      {{"PCAPPI", "DBZH"}, kFmiCorrectedReflectivity},
+      {{"PCAPPI", "VRAD"}, kFmiRadialVelocity},
+      {{"PCAPPI", "WRAD"}, kFmiSpectralWidth},
+      {{"PCAPPI", "W"}, kFmiSpectralWidth},
+      {{"PCAPPI", "RATE"}, kFmiPrecipitationRate},
+      {{"ETOP", "HGHT"}, kFmiEchoTop},
+      {{"MAX", "TH"}, kFmiReflectivity},
+      {{"MAX", "DBZH"}, kFmiCorrectedReflectivity},
+      {{"RR", "ACRR"}, kFmiPrecipitationAmount},
+      {{"RR", "RATE"}, kFmiPrecipitationRate},
+      {{"VIL", "ACRR"}, kFmiPrecipitationAmount},
+      {{"COMP", "RATE"}, kFmiPrecipitationRate},
+      {{"COMP", "BRDR"}, kFmiRadarBorder},
+      {{"COMP", "TH"}, kFmiReflectivity},
+      {{"COMP", "DBZH"}, kFmiCorrectedReflectivity},
+      {{"COMP", "ACRR"}, kFmiPrecipitationAmount},
+      {{"COMP", "QIND"}, kFmiSignalQualityIndex},
+  };
   // Quantity-only fallbacks (don't depend on product). Many local products
   // (LMR, LTB, SMV, PAC, SRI, MAX, ETOP, …) reuse standard quantities.
-  if (quantity == "TH" || quantity == "DBZ") return kFmiReflectivity;
-  if (quantity == "DBZH") return kFmiCorrectedReflectivity;
-  if (quantity == "VRAD") return kFmiRadialVelocity;
-  if (quantity == "WRAD" || quantity == "W") return kFmiSpectralWidth;
-  if (quantity == "RATE") return kFmiPrecipitationRate;
-  if (quantity == "ACRR") return kFmiPrecipitationAmount;
-  if (quantity == "HGHT") return kFmiEchoTop;
+  static const std::map<std::string, int> kByQuantity = {
+      {"TH", kFmiReflectivity},
+      {"DBZ", kFmiReflectivity},
+      {"DBZH", kFmiCorrectedReflectivity},
+      {"VRAD", kFmiRadialVelocity},
+      {"WRAD", kFmiSpectralWidth},
+      {"W", kFmiSpectralWidth},
+      {"RATE", kFmiPrecipitationRate},
+      {"ACRR", kFmiPrecipitationAmount},
+      {"HGHT", kFmiEchoTop},
+  };
+  if (auto it = kByProduct.find({product, quantity}); it != kByProduct.end())
+    return it->second;
+  if (auto it = kByQuantity.find(quantity); it != kByQuantity.end())
+    return it->second;
   return 0;
 }
 
