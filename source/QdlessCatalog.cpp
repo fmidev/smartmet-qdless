@@ -198,6 +198,47 @@ std::string indexKey(const std::string& param,
 }
 }  // namespace
 
+namespace
+{
+// Sort the levels of the axis by their numeric value (natural order)
+void sortLevelsByValue(MasalaCube::LevelAxis& axis)
+{
+  std::vector<std::size_t> idx(axis.levelStrs.size());
+  for (std::size_t i = 0; i < idx.size(); ++i)
+    idx[i] = i;
+  std::sort(idx.begin(),
+            idx.end(),
+            [&](std::size_t a, std::size_t b) { return axis.levelVals[a] < axis.levelVals[b]; });
+  std::vector<std::string> ss;
+  std::vector<double> vv;
+  ss.reserve(idx.size());
+  vv.reserve(idx.size());
+  for (auto i : idx)
+  {
+    ss.push_back(axis.levelStrs[i]);
+    vv.push_back(axis.levelVals[i]);
+  }
+  axis.levelStrs = std::move(ss);
+  axis.levelVals = std::move(vv);
+}
+
+// (leadHours, leafDir) pairs of a cube directory sorted by lead time. Numeric
+// subdirs are leadtimes; if there are none but files live directly in `dir`,
+// that's a single leaf at leadtime 0.
+std::vector<std::pair<int, std::string>> leadtimeLeaves(const std::string& dir)
+{
+  std::vector<std::pair<int, std::string>> leaves;
+  const auto subs = MasalaCatalog::listSubdirs(dir);
+  for (const auto& s : subs)
+    if (MasalaCatalog::isAllDigitsName(s))
+      leaves.emplace_back(std::atoi(s.c_str()), dir + "/" + s);
+  if (leaves.empty() && MasalaCatalog::hasCubeFiles(dir))
+    leaves.emplace_back(0, dir);
+  std::sort(leaves.begin(), leaves.end());
+  return leaves;
+}
+}  // namespace
+
 MasalaCube MasalaCube::build(const std::string& dir)
 {
   MasalaCube cube;
@@ -223,20 +264,10 @@ MasalaCube MasalaCube::build(const std::string& dir)
     }
   }
 
-  // Collect (leadHours, leafDir) pairs. Numeric subdirs are leadtimes; if
-  // there are none but files live directly in `dir`, that's a single leaf at
-  // leadtime 0.
-  std::vector<std::pair<int, std::string>> leaves;
-  const auto subs = MasalaCatalog::listSubdirs(dir);
-  for (const auto& s : subs)
-    if (MasalaCatalog::isAllDigitsName(s))
-      leaves.emplace_back(std::atoi(s.c_str()), dir + "/" + s);
-  if (leaves.empty() && MasalaCatalog::hasCubeFiles(dir))
-    leaves.emplace_back(0, dir);
+  // Collect (leadHours, leafDir) pairs.
+  const auto leaves = leadtimeLeaves(dir);
   if (leaves.empty())
     return cube;
-
-  std::sort(leaves.begin(), leaves.end());
 
   // Accumulators: param -> (typeToken -> set<levelStr,val>), and the set of
   // lead hours actually present.
@@ -292,24 +323,7 @@ MasalaCube MasalaCube::build(const std::string& dir)
         axis.levelVals.push_back(v);
       }
       // Sort levels by numeric value (natural order).
-      std::vector<std::size_t> idx(axis.levelStrs.size());
-      for (std::size_t i = 0; i < idx.size(); ++i)
-        idx[i] = i;
-      std::sort(idx.begin(),
-                idx.end(),
-                [&](std::size_t a, std::size_t b)
-                { return axis.levelVals[a] < axis.levelVals[b]; });
-      std::vector<std::string> ss;
-      std::vector<double> vv;
-      ss.reserve(idx.size());
-      vv.reserve(idx.size());
-      for (auto i : idx)
-      {
-        ss.push_back(axis.levelStrs[i]);
-        vv.push_back(axis.levelVals[i]);
-      }
-      axis.levelStrs = std::move(ss);
-      axis.levelVals = std::move(vv);
+      sortLevelsByValue(axis);
       param.levels.push_back(std::move(axis));
     }
     cube.itsParams.push_back(std::move(param));
