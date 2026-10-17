@@ -369,6 +369,83 @@ void appendRun(std::string& out, char byte, int n)
       out.push_back(byte);
   }
 }
+
+// Index of the palette colour nearest to p (brute force)
+int nearestPaletteIndex(const Rgb& p, const std::vector<std::array<int, 3>>& palette)
+{
+  int best = 0;
+  int bestD = std::numeric_limits<int>::max();
+  for (std::size_t k = 0; k < palette.size(); ++k)
+  {
+    const int d = dist2(p.r, p.g, p.b, palette[k][0], palette[k][1], palette[k][2]);
+    if (d < bestD)
+    {
+      bestD = d;
+      best = static_cast<int>(k);
+    }
+  }
+  return best;
+}
+
+// The palette entries used in rows y0..y0+rows-1, in order of appearance
+void collectBandColours(const std::vector<std::uint8_t>& map,
+                        int subWidth,
+                        int y0,
+                        int rows,
+                        std::uint8_t transparent,
+                        std::vector<std::uint8_t>& bandColors)
+{
+  bandColors.clear();
+  std::array<std::uint8_t, 256> seen{};
+  seen.fill(0);
+  for (int dy = 0; dy < rows; ++dy)
+  {
+    const std::uint8_t* row = map.data() + static_cast<std::size_t>(y0 + dy) * subWidth;
+    for (int x = 0; x < subWidth; ++x)
+    {
+      const std::uint8_t c = row[x];
+      if (c == transparent || seen[c])
+        continue;
+      seen[c] = 1;
+      bandColors.push_back(c);
+    }
+  }
+}
+
+// The sixel character of every column of the band for colour c
+void sixelColumnBytes(const std::vector<std::uint8_t>& map,
+                      int subWidth,
+                      int y0,
+                      int rows,
+                      std::uint8_t c,
+                      std::vector<char>& sixelByte)
+{
+  for (int x = 0; x < subWidth; ++x)
+  {
+    std::uint8_t mask = 0;
+    for (int dy = 0; dy < rows; ++dy)
+    {
+      if (map[static_cast<std::size_t>(y0 + dy) * subWidth + x] == c)
+        mask = static_cast<std::uint8_t>(mask | (1U << dy));
+    }
+    sixelByte[static_cast<std::size_t>(x)] = static_cast<char>('?' + mask);
+  }
+}
+
+// Run-length compressed column sweep of the sixel characters
+void appendRunLengths(std::string& out, const std::vector<char>& sixelByte)
+{
+  const int n = static_cast<int>(sixelByte.size());
+  int runStart = 0;
+  while (runStart < n)
+  {
+    int runEnd = runStart + 1;
+    while (runEnd < n && sixelByte[runEnd] == sixelByte[runStart])
+      ++runEnd;
+    appendRun(out, sixelByte[runStart], runEnd - runStart);
+    runStart = runEnd;
+  }
+}
 }  // namespace
 
 void renderSixel(std::ostream& os,
@@ -417,18 +494,7 @@ void renderSixel(std::ostream& os,
     const Rgb& p = pixels[i];
     if (p.transparent)
       continue;
-    int best = 0;
-    int bestD = std::numeric_limits<int>::max();
-    for (std::size_t k = 0; k < nPal; ++k)
-    {
-      const int d = dist2(p.r, p.g, p.b, palette[k][0], palette[k][1], palette[k][2]);
-      if (d < bestD)
-      {
-        bestD = d;
-        best = static_cast<int>(k);
-      }
-    }
-    map[i] = static_cast<std::uint8_t>(best);
+    map[i] = static_cast<std::uint8_t>(nearestPaletteIndex(p, palette));
   }
 
   // Build the sixel payload.
@@ -475,50 +541,19 @@ void renderSixel(std::ostream& os,
     const int rows = std::min(6, subHeight - y0);
     // Which palette entries actually appear in this band? Avoids paying for
     // 254 colour passes when the band only uses a handful.
-    bandColors.clear();
-    std::array<std::uint8_t, 256> seen{};
-    seen.fill(0);
-    for (int dy = 0; dy < rows; ++dy)
-    {
-      const std::uint8_t* row = map.data() + static_cast<std::size_t>(y0 + dy) * subWidth;
-      for (int x = 0; x < subWidth; ++x)
-      {
-        const std::uint8_t c = row[x];
-        if (c == kTransparent || seen[c])
-          continue;
-        seen[c] = 1;
-        bandColors.push_back(c);
-      }
-    }
+    collectBandColours(map, subWidth, y0, rows, kTransparent, bandColors);
 
     for (std::size_t ci = 0; ci < bandColors.size(); ++ci)
     {
       const std::uint8_t c = bandColors[ci];
       // Build the per-column 6-bit mask.
-      for (int x = 0; x < subWidth; ++x)
-      {
-        std::uint8_t mask = 0;
-        for (int dy = 0; dy < rows; ++dy)
-        {
-          if (map[static_cast<std::size_t>(y0 + dy) * subWidth + x] == c)
-            mask = static_cast<std::uint8_t>(mask | (1U << dy));
-        }
-        sixelByte[static_cast<std::size_t>(x)] = static_cast<char>('?' + mask);
-      }
+      sixelColumnBytes(map, subWidth, y0, rows, c, sixelByte);
       // `#<idx>` selects current colour register.
       char colorSel[16];
       const int cl = std::snprintf(colorSel, sizeof(colorSel), "#%u", c);
       out.append(colorSel, static_cast<std::size_t>(cl));
       // Run-length compressed column sweep.
-      int runStart = 0;
-      while (runStart < subWidth)
-      {
-        int runEnd = runStart + 1;
-        while (runEnd < subWidth && sixelByte[runEnd] == sixelByte[runStart])
-          ++runEnd;
-        appendRun(out, sixelByte[runStart], runEnd - runStart);
-        runStart = runEnd;
-      }
+      appendRunLengths(out, sixelByte);
       // Return to start of band for the next colour (skip after last).
       if (ci + 1 < bandColors.size())
         out.push_back('$');
