@@ -5,22 +5,134 @@ namespace Qdless
 namespace ee_detail
 {
 
+namespace
+{
+// Paper-tinted greyscale copy of the source frame: base + luma * gain per channel
+void drawTintedLuma(std::vector<Rgb>& dst,
+                    const std::vector<Rgb>& src,
+                    int w,
+                    int h,
+                    float missingLuma,
+                    const std::array<float, 3>& base,
+                    const std::array<float, 3>& gain)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x)
+    {
+      const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+      const float l = s.transparent ? missingLuma : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+      dst[static_cast<std::size_t>(y) * w + x] =
+          Rgb{u8(base[0] + l * gain[0]), u8(base[1] + l * gain[1]), u8(base[2] + l * gain[2]),
+              false};
+    }
+}
+
+// Banksy heart balloon, shredded from the bottom upward as shred goes 0..1
+void drawShreddingHeart(
+    std::vector<Rgb>& dst, int w, int h, float bx, float by, float R, float shred, const Rgb& red)
+{
+  const int yTop = static_cast<int>(by - R * 1.10F);
+  const int yBot = static_cast<int>(by + R * 1.20F);
+  for (int yy = yTop; yy <= yBot; ++yy)
+  {
+    if (yy < 0 || yy >= h) continue;
+    const float ny = (yy - by) / R;
+    for (int xx = static_cast<int>(bx - R * 1.15F); xx <= static_cast<int>(bx + R * 1.15F); ++xx)
+    {
+      if (xx < 0 || xx >= w) continue;
+      const float nx = (xx - bx) / R;
+      // Heart curve: (x² + y² - 1)³ - x² y³ ≤ 0
+      const float a = nx * nx + ny * ny - 1.0F;
+      const float heart = a * a * a - nx * nx * ny * ny * ny;
+      if (heart <= 0.0F)
+      {
+        // Below shred-front: replace with strip drifting downward.
+        const float shredFront = (1.0F - shred) * 2.2F - 1.1F;
+        if (ny > shredFront) continue;
+        dst[static_cast<std::size_t>(yy) * w + xx] = red;
+      }
+    }
+  }
+}
+
+// Pipe bowl rising out of the stem near its left end as draw goes 0.55..1
+void drawPipeBowl(std::vector<Rgb>& dst,
+                  int w,
+                  int h,
+                  float pipeCx,
+                  float pipeCy,
+                  float bowlR,
+                  float draw,
+                  float mn,
+                  float ya,
+                  const Rgb& ink)
+{
+  const float bd = std::clamp((draw - 0.55F) / 0.45F, 0.0F, 1.0F);
+  for (float a = -0.2F; a < 2.0F * 3.14159F * bd; a += 0.06F)
+  {
+    const float bxd = pipeCx + std::sin(a) * bowlR;
+    const float byd = pipeCy - bowlR * 0.6F - bowlR * (1.0F - std::cos(a));
+    plotDot(dst, w, h, bxd, byd, std::max(1.0F, mn * 0.008F), ya, ink);
+  }
+}
+
+// The first nReveal letters of line in the 5x7 font, sc pixels per font dot
+void drawTypedText(std::vector<Rgb>& dst,
+                   int w,
+                   int h,
+                   const std::string& line,
+                   int nReveal,
+                   int sc,
+                   float startX,
+                   float startY,
+                   float ya,
+                   const Rgb& ink)
+{
+  for (int ci = 0; ci < nReveal && ci < static_cast<int>(line.size()); ++ci)
+  {
+    const char ch = line[ci];
+    const auto g = glyph5x7(ch);
+    for (int fy = 0; fy < 7; ++fy)
+      for (int fx = 0; fx < 5; ++fx)
+        if (g[fy][fx] == '1')
+          plotDot(dst, w, h, startX + (ci * 6 + fx) * sc, startY + fy * sc,
+                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, ink);
+  }
+}
+
+// Horizontal band from yTop to yBot whose half-width tapers as S * (a + b * yf), yf = 0..1
+void fillTaperedBand(std::vector<Rgb>& dst,
+                     int w,
+                     int h,
+                     float cx,
+                     float yTop,
+                     float yBot,
+                     float span,
+                     float S,
+                     float a,
+                     float b,
+                     const Rgb& colour)
+{
+  for (int yy = static_cast<int>(yTop); yy <= static_cast<int>(yBot); ++yy)
+  {
+    const float yf = (yy - yTop) / span;
+    const int half = static_cast<int>(S * (a + b * yf));
+    for (int xo = -half; xo <= half; ++xo)
+      if (cx + xo >= 0 && cx + xo < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + static_cast<int>(cx + xo)] = colour;
+  }
+}
+}  // namespace
+
 void effectBanksyBalloon(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 80.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(220 + l * 0.10F), u8(212 + l * 0.10F), u8(196 + l * 0.08F), false};
-                }
+              drawTintedLuma(dst, src, w, h, 80.0F, {220, 212, 196}, {0.10F, 0.10F, 0.08F});
               const float rise = std::clamp(t / 0.85F, 0.0F, 1.0F);
               const float bx = w * (0.45F + 0.06F * std::sin(t * 1.7F));
               const float by = h * (1.05F - rise * 1.05F);
@@ -32,29 +144,7 @@ void effectBanksyBalloon(const Renderer& renderer, const std::vector<Rgb>& src, 
               // Heart shape: two circles + downward triangle. Shred from bottom
               // upward over the last quarter of the animation.
               const float shred = std::clamp((t - 0.72F) / 0.28F, 0.0F, 1.0F);
-              const int yTop = static_cast<int>(by - R * 1.10F);
-              const int yBot = static_cast<int>(by + R * 1.20F);
-              for (int yy = yTop; yy <= yBot; ++yy)
-              {
-                if (yy < 0 || yy >= h) continue;
-                const float ny = (yy - by) / R;
-                for (int xx = static_cast<int>(bx - R * 1.15F);
-                     xx <= static_cast<int>(bx + R * 1.15F); ++xx)
-                {
-                  if (xx < 0 || xx >= w) continue;
-                  const float nx = (xx - bx) / R;
-                  // Heart curve: (x² + y² - 1)³ - x² y³ ≤ 0
-                  const float a = nx * nx + ny * ny - 1.0F;
-                  const float heart = a * a * a - nx * nx * ny * ny * ny;
-                  if (heart <= 0.0F)
-                  {
-                    // Below shred-front: replace with strip drifting downward.
-                    const float shredFront = (1.0F - shred) * 2.2F - 1.1F;
-                    if (ny > shredFront) continue;
-                    dst[static_cast<std::size_t>(yy) * w + xx] = red;
-                  }
-                }
-              }
+              drawShreddingHeart(dst, w, h, bx, by, R, shred, red);
               // Drifting paper strips below the shred front.
               if (shred > 0.0F)
               {
@@ -186,18 +276,10 @@ void effectCeciNestPas(const Renderer& renderer, const std::vector<Rgb>& src, in
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 80.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(218 + l * 0.10F), u8(204 + l * 0.10F), u8(168 + l * 0.08F), false};
-                }
+              drawTintedLuma(dst, src, w, h, 80.0F, {218, 204, 168}, {0.10F, 0.10F, 0.08F});
               const Rgb ink{34, 24, 18, false};
               const float pipeCx = w * 0.5F;
               const float pipeCy = h * 0.40F;
@@ -210,15 +292,7 @@ void effectCeciNestPas(const Renderer& renderer, const std::vector<Rgb>& src, in
                       ink);
               // Bowl (rises out of the stem near its left end).
               if (draw > 0.55F)
-              {
-                const float bd = std::clamp((draw - 0.55F) / 0.45F, 0.0F, 1.0F);
-                for (float a = -0.2F; a < 2.0F * 3.14159F * bd; a += 0.06F)
-                {
-                  const float bxd = pipeCx + std::sin(a) * bowlR;
-                  const float byd = pipeCy - bowlR * 0.6F - bowlR * (1.0F - std::cos(a));
-                  plotDot(dst, w, h, bxd, byd, std::max(1.0F, mn * 0.008F), ya, ink);
-                }
-              }
+                drawPipeBowl(dst, w, h, pipeCx, pipeCy, bowlR, draw, mn, ya, ink);
               // Text below the pipe — types out letter by letter.
               const std::string line = "CECI N'EST PAS UN TERMINAL";
               const float typeT = std::clamp((t - 0.45F) / 0.50F, 0.0F, 1.0F);
@@ -227,16 +301,7 @@ void effectCeciNestPas(const Renderer& renderer, const std::vector<Rgb>& src, in
               const float lineW = static_cast<float>(line.size()) * 6 * sc;
               const float startX = pipeCx - lineW * 0.5F;
               const float startY = pipeCy + mn * 0.20F;
-              for (int ci = 0; ci < nReveal && ci < static_cast<int>(line.size()); ++ci)
-              {
-                const char ch = line[ci];
-                const auto g = glyph5x7(ch);
-                for (int fy = 0; fy < 7; ++fy)
-                  for (int fx = 0; fx < 5; ++fx)
-                    if (g[fy][fx] == '1')
-                      plotDot(dst, w, h, startX + (ci * 6 + fx) * sc, startY + fy * sc,
-                              std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, ink);
-              }
+              drawTypedText(dst, w, h, line, nReveal, sc, startX, startY, ya, ink);
             });
 }
 
@@ -330,26 +395,13 @@ void effectMagritteBowler(const Renderer& renderer, const std::vector<Rgb>& src,
               const Rgb apple{40, 160, 60, false};
               const Rgb appleLeaf{80, 50, 40, false};
               // Body: trapezoidal coat.
-              for (int yy = static_cast<int>(baseY - S * 0.5F); yy <= static_cast<int>(baseY); ++yy)
-              {
-                const float yf = (yy - (baseY - S * 0.5F)) / (S * 0.5F);
-                const int half = static_cast<int>(S * (0.20F + 0.20F * yf));
-                for (int xo = -half; xo <= half; ++xo)
-                  if (cx + xo >= 0 && cx + xo < w && yy >= 0 && yy < h)
-                    dst[static_cast<std::size_t>(yy) * w + static_cast<int>(cx + xo)] = coat;
-              }
+              fillTaperedBand(dst, w, h, cx, baseY - S * 0.5F, baseY, S * 0.5F, S, 0.20F, 0.20F,
+                              coat);
               // Head.
               plotDot(dst, w, h, cx, baseY - S * 0.6F, S * 0.16F, ya, face);
               // Bowler hat: dome + flat brim.
-              for (int yy = static_cast<int>(baseY - S * 0.82F); yy <= static_cast<int>(baseY - S * 0.70F);
-                   ++yy)
-              {
-                const float yf = (yy - (baseY - S * 0.82F)) / (S * 0.12F);
-                const int half = static_cast<int>(S * (0.14F + 0.04F * yf));
-                for (int xo = -half; xo <= half; ++xo)
-                  if (cx + xo >= 0 && cx + xo < w && yy >= 0 && yy < h)
-                    dst[static_cast<std::size_t>(yy) * w + static_cast<int>(cx + xo)] = hat;
-              }
+              fillTaperedBand(dst, w, h, cx, baseY - S * 0.82F, baseY - S * 0.70F, S * 0.12F, S,
+                              0.14F, 0.04F, hat);
               drawSeg(dst, w, h, cx - S * 0.20F, baseY - S * 0.70F, cx + S * 0.20F, baseY - S * 0.70F,
                       std::max(1.0F, mn * 0.008F), ya, hat);
               // Apple floats up to cover face.
@@ -469,51 +521,125 @@ void effectWarholBanana(const Renderer& renderer, const std::vector<Rgb>& src, i
             });
 }
 
+namespace
+{
+// Mona Lisa backdrop: luma over a vertical umber gradient
+void drawSfumatoBackground(std::vector<Rgb>& dst, const std::vector<Rgb>& src, int w, int h)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x) {
+      const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
+      const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+      const float sf = static_cast<float>(y) / h;
+      dst[static_cast<std::size_t>(y) * w + x] =
+          Rgb{u8(80 + 50 * (1 - sf) + l * 0.10F), u8(60 + 40 * (1 - sf) + l * 0.10F), u8(40 + 30 * sf + l * 0.08F), false};
+    }
+}
+
+// Gilded picture frame: the outer 5% of the FW x FH half-extents around (cx, cy)
+void drawPortraitFrame(std::vector<Rgb>& dst, int w, int h, float cx, float cy, float FW, float FH)
+{
+  for (int yo = static_cast<int>(-FH); yo <= static_cast<int>(FH); ++yo)
+    for (int xo = -static_cast<int>(FW); xo <= static_cast<int>(FW); ++xo) {
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(cy + yo);
+      if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+      const float ax = std::fabs(xo) / FW;
+      const float ay = std::fabs(yo) / FH;
+      if (ax > 0.95F || ay > 0.95F)
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{180, 130, 50, false};
+    }
+}
+
+// Mona Lisa's dress: a data-sampled trapezoid below the face
+void drawDataDress(std::vector<Rgb>& dst,
+                   const std::vector<Rgb>& src,
+                   int w,
+                   int h,
+                   float cx,
+                   float cy,
+                   float FW,
+                   float FH)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  for (int yo = static_cast<int>(FH * 0.05F); yo <= static_cast<int>(FH * 0.95F); ++yo)
+    for (int xo = -static_cast<int>(FW * 0.85F); xo <= static_cast<int>(FW * 0.85F); ++xo) {
+      const float yf = yo / (FH * 0.95F);
+      const float xf = std::fabs(xo) / (FW * 0.85F);
+      if (xf > 0.40F + 0.40F * yf) continue;
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(cy + yo);
+      if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 60.0F : d.r;
+      const float dg = d.transparent ? 50.0F : d.g;
+      const float db = d.transparent ? 30.0F : d.b;
+      dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(40 + dr * 0.25F), u8(30 + dg * 0.20F), u8(20 + db * 0.15F), false};
+    }
+}
+
+// Cezanne backdrop: sampled luma with a vertical darkening
+void drawPainterlyBackground(std::vector<Rgb>& dst, const std::vector<Rgb>& src, int w, int h)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x) {
+      const Rgb d = sample(src, w, h, x, y);
+      const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
+      const float sf = static_cast<float>(y) / h;
+      dst[static_cast<std::size_t>(y) * w + x] =
+          Rgb{u8(120 + dl * 0.30F - 20 * sf), u8(100 + dl * 0.30F - 30 * sf),
+              u8(70 + dl * 0.20F), false};
+    }
+}
+
+// Wooden table slab from tableY down to the bottom edge
+void drawWoodenTable(
+    std::vector<Rgb>& dst, const std::vector<Rgb>& src, int w, int h, float tableY)
+{
+  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
+  for (int yy = static_cast<int>(tableY); yy < h; ++yy)
+    for (int xx = 0; xx < w; ++xx) {
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 100.0F : d.r;
+      const float yf = (yy - tableY) / (h - tableY);
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          Rgb{u8(140 + dr * 0.20F - 30 * yf), u8(80 - 20 * yf), u8(40), false};
+    }
+}
+
+// Wide brown bowl ellipse centred on (bowlCx, bowlCy)
+void fillBowlEllipse(std::vector<Rgb>& dst, int w, int h, float bowlCx, float bowlCy, float mn)
+{
+  for (int yo = -static_cast<int>(mn * 0.08F); yo <= static_cast<int>(mn * 0.02F); ++yo)
+    for (int xo = -static_cast<int>(mn * 0.25F); xo <= static_cast<int>(mn * 0.25F); ++xo) {
+      const float nx = xo / (mn * 0.25F);
+      const float nyN = yo / (mn * 0.08F);
+      if (nx * nx + nyN * nyN > 1.0F) continue;
+      const int xx = static_cast<int>(bowlCx + xo);
+      const int yy = static_cast<int>(bowlCy + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{120, 70, 30, false};
+    }
+}
+}  // namespace
+
 void effectMonaLisa(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          const float sf = static_cast<float>(y) / h;
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(80 + 50 * (1 - sf) + l * 0.10F), u8(60 + 40 * (1 - sf) + l * 0.10F), u8(40 + 30 * sf + l * 0.08F), false};
-        }
+      drawSfumatoBackground(dst, src, w, h);
       const float cx = w * 0.5F;
       const float cy = h * 0.55F;
       const float FW = mn * 0.30F;
       const float FH = mn * 0.45F;
       // Frame.
-      for (int yo = static_cast<int>(-FH); yo <= static_cast<int>(FH); ++yo)
-        for (int xo = -static_cast<int>(FW); xo <= static_cast<int>(FW); ++xo) {
-          const int xx = static_cast<int>(cx + xo);
-          const int yy = static_cast<int>(cy + yo);
-          if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-          const float ax = std::fabs(xo) / FW;
-          const float ay = std::fabs(yo) / FH;
-          if (ax > 0.95F || ay > 0.95F)
-            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{180, 130, 50, false};
-        }
+      drawPortraitFrame(dst, w, h, cx, cy, FW, FH);
       // Dress: data-sampled trapezoid below face.
-      for (int yo = static_cast<int>(FH * 0.05F); yo <= static_cast<int>(FH * 0.95F); ++yo)
-        for (int xo = -static_cast<int>(FW * 0.85F); xo <= static_cast<int>(FW * 0.85F); ++xo) {
-          const float yf = yo / (FH * 0.95F);
-          const float xf = std::fabs(xo) / (FW * 0.85F);
-          if (xf > 0.40F + 0.40F * yf) continue;
-          const int xx = static_cast<int>(cx + xo);
-          const int yy = static_cast<int>(cy + yo);
-          if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-          const Rgb d = sample(src, w, h, xx, yy);
-          const float dr = d.transparent ? 60.0F : d.r;
-          const float dg = d.transparent ? 50.0F : d.g;
-          const float db = d.transparent ? 30.0F : d.b;
-          dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{u8(40 + dr * 0.25F), u8(30 + dg * 0.20F), u8(20 + db * 0.15F), false};
-        }
+      drawDataDress(dst, src, w, h, cx, cy, FW, FH);
       // Face (oval).
       drawDataDisk(dst, w, h, src, cx, cy - FH * 0.30F, FW * 0.30F, ya, 0.5F, 0.0F, Rgb{220, 190, 150, false});
       // Hair.
@@ -583,43 +709,18 @@ void effectCezanneStill(const Renderer& renderer, const std::vector<Rgb>& src, i
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   FootSprite f = loadPythonFootSprite();
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
       // Painterly background.
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb d = sample(src, w, h, x, y);
-          const float dl = d.transparent ? 50.0F : (0.3F * d.r + 0.59F * d.g + 0.11F * d.b);
-          const float sf = static_cast<float>(y) / h;
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(120 + dl * 0.30F - 20 * sf), u8(100 + dl * 0.30F - 30 * sf),
-                  u8(70 + dl * 0.20F), false};
-        }
+      drawPainterlyBackground(dst, src, w, h);
       // Wooden table — horizontal slab.
       const float tableY = h * 0.68F;
-      for (int yy = static_cast<int>(tableY); yy < h; ++yy)
-        for (int xx = 0; xx < w; ++xx) {
-          const Rgb d = sample(src, w, h, xx, yy);
-          const float dr = d.transparent ? 100.0F : d.r;
-          const float yf = (yy - tableY) / (h - tableY);
-          dst[static_cast<std::size_t>(yy) * w + xx] =
-              Rgb{u8(140 + dr * 0.20F - 30 * yf), u8(80 - 20 * yf), u8(40), false};
-        }
+      drawWoodenTable(dst, src, w, h, tableY);
       // Bowl: a wide brown ellipse on the table.
       const float bowlCx = w * 0.5F;
       const float bowlCy = tableY - mn * 0.02F;
-      for (int yo = -static_cast<int>(mn * 0.08F); yo <= static_cast<int>(mn * 0.02F); ++yo)
-        for (int xo = -static_cast<int>(mn * 0.25F); xo <= static_cast<int>(mn * 0.25F); ++xo) {
-          const float nx = xo / (mn * 0.25F);
-          const float nyN = yo / (mn * 0.08F);
-          if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(bowlCx + xo);
-          const int yy = static_cast<int>(bowlCy + yo);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{120, 70, 30, false};
-        }
+      fillBowlEllipse(dst, w, h, bowlCx, bowlCy, mn);
       // Bowl rim ellipse.
       for (float a = 0; a < 6.2832F; a += 0.02F)
         plotDot(dst, w, h, bowlCx + std::cos(a) * mn * 0.25F,
