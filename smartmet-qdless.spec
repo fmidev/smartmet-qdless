@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.10.16
+Version: 26.10.17
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -70,11 +70,11 @@ Requires: ncurses-libs
 Requires: netcdf >= 4.3.3.1
 Requires: netcdf-cxx4
 Requires: smartmet-library-calculator >= 26.10.16
-Requires: smartmet-library-gis >= 26.10.16
-Requires: smartmet-library-grid-files >= 26.10.16
-Requires: smartmet-library-macgyver >= 26.10.16
-Requires: smartmet-library-newbase >= 26.10.16
-Requires: smartmet-library-smarttools >= 26.10.16
+Requires: smartmet-library-gis >= 26.10.17
+Requires: smartmet-library-grid-files >= 26.10.17
+Requires: smartmet-library-macgyver >= 26.10.17
+Requires: smartmet-library-newbase >= 26.10.17
+Requires: smartmet-library-smarttools >= 26.10.17
 Requires: smartmet-timezones >= 26.9.26
 Requires: zlib
 
@@ -115,6 +115,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Sat Oct 17 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.17-1.fmi
+- Split functions with a cognitive complexity above 25 into smaller helpers, no functional changes
+
 * Fri Oct 16 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.16-1.fmi
 - Uses boost::regex instead of std::regex
 - Rounding with std::lround instead of adding 0.5
