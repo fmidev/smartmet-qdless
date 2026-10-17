@@ -5,6 +5,270 @@ namespace Qdless
 namespace ee_detail
 {
 
+namespace
+{
+// Clamp a channel value to 0..255
+std::uint8_t clampU8(float v)
+{
+  return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F));
+}
+
+// Fill the box of offsets xo0..xo1, yo0..yo1 around (cx, cy), clipped to the image
+void fillOffsetBox(std::vector<Rgb>& dst,
+                   int w,
+                   int h,
+                   float cx,
+                   float cy,
+                   int xo0,
+                   int xo1,
+                   int yo0,
+                   int yo1,
+                   const Rgb& c)
+{
+  for (int yo = yo0; yo <= yo1; ++yo)
+    for (int xo = xo0; xo <= xo1; ++xo)
+    {
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(cy + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = c;
+    }
+}
+
+// Data-tinted base pair rung between the two DNA strands on row k
+void drawBasePairRung(
+    std::vector<Rgb>& dst, const std::vector<Rgb>& src, int w, int h, float xA, float xB, int k, float mn, float ya)
+{
+  for (int rr = 1; rr < 12; ++rr)
+  {
+    const float ux = xA + (xB - xA) * rr / 12.0F;
+    const Rgb d = sample(src, w, h, ux, static_cast<float>(k));
+    const float dr = d.transparent ? 180.0F : d.r;
+    const float dg = d.transparent ? 180.0F : d.g;
+    const float db = d.transparent ? 200.0F : d.b;
+    plotDot(dst, w, h, ux, k, std::max(1.0F, mn * 0.005F), ya,
+            Rgb{clampU8(dr * 0.7F + 60), clampU8(dg * 0.7F + 60), clampU8(db * 0.7F + 60),
+                false});
+  }
+}
+
+// One of Darwin's finches: beak length and depth, and the species label
+struct BeakShape
+{
+  float length, depth;
+  const char* name;
+};
+
+// Finch head at (tx, tyy) with its triangular beak pointing right and the species label below
+void drawFinchHead(std::vector<Rgb>& dst,
+                   const std::vector<Rgb>& src,
+                   int w,
+                   int h,
+                   float tx,
+                   float tyy,
+                   const BeakShape& b,
+                   float mn,
+                   float ya)
+{
+  // Beak silhouette = data-textured head + triangular beak.
+  const float headR = mn * 0.05F;
+  drawDataDisk(dst, w, h, src, tx, tyy, headR, ya, 0.7F, 0.0F,
+               Rgb{180, 130, 90, false});
+  // Beak as triangle pointing right.
+  const float bx0 = tx + headR;
+  const float bx1 = bx0 + mn * b.length;
+  const float bd = mn * b.depth;
+  for (float u = 0; u < 1.0F; u += 0.02F)
+  {
+    const float bx = bx0 + (bx1 - bx0) * u;
+    const float byHalf = bd * (1.0F - u);
+    plotDot(dst, w, h, bx, tyy, std::max(1.0F, byHalf), ya, Rgb{160, 100, 60, false});
+  }
+  // Name label.
+  const int sc = std::max(1, static_cast<int>(mn / 60.0F));
+  const std::string name(b.name);
+  for (int ci = 0; ci < static_cast<int>(name.size()); ++ci)
+  {
+    const auto g = glyph5x7(name[ci]);
+    for (int fy = 0; fy < 7; ++fy)
+      for (int fx = 0; fx < 5; ++fx)
+        if (g[fy][fx] == '1')
+          plotDot(dst, w, h, tx + (ci * 6 + fx) * sc - name.size() * 3 * sc,
+                  tyy + headR + sc * 2 + fy * sc,
+                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                  Rgb{40, 30, 20, false});
+  }
+}
+
+// Darwin's beard: a large oval below the head, growing in with fade
+void drawBeard(std::vector<Rgb>& dst, int w, int h, float cx, float cy, float S, float fade, const Rgb& ink)
+{
+  for (int yo = static_cast<int>(S * 0.05F); yo <= static_cast<int>(S * 0.55F); ++yo)
+  {
+    const float yf = (yo - S * 0.05F) / (S * 0.50F);
+    const int half = static_cast<int>(S * (0.30F + 0.10F * std::sin(yf * 3.14159F)) * fade);
+    for (int xo = -half; xo <= half; ++xo)
+    {
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(cy + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = ink;
+    }
+  }
+}
+
+// One Punnett square cell: the genotype letters and a pea coloured by dominance
+void drawPunnettCell(std::vector<Rgb>& dst,
+                     const std::vector<Rgb>& src,
+                     int w,
+                     int h,
+                     const char* genotype,
+                     bool dominant,
+                     float ccx,
+                     float ccy,
+                     float S,
+                     int sc,
+                     float ya,
+                     const Rgb& ink)
+{
+  // Letters.
+  drawDotText(dst, w, h, genotype, 2, ccx - sc * 5, ccy - sc * 3, sc,
+              std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, ink);
+  // Pea pod.
+  const Rgb yellow{220, 200, 80, false};
+  const Rgb wrinkly{160, 130, 60, false};
+  drawDataDisk(dst, w, h, src, ccx, ccy + sc * 8, S * 0.20F, ya, 0.75F, 0.0F,
+               dominant ? yellow : wrinkly);
+}
+
+// Night sea: rippling water below the horizon, a darkening sky above
+Rgb nightSeaPixel(const Rgb& s, int x, int y, float horY, float t)
+{
+  const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+  if (y > horY)
+  {
+    const float ripple = std::sin(x * 0.3F + y * 0.15F + t * 6.0F);
+    return Rgb{clampU8(10 + l * 0.10F + ripple * 10), clampU8(30 + l * 0.12F + ripple * 14),
+               clampU8(60 + l * 0.18F + ripple * 18), false};
+  }
+  const float sf = static_cast<float>(y) / horY;
+  return Rgb{clampU8(8 + 20 * (1 - sf) + l * 0.06F), clampU8(12 + 20 * (1 - sf) + l * 0.06F),
+             clampU8(20 + 30 * (1 - sf) + l * 0.08F), false};
+}
+
+// Twinkling stars in the sky above the horizon
+template <typename Hash>
+void drawSkyStars(std::vector<Rgb>& dst, int w, float horY, float t, Hash&& hash)
+{
+  for (int i = 0; i < 60; ++i)
+  {
+    const int sx = static_cast<int>(hash(i) * w);
+    const int sy = static_cast<int>(hash(i * 3) * horY);
+    const float tw = 0.5F + 0.5F * std::sin(t * 10.0F + i);
+    dst[static_cast<std::size_t>(sy) * w + sx] = Rgb{clampU8(180 * tw), clampU8(180 * tw), clampU8(220 * tw), false};
+  }
+}
+
+// HMS Beagle at (sx, sy): trapezoid hull, three masts with sails
+void drawBeagleShip(std::vector<Rgb>& dst, int w, int h, float sx, float sy, float SS, float mn, float ya)
+{
+  const Rgb hull{20, 16, 14, false};
+  // Hull (trapezoid).
+  for (int yo = 0; yo <= static_cast<int>(SS * 0.18F); ++yo)
+  {
+    const float yf = yo / (SS * 0.18F);
+    const int half = static_cast<int>(SS * (0.32F - 0.10F * yf));
+    for (int xo = -half; xo <= half; ++xo)
+    {
+      const int xx = static_cast<int>(sx + xo);
+      const int yy = static_cast<int>(sy + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = hull;
+    }
+  }
+  // Three masts.
+  for (int m = -1; m <= 1; ++m)
+  {
+    const float mx = sx + m * SS * 0.20F;
+    drawSeg(dst, w, h, mx, sy, mx, sy - SS * 0.55F, std::max(1.0F, mn * 0.004F), ya, hull);
+    // Sails.
+    for (int s2 = 0; s2 < 3; ++s2)
+    {
+      const float sy2 = sy - SS * (0.12F + s2 * 0.16F);
+      drawSeg(dst, w, h, mx - SS * 0.13F, sy2, mx + SS * 0.13F, sy2, SS * 0.05F, ya,
+              Rgb{230, 220, 200, false});
+    }
+  }
+}
+
+// A filled caption box centred on (bx, by) with the line of text in it
+void drawCaptionBox(std::vector<Rgb>& dst,
+                    int w,
+                    int h,
+                    const std::string& line,
+                    float bx,
+                    float by,
+                    int sc,
+                    float ya,
+                    const Rgb& paper,
+                    const Rgb& ink)
+{
+  const float lineW = static_cast<float>(line.size()) * 6 * sc;
+  for (int xo = -static_cast<int>(lineW * 0.55F); xo <= static_cast<int>(lineW * 0.55F); ++xo)
+    for (int yo = -static_cast<int>(sc * 5); yo <= static_cast<int>(sc * 5); ++yo)
+    {
+      const int xx = static_cast<int>(bx + xo);
+      const int yy = static_cast<int>(by + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = paper;
+    }
+  drawDotText(dst, w, h, line.c_str(), static_cast<int>(line.size()), bx - lineW * 0.5F,
+              by - sc * 3, sc, std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, ink);
+}
+
+// Limbs of a cetacean evolution stage: legs, paddles, or flippers and fluke
+void drawCetaceanLimbs(std::vector<Rgb>& dst,
+                       int w,
+                       int h,
+                       int stage,
+                       float cx,
+                       float cy,
+                       float bodyL,
+                       float groundY,
+                       float mn,
+                       float ya,
+                       const Rgb& body)
+{
+  if (stage == 0)
+  {
+    for (int leg = 0; leg < 4; ++leg)
+    {
+      const float lx = cx + (leg - 1.5F) * bodyL * 0.4F;
+      drawSeg(dst, w, h, lx, cy, lx, groundY, std::max(1.0F, mn * 0.010F), ya, body);
+    }
+  }
+  else if (stage == 1)
+  {
+    for (int leg = 0; leg < 4; ++leg)
+    {
+      const float lx = cx + (leg - 1.5F) * bodyL * 0.4F;
+      drawSeg(dst, w, h, lx, cy + mn * 0.02F, lx + mn * 0.025F, cy + mn * 0.06F,
+              std::max(1.0F, mn * 0.008F), ya, body);
+    }
+  }
+  else
+  {
+    // Flippers + tail fluke
+    drawSeg(dst, w, h, cx - bodyL * 0.4F, cy + mn * 0.02F, cx - bodyL * 0.6F,
+            cy + mn * 0.07F, std::max(1.0F, mn * 0.010F), ya, body);
+    drawSeg(dst, w, h, cx + bodyL, cy, cx + bodyL * 1.4F, cy - mn * 0.05F,
+            std::max(1.0F, mn * 0.014F), ya, body);
+    drawSeg(dst, w, h, cx + bodyL, cy, cx + bodyL * 1.4F, cy + mn * 0.05F,
+            std::max(1.0F, mn * 0.014F), ya, body);
+  }
+}
+}  // namespace
+
 void effectDNA(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
@@ -14,15 +278,11 @@ void effectDNA(const Renderer& renderer, const std::vector<Rgb>& src, int w, int
             [&](float t, std::vector<Rgb>& dst)
             {
               const float dim = 0.20F;
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(18 + l * 0.10F * dim), u8(22 + l * 0.10F * dim),
-                          u8(40 + l * 0.14F * dim), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(18 + l * 0.10F * dim), u8(22 + l * 0.10F * dim),
+                           u8(40 + l * 0.14F * dim), false};
+              });
               const float cx = w * 0.5F;
               const float R = mn * 0.13F;
               const Rgb strandA{230, 120, 130, false};
@@ -37,19 +297,7 @@ void effectDNA(const Renderer& renderer, const std::vector<Rgb>& src, int w, int
                 plotDot(dst, w, h, xA, k, std::max(1.0F, mn * 0.010F), ya, strandA);
                 plotDot(dst, w, h, xB, k, std::max(1.0F, mn * 0.010F), ya, strandB);
                 if (k % 5 == 0 && std::sin(ang) > 0)
-                {
-                  for (int rr = 1; rr < 12; ++rr)
-                  {
-                    const float ux = xA + (xB - xA) * rr / 12.0F;
-                    const Rgb d = sample(src, w, h, ux, static_cast<float>(k));
-                    const float dr = d.transparent ? 180.0F : d.r;
-                    const float dg = d.transparent ? 180.0F : d.g;
-                    const float db = d.transparent ? 200.0F : d.b;
-                    plotDot(dst, w, h, ux, k, std::max(1.0F, mn * 0.005F), ya,
-                            Rgb{u8(dr * 0.7F + 60), u8(dg * 0.7F + 60), u8(db * 0.7F + 60),
-                                false});
-                  }
-                }
+                  drawBasePairRung(dst, src, w, h, xA, xB, k, mn, ya);
               }
             });
 }
@@ -168,7 +416,6 @@ void effectFinches(const Renderer& renderer, const std::vector<Rgb>& src, int w,
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
-  struct BeakShape { float length, depth; const char* name; };
   static const std::array<BeakShape, 4> kBeaks = {
       BeakShape{0.30F, 0.06F, "WARBLER"},
       BeakShape{0.40F, 0.10F, "INSECT"},
@@ -179,15 +426,11 @@ void effectFinches(const Renderer& renderer, const std::vector<Rgb>& src, int w,
       [&](float t, std::vector<Rgb>& dst)
       {
         const float dim = 0.20F;
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            dst[static_cast<std::size_t>(y) * w + x] =
-                Rgb{u8(200 + l * 0.10F * dim), u8(220 + l * 0.10F * dim),
-                    u8(240 + l * 0.10F * dim), false};
-          }
+        shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+          const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+          return Rgb{u8(200 + l * 0.10F * dim), u8(220 + l * 0.10F * dim),
+                     u8(240 + l * 0.10F * dim), false};
+        });
         // Common ancestor at centre.
         const float cx = w * 0.5F;
         const float cy = h * 0.5F;
@@ -207,35 +450,7 @@ void effectFinches(const Renderer& renderer, const std::vector<Rgb>& src, int w,
                   std::max(1.0F, mn * 0.004F), ya, Rgb{40, 30, 20, false});
           if (reveal > 0.8F)
           {
-            // Beak silhouette = data-textured head + triangular beak.
-            const BeakShape& b = kBeaks[i];
-            const float headR = mn * 0.05F;
-            drawDataDisk(dst, w, h, src, tx, tyy, headR, ya, 0.7F, 0.0F,
-                         Rgb{180, 130, 90, false});
-            // Beak as triangle pointing right.
-            const float bx0 = tx + headR;
-            const float bx1 = bx0 + mn * b.length;
-            const float bd = mn * b.depth;
-            for (float u = 0; u < 1.0F; u += 0.02F)
-            {
-              const float bx = bx0 + (bx1 - bx0) * u;
-              const float byHalf = bd * (1.0F - u);
-              plotDot(dst, w, h, bx, tyy, std::max(1.0F, byHalf), ya, Rgb{160, 100, 60, false});
-            }
-            // Name label.
-            const int sc = std::max(1, static_cast<int>(mn / 60.0F));
-            const std::string name(b.name);
-            for (int ci = 0; ci < static_cast<int>(name.size()); ++ci)
-            {
-              const auto g = glyph5x7(name[ci]);
-              for (int fy = 0; fy < 7; ++fy)
-                for (int fx = 0; fx < 5; ++fx)
-                  if (g[fy][fx] == '1')
-                    plotDot(dst, w, h, tx + (ci * 6 + fx) * sc - name.size() * 3 * sc,
-                            tyy + headR + sc * 2 + fy * sc,
-                            std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                            Rgb{40, 30, 20, false});
-            }
+            drawFinchHead(dst, src, w, h, tx, tyy, kBeaks[i], mn, ya);
           }
         }
       });
@@ -299,16 +514,12 @@ void effectCambrian(const Renderer& renderer, const std::vector<Rgb>& src, int w
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  const float sf = static_cast<float>(y) / h;
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(8 + 20 * sf + l * 0.08F), u8(30 + 30 * sf + l * 0.10F),
-                          u8(60 + 40 * sf + l * 0.12F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                const float sf = static_cast<float>(y) / h;
+                return Rgb{u8(8 + 20 * sf + l * 0.08F), u8(30 + 30 * sf + l * 0.10F),
+                           u8(60 + 40 * sf + l * 0.12F), false};
+              });
               const float floorY = h * 0.92F;
               for (int x = 0; x < w; ++x)
                 for (int yo = 0; yo <= 2; ++yo)
@@ -453,15 +664,11 @@ void effectPunctuated(const Renderer& renderer, const std::vector<Rgb>& src, int
       [&](float t, std::vector<Rgb>& dst)
       {
         const float dim = 0.25F;
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            dst[static_cast<std::size_t>(y) * w + x] =
-                Rgb{u8(24 + l * 0.10F * dim), u8(24 + l * 0.10F * dim),
-                    u8(32 + l * 0.10F * dim), false};
-          }
+        shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+          const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+          return Rgb{u8(24 + l * 0.10F * dim), u8(24 + l * 0.10F * dim),
+                     u8(32 + l * 0.10F * dim), false};
+        });
         // Axes.
         const float ax0 = w * 0.10F;
         const float ax1 = w * 0.92F;
@@ -501,18 +708,8 @@ void effectPunctuated(const Renderer& renderer, const std::vector<Rgb>& src, int
         // Labels.
         const int sc = std::max(1, static_cast<int>(mn / 70.0F));
         const std::string lab = "PUNCTUATED EQUILIBRIUM";
-        for (int ci = 0; ci < static_cast<int>(lab.size()); ++ci)
-        {
-          const char ch = lab[ci];
-          if (ch == ' ') continue;
-          const auto g = glyph5x7(ch);
-          for (int fy = 0; fy < 7; ++fy)
-            for (int fx = 0; fx < 5; ++fx)
-              if (g[fy][fx] == '1')
-                plotDot(dst, w, h, ax0 + (ci * 6 + fx) * sc, h * 0.04F + fy * sc,
-                        std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                        Rgb{200, 200, 220, false});
-        }
+        drawDotText(dst, w, h, lab.c_str(), static_cast<int>(lab.size()), ax0, h * 0.04F, sc,
+                    std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, Rgb{200, 200, 220, false});
       });
 }
 
@@ -575,15 +772,11 @@ void effectDarwin(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
             [&](float t, std::vector<Rgb>& dst)
             {
               const float dim = 0.30F;
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 100.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(170 + l * 0.10F * dim), u8(140 + l * 0.10F * dim),
-                          u8(95 + l * 0.10F * dim), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 100.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(170 + l * 0.10F * dim), u8(140 + l * 0.10F * dim),
+                           u8(95 + l * 0.10F * dim), false};
+              });
               const float fade = std::clamp(t * 1.6F, 0.0F, 1.0F);
               const float cx = w * 0.5F;
               const float cy = h * 0.42F;
@@ -592,18 +785,7 @@ void effectDarwin(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
               // Head (top dome).
               plotDot(dst, w, h, cx, cy - S * 0.15F, S * 0.25F * fade, ya, ink);
               // Beard (large oval below).
-              for (int yo = static_cast<int>(S * 0.05F); yo <= static_cast<int>(S * 0.55F); ++yo)
-              {
-                const float yf = (yo - S * 0.05F) / (S * 0.50F);
-                const int half = static_cast<int>(S * (0.30F + 0.10F * std::sin(yf * 3.14159F)) * fade);
-                for (int xo = -half; xo <= half; ++xo)
-                {
-                  const int xx = static_cast<int>(cx + xo);
-                  const int yy = static_cast<int>(cy + yo);
-                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                    dst[static_cast<std::size_t>(yy) * w + xx] = ink;
-                }
-              }
+              drawBeard(dst, w, h, cx, cy, S, fade, ink);
               // Eyebrows.
               if (fade > 0.6F)
               {
@@ -618,18 +800,9 @@ void effectDarwin(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
               const int nReveal = static_cast<int>(typeT * text.size());
               const int sc = std::max(2, static_cast<int>(mn / 50.0F));
               const float lineW = static_cast<float>(text.size()) * 6 * sc;
-              for (int ci = 0; ci < nReveal && ci < static_cast<int>(text.size()); ++ci)
-              {
-                const char ch = text[ci];
-                if (ch == ' ') continue;
-                const auto g = glyph5x7(ch);
-                for (int fy = 0; fy < 7; ++fy)
-                  for (int fx = 0; fx < 5; ++fx)
-                    if (g[fy][fx] == '1')
-                      plotDot(dst, w, h, cx - lineW * 0.5F + (ci * 6 + fx) * sc,
-                              h * 0.85F + fy * sc,
-                              std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, ink);
-              }
+              drawDotText(dst, w, h, text.c_str(), std::min(nReveal, static_cast<int>(text.size())),
+                          cx - lineW * 0.5F, h * 0.85F, sc,
+                          std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, ink);
             });
 }
 
@@ -690,14 +863,10 @@ void effectMendel(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 80.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(220 + l * 0.08F), u8(212 + l * 0.08F), u8(186 + l * 0.06F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 80.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(220 + l * 0.08F), u8(212 + l * 0.08F), u8(186 + l * 0.06F), false};
+              });
               const float cx = w * 0.5F;
               const float cy = h * 0.5F;
               const float S = std::min(w, h) * 0.30F;
@@ -720,42 +889,14 @@ void effectMendel(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
                   if (reveal <= 0.0F) continue;
                   const float ccx = cx - S * 0.5F + gc * S;
                   const float ccy = cy - S * 0.5F + gr * S;
-                  // Letters.
-                  const std::string ll(kCells[idx]);
-                  for (int ci = 0; ci < 2; ++ci)
-                  {
-                    const auto g = glyph5x7(ll[ci]);
-                    for (int fy = 0; fy < 7; ++fy)
-                      for (int fx = 0; fx < 5; ++fx)
-                        if (g[fy][fx] == '1')
-                          plotDot(dst, w, h, ccx - sc * 5 + (ci * 6 + fx) * sc,
-                                  ccy - sc * 3 + fy * sc,
-                                  std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, ink);
-                  }
-                  // Pea pod.
-                  const Rgb yellow{220, 200, 80, false};
-                  const Rgb green{120, 180, 80, false};
-                  const Rgb wrinkly{160, 130, 60, false};
-                  const bool dominant = idx != 3;
-                  drawDataDisk(dst, w, h, src, ccx, ccy + sc * 8, S * 0.20F, ya, 0.75F, 0.0F,
-                               dominant ? yellow : wrinkly);
-                  (void)green;
+                  drawPunnettCell(dst, src, w, h, kCells[idx], idx != 3, ccx, ccy, S, sc, ya, ink);
                 }
               // Header.
               const std::string hdr = "F2 GENERATION 3:1";
               const int sh = std::max(2, static_cast<int>(mn / 40.0F));
-              for (int ci = 0; ci < static_cast<int>(hdr.size()); ++ci)
-              {
-                const char ch = hdr[ci];
-                if (ch == ' ') continue;
-                const auto g = glyph5x7(ch);
-                for (int fy = 0; fy < 7; ++fy)
-                  for (int fx = 0; fx < 5; ++fx)
-                    if (g[fy][fx] == '1')
-                      plotDot(dst, w, h, w * 0.5F - hdr.size() * 3 * sh + (ci * 6 + fx) * sh,
-                              h * 0.10F + fy * sh,
-                              std::max(1.0F, static_cast<float>(sh) * 0.5F), ya, ink);
-              }
+              drawDotText(dst, w, h, hdr.c_str(), static_cast<int>(hdr.size()),
+                          w * 0.5F - hdr.size() * 3 * sh, h * 0.10F, sh,
+                          std::max(1.0F, static_cast<float>(sh) * 0.5F), ya, ink);
             });
 }
 
@@ -770,15 +911,11 @@ void effectMutation(const Renderer& renderer, const std::vector<Rgb>& src, int w
             [&](float t, std::vector<Rgb>& dst)
             {
               const float dim = 0.20F;
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(20 + l * 0.10F * dim), u8(24 + l * 0.10F * dim),
-                          u8(20 + l * 0.06F * dim), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(20 + l * 0.10F * dim), u8(24 + l * 0.10F * dim),
+                           u8(20 + l * 0.06F * dim), false};
+              });
               const int sc = std::max(2, static_cast<int>(mn / 30.0F));
               const int cellW = 6 * sc;
               const float scrollPx = t * cellW * 12;
@@ -801,13 +938,9 @@ void effectMutation(const Renderer& renderer, const std::vector<Rgb>& src, int w
                     nti = (nti + 2) % 4;
                     mutated = true;
                   }
-                  const auto g = glyph5x7(nts[nti]);
-                  for (int fy = 0; fy < 7; ++fy)
-                    for (int fx = 0; fx < 5; ++fx)
-                      if (g[fy][fx] == '1')
-                        plotDot(dst, w, h, px + fx * sc, rowY + fy * sc,
-                                std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                                mutated ? Rgb{255, 80, 80, false} : cols[nti]);
+                  drawDotText(dst, w, h, &nts[nti], 1, px, rowY, sc,
+                              std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
+                              mutated ? Rgb{255, 80, 80, false} : cols[nti]);
                 }
               }
             });
@@ -817,7 +950,6 @@ void effectBeagle(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
 {
   const float ya = yAspectFor(renderer);
   const float mn = std::min(static_cast<float>(w), h * ya);
-  auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   auto hash = [](int n)
   { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   runFrames(
@@ -825,79 +957,20 @@ void effectBeagle(const Renderer& renderer, const std::vector<Rgb>& src, int w, 
       [&](float t, std::vector<Rgb>& dst)
       {
         const float horY = h * 0.62F;
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            if (y > horY)
-            {
-              const float ripple = std::sin(x * 0.3F + y * 0.15F + t * 6.0F);
-              dst[static_cast<std::size_t>(y) * w + x] =
-                  Rgb{u8(10 + l * 0.10F + ripple * 10), u8(30 + l * 0.12F + ripple * 14),
-                      u8(60 + l * 0.18F + ripple * 18), false};
-            }
-            else
-            {
-              const float sf = static_cast<float>(y) / horY;
-              dst[static_cast<std::size_t>(y) * w + x] =
-                  Rgb{u8(8 + 20 * (1 - sf) + l * 0.06F), u8(12 + 20 * (1 - sf) + l * 0.06F),
-                      u8(20 + 30 * (1 - sf) + l * 0.08F), false};
-            }
-          }
-        for (int i = 0; i < 60; ++i)
-        {
-          const int sx = static_cast<int>(hash(i) * w);
-          const int sy = static_cast<int>(hash(i * 3) * horY);
-          const float tw = 0.5F + 0.5F * std::sin(t * 10.0F + i);
-          dst[static_cast<std::size_t>(sy) * w + sx] = Rgb{u8(180 * tw), u8(180 * tw), u8(220 * tw), false};
-        }
+        shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y)
+                    { return nightSeaPixel(s, x, y, horY, t); });
+        drawSkyStars(dst, w, horY, t, hash);
         // Ship moves left-to-right.
         const float sx = -mn * 0.3F + t * (w + mn * 0.6F);
         const float sy = horY - mn * 0.05F;
         const float SS = mn * 0.18F;
-        const Rgb hull{20, 16, 14, false};
-        // Hull (trapezoid).
-        for (int yo = 0; yo <= static_cast<int>(SS * 0.18F); ++yo)
-        {
-          const float yf = yo / (SS * 0.18F);
-          const int half = static_cast<int>(SS * (0.32F - 0.10F * yf));
-          for (int xo = -half; xo <= half; ++xo)
-          {
-            const int xx = static_cast<int>(sx + xo);
-            const int yy = static_cast<int>(sy + yo);
-            if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-              dst[static_cast<std::size_t>(yy) * w + xx] = hull;
-          }
-        }
-        // Three masts.
-        for (int m = -1; m <= 1; ++m)
-        {
-          const float mx = sx + m * SS * 0.20F;
-          drawSeg(dst, w, h, mx, sy, mx, sy - SS * 0.55F, std::max(1.0F, mn * 0.004F), ya, hull);
-          // Sails.
-          for (int s2 = 0; s2 < 3; ++s2)
-          {
-            const float sy2 = sy - SS * (0.12F + s2 * 0.16F);
-            drawSeg(dst, w, h, mx - SS * 0.13F, sy2, mx + SS * 0.13F, sy2, SS * 0.05F, ya,
-                    Rgb{230, 220, 200, false});
-          }
-        }
+        drawBeagleShip(dst, w, h, sx, sy, SS, mn, ya);
         // Years label.
         const std::string lab = "1831 - 1836";
         const int sc = std::max(2, static_cast<int>(mn / 50.0F));
-        for (int ci = 0; ci < static_cast<int>(lab.size()); ++ci)
-        {
-          const char ch = lab[ci];
-          if (ch == ' ') continue;
-          const auto g = glyph5x7(ch);
-          for (int fy = 0; fy < 7; ++fy)
-            for (int fx = 0; fx < 5; ++fx)
-              if (g[fy][fx] == '1')
-                plotDot(dst, w, h, w * 0.5F - lab.size() * 3 * sc + (ci * 6 + fx) * sc,
-                        h * 0.92F + fy * sc, std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                        Rgb{220, 200, 160, false});
-        }
+        drawDotText(dst, w, h, lab.c_str(), static_cast<int>(lab.size()),
+                    w * 0.5F - lab.size() * 3 * sc, h * 0.92F, sc,
+                    std::max(1.0F, static_cast<float>(sc) * 0.5F), ya, Rgb{220, 200, 160, false});
       });
 }
 
@@ -957,14 +1030,10 @@ void effectLucy(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 80.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(170 + l * 0.10F), u8(140 + l * 0.10F), u8(90 + l * 0.08F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 80.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                return Rgb{u8(170 + l * 0.10F), u8(140 + l * 0.10F), u8(90 + l * 0.08F), false};
+              });
               const float cx = w * 0.5F;
               const float baseY = h * 0.92F;
               const float H = mn * 0.50F;
@@ -984,14 +1053,9 @@ void effectLucy(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
                         cx + H * (0.06F + r * 0.005F), yy, std::max(1.0F, mn * 0.003F), ya, bone);
               }
               // Pelvis.
-              for (int xo = -static_cast<int>(H * 0.10F); xo <= static_cast<int>(H * 0.10F); ++xo)
-                for (int yo = 0; yo <= static_cast<int>(H * 0.05F); ++yo)
-                {
-                  const int xx = static_cast<int>(cx + xo);
-                  const int yy = static_cast<int>(baseY - H * 0.45F) + yo;
-                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                    dst[static_cast<std::size_t>(yy) * w + xx] = bone;
-                }
+              fillOffsetBox(dst, w, h, cx, static_cast<float>(static_cast<int>(baseY - H * 0.45F)),
+                            -static_cast<int>(H * 0.10F), static_cast<int>(H * 0.10F), 0,
+                            static_cast<int>(H * 0.05F), bone);
               // Legs (bent slightly, bipedal).
               drawSeg(dst, w, h, cx - H * 0.05F, baseY - H * 0.40F, cx - H * 0.08F, baseY,
                       std::max(1.0F, mn * 0.004F), ya, bone);
@@ -1007,31 +1071,8 @@ void effectLucy(const Renderer& renderer, const std::vector<Rgb>& src, int w, in
               {
                 const std::string line = "3.2 MA";
                 const int sc = std::max(3, static_cast<int>(mn / 25.0F));
-                const float lineW = static_cast<float>(line.size()) * 6 * sc;
-                const float bx = cx + H * 0.20F;
-                const float by = baseY - H * 0.90F;
-                for (int xo = -static_cast<int>(lineW * 0.55F);
-                     xo <= static_cast<int>(lineW * 0.55F); ++xo)
-                  for (int yo = -static_cast<int>(sc * 5); yo <= static_cast<int>(sc * 5); ++yo)
-                  {
-                    const int xx = static_cast<int>(bx + xo);
-                    const int yy = static_cast<int>(by + yo);
-                    if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                      dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{240, 230, 200, false};
-                  }
-                for (int ci = 0; ci < static_cast<int>(line.size()); ++ci)
-                {
-                  const char ch = line[ci];
-                  if (ch == ' ') continue;
-                  const auto g = glyph5x7(ch);
-                  for (int fy = 0; fy < 7; ++fy)
-                    for (int fx = 0; fx < 5; ++fx)
-                      if (g[fy][fx] == '1')
-                        plotDot(dst, w, h, bx - lineW * 0.5F + (ci * 6 + fx) * sc,
-                                by - sc * 3 + fy * sc,
-                                std::max(1.0F, static_cast<float>(sc) * 0.5F), ya,
-                                Rgb{40, 30, 20, false});
-                }
+                drawCaptionBox(dst, w, h, line, cx + H * 0.20F, baseY - H * 0.90F, sc, ya,
+                               Rgb{240, 230, 200, false}, Rgb{40, 30, 20, false});
               }
             });
 }
@@ -1084,16 +1125,12 @@ void effectCoEvolution(const Renderer& renderer, const std::vector<Rgb>& src, in
   runFrames(renderer, w, h, 5400,
             [&](float t, std::vector<Rgb>& dst)
             {
-              for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                  const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-                  const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-                  const float sf = static_cast<float>(y) / h;
-                  dst[static_cast<std::size_t>(y) * w + x] =
-                      Rgb{u8(200 - 30 * sf + l * 0.10F), u8(160 - 20 * sf + l * 0.10F),
-                          u8(110 - 30 * sf + l * 0.08F), false};
-                }
+              shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+                const float l = s.transparent ? 70.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+                const float sf = static_cast<float>(y) / h;
+                return Rgb{u8(200 - 30 * sf + l * 0.10F), u8(160 - 20 * sf + l * 0.10F),
+                           u8(110 - 30 * sf + l * 0.08F), false};
+              });
               const float groundY = h * 0.92F;
               for (int x = 0; x < w; ++x)
                 for (int yo = 0; yo <= 2; ++yo)
@@ -1118,14 +1155,9 @@ void effectCoEvolution(const Renderer& renderer, const std::vector<Rgb>& src, in
               const Rgb hide{220, 180, 110, false};
               const Rgb spots{120, 80, 40, false};
               // Body
-              for (int yo = -static_cast<int>(mn * 0.06F); yo <= static_cast<int>(mn * 0.06F); ++yo)
-                for (int xo = -static_cast<int>(mn * 0.12F); xo <= static_cast<int>(mn * 0.12F); ++xo)
-                {
-                  const int xx = static_cast<int>(gx + xo);
-                  const int yy = static_cast<int>(bodyY + yo);
-                  if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                    dst[static_cast<std::size_t>(yy) * w + xx] = hide;
-                }
+              fillOffsetBox(dst, w, h, gx, bodyY, -static_cast<int>(mn * 0.12F),
+                            static_cast<int>(mn * 0.12F), -static_cast<int>(mn * 0.06F),
+                            static_cast<int>(mn * 0.06F), hide);
               // Spots
               for (int i = 0; i < 12; ++i)
               {
@@ -1203,16 +1235,12 @@ void effectCetacean(const Renderer& renderer, const std::vector<Rgb>& src, int w
       renderer, w, h, 5400,
       [&](float t, std::vector<Rgb>& dst)
       {
-        for (int y = 0; y < h; ++y)
-          for (int x = 0; x < w; ++x)
-          {
-            const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-            const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-            const float sf = static_cast<float>(y) / h;
-            dst[static_cast<std::size_t>(y) * w + x] =
-                Rgb{u8(120 + 80 * (1 - sf) + l * 0.08F), u8(170 + 50 * (1 - sf) + l * 0.10F),
-                    u8(220 - 40 * sf + l * 0.12F), false};
-          }
+        shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+          const float l = s.transparent ? 60.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+          const float sf = static_cast<float>(y) / h;
+          return Rgb{u8(120 + 80 * (1 - sf) + l * 0.08F), u8(170 + 50 * (1 - sf) + l * 0.10F),
+                     u8(220 - 40 * sf + l * 0.12F), false};
+        });
         const float groundY = h * 0.85F;
         for (int x = 0; x < w; ++x)
           for (int yo = 0; yo <= 1; ++yo)
@@ -1227,45 +1255,11 @@ void effectCetacean(const Renderer& renderer, const std::vector<Rgb>& src, int w
           const float cy = groundY - mn * 0.10F;
           const float bodyL = mn * 0.16F;
           // Body = elongated ellipse.
-          for (int yo = -static_cast<int>(mn * 0.03F); yo <= static_cast<int>(mn * 0.03F); ++yo)
-            for (int xo = -static_cast<int>(bodyL); xo <= static_cast<int>(bodyL); ++xo)
-            {
-              const float nx = xo / bodyL;
-              const float ny = yo / (mn * 0.03F);
-              if (nx * nx + ny * ny > 1.0F) continue;
-              const int xx = static_cast<int>(cx + xo);
-              const int yy = static_cast<int>(cy + yo);
-              if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-                dst[static_cast<std::size_t>(yy) * w + xx] = body;
-            }
+          fillEllipse(dst, w, h, cx, cy, bodyL, mn * 0.03F, -static_cast<int>(bodyL),
+                      static_cast<int>(bodyL), -static_cast<int>(mn * 0.03F),
+                      static_cast<int>(mn * 0.03F), body);
           // Legs (stage 0 + 1) or flippers (stage 2).
-          if (stage == 0)
-          {
-            for (int leg = 0; leg < 4; ++leg)
-            {
-              const float lx = cx + (leg - 1.5F) * bodyL * 0.4F;
-              drawSeg(dst, w, h, lx, cy, lx, groundY, std::max(1.0F, mn * 0.010F), ya, body);
-            }
-          }
-          else if (stage == 1)
-          {
-            for (int leg = 0; leg < 4; ++leg)
-            {
-              const float lx = cx + (leg - 1.5F) * bodyL * 0.4F;
-              drawSeg(dst, w, h, lx, cy + mn * 0.02F, lx + mn * 0.025F, cy + mn * 0.06F,
-                      std::max(1.0F, mn * 0.008F), ya, body);
-            }
-          }
-          else
-          {
-            // Flippers + tail fluke
-            drawSeg(dst, w, h, cx - bodyL * 0.4F, cy + mn * 0.02F, cx - bodyL * 0.6F,
-                    cy + mn * 0.07F, std::max(1.0F, mn * 0.010F), ya, body);
-            drawSeg(dst, w, h, cx + bodyL, cy, cx + bodyL * 1.4F, cy - mn * 0.05F,
-                    std::max(1.0F, mn * 0.014F), ya, body);
-            drawSeg(dst, w, h, cx + bodyL, cy, cx + bodyL * 1.4F, cy + mn * 0.05F,
-                    std::max(1.0F, mn * 0.014F), ya, body);
-          }
+          drawCetaceanLimbs(dst, w, h, stage, cx, cy, bodyL, groundY, mn, ya, body);
           // Eye.
           plotDot(dst, w, h, cx - bodyL * 0.7F, cy - mn * 0.005F, std::max(1.0F, mn * 0.005F), ya,
                   Rgb{220, 220, 220, false});
