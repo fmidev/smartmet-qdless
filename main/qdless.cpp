@@ -25,6 +25,95 @@
 
 namespace po = boost::program_options;
 
+namespace
+{
+// Print the exit effect names grouped by theme
+void listExitEffects()
+{
+  std::cout << "Exit effects (use names with --exit-effect):\n";
+  const int nThemes = Qdless::exitThemeCount();
+  for (int t = 0; t < nThemes; ++t)
+  {
+    const std::vector<int> members = Qdless::exitEffectsInTheme(t);
+    if (members.empty())
+      continue;
+    std::cout << "\n  " << Qdless::exitThemeName(t) << ":\n";
+    for (int i : members)
+      std::cout << "    " << Qdless::exitEffectName(i) << '\n';
+  }
+}
+
+// --dir auto-detects tree mode: when the argument has subdirectories
+// but no image files directly in it, treat it as the root of a PNG
+// tree and hand it to App for the picker. Otherwise add its files to
+// the positional inputs.
+void resolveDirArgument(const std::string& dirArg,
+                        Qdless::Options& opts,
+                        std::vector<std::string>& positional)
+{
+  static const std::array<std::string_view, 4> kImgExts = {".png", ".webp", ".jpg",
+                                                           ".jpeg"};
+  auto isImageExt = [&](const std::filesystem::path& p) {
+    if (!p.has_extension()) return false;
+    std::string ext = p.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    for (auto e : kImgExts)
+      if (ext == e) return true;
+    return false;
+  };
+  std::error_code ec;
+  bool anyImageFile = false;
+  bool anySubdir = false;
+  std::vector<std::string> rootFiles;
+  for (const auto& entry : std::filesystem::directory_iterator(dirArg, ec))
+  {
+    if (entry.is_regular_file())
+    {
+      rootFiles.push_back(entry.path().string());
+      if (isImageExt(entry.path())) anyImageFile = true;
+    }
+    else if (entry.is_directory())
+    {
+      anySubdir = true;
+    }
+  }
+  if (!anyImageFile && anySubdir)
+  {
+    // Tree mode — defer the file list to the App's picker.
+    opts.browseRoot = dirArg;
+  }
+  else
+  {
+    // Flat mode: today's behaviour. Include every regular file so
+    // non-image batches (a directory of .sqd files, etc.) still
+    // work.
+    for (auto& f : rootFiles) positional.push_back(std::move(f));
+    std::sort(positional.begin(), positional.end());
+  }
+}
+
+// Split -p on commas. Trim whitespace; drop empty entries.
+std::vector<std::string> splitParameterList(const std::string& paramArg)
+{
+  std::vector<std::string> out;
+  std::size_t start = 0;
+  while (start <= paramArg.size())
+  {
+    const std::size_t comma = paramArg.find(',', start);
+    const std::size_t end = (comma == std::string::npos) ? paramArg.size() : comma;
+    std::size_t lo = start;
+    std::size_t hi = end;
+    while (lo < hi && std::isspace(static_cast<unsigned char>(paramArg[lo]))) ++lo;
+    while (hi > lo && std::isspace(static_cast<unsigned char>(paramArg[hi - 1]))) --hi;
+    if (hi > lo) out.emplace_back(paramArg.substr(lo, hi - lo));
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
+  return out;
+}
+}  // namespace
+
 int main(int argc, char* argv[])
 {
   try
@@ -132,17 +221,7 @@ int main(int argc, char* argv[])
       // ~200-strong roster is browsable. Within a theme effects stay in
       // their alphabetical kNames[] order. Names remain the canonical
       // identifier for --exit-effect (theme is purely a display detail).
-      std::cout << "Exit effects (use names with --exit-effect):\n";
-      const int nThemes = Qdless::exitThemeCount();
-      for (int t = 0; t < nThemes; ++t)
-      {
-        const std::vector<int> members = Qdless::exitEffectsInTheme(t);
-        if (members.empty())
-          continue;
-        std::cout << "\n  " << Qdless::exitThemeName(t) << ":\n";
-        for (int i : members)
-          std::cout << "    " << Qdless::exitEffectName(i) << '\n';
-      }
+      listExitEffects();
       return 0;
     }
 
@@ -155,46 +234,7 @@ int main(int argc, char* argv[])
     // .DS_Store / .placeholder.
     if (!dirArg.empty())
     {
-      static const std::array<std::string_view, 4> kImgExts = {".png", ".webp", ".jpg",
-                                                               ".jpeg"};
-      auto isImageExt = [&](const std::filesystem::path& p) {
-        if (!p.has_extension()) return false;
-        std::string ext = p.extension().string();
-        std::transform(ext.begin(), ext.end(), ext.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
-        for (auto e : kImgExts)
-          if (ext == e) return true;
-        return false;
-      };
-      std::error_code ec;
-      bool anyImageFile = false;
-      bool anySubdir = false;
-      std::vector<std::string> rootFiles;
-      for (const auto& entry : std::filesystem::directory_iterator(dirArg, ec))
-      {
-        if (entry.is_regular_file())
-        {
-          rootFiles.push_back(entry.path().string());
-          if (isImageExt(entry.path())) anyImageFile = true;
-        }
-        else if (entry.is_directory())
-        {
-          anySubdir = true;
-        }
-      }
-      if (!anyImageFile && anySubdir)
-      {
-        // Tree mode — defer the file list to the App's picker.
-        opts.browseRoot = dirArg;
-      }
-      else
-      {
-        // Flat mode: today's behaviour. Include every regular file so
-        // non-image batches (a directory of .sqd files, etc.) still
-        // work.
-        for (auto& f : rootFiles) positional.push_back(std::move(f));
-        std::sort(positional.begin(), positional.end());
-      }
+      resolveDirArgument(dirArg, opts, positional);
     }
     if (positional.size() == 1) opts.filename = positional.front();
     else if (positional.size() > 1) opts.filenames = std::move(positional);
@@ -217,19 +257,8 @@ int main(int argc, char* argv[])
     // Split -p on commas. Trim whitespace; drop empty entries.
     if (!paramArg.empty())
     {
-      std::size_t start = 0;
-      while (start <= paramArg.size())
-      {
-        const std::size_t comma = paramArg.find(',', start);
-        const std::size_t end = (comma == std::string::npos) ? paramArg.size() : comma;
-        std::size_t lo = start;
-        std::size_t hi = end;
-        while (lo < hi && std::isspace(static_cast<unsigned char>(paramArg[lo]))) ++lo;
-        while (hi > lo && std::isspace(static_cast<unsigned char>(paramArg[hi - 1]))) --hi;
-        if (hi > lo) opts.parameterOverrides.emplace_back(paramArg.substr(lo, hi - lo));
-        if (comma == std::string::npos) break;
-        start = comma + 1;
-      }
+      const auto names = splitParameterList(paramArg);
+      opts.parameterOverrides.insert(opts.parameterOverrides.end(), names.begin(), names.end());
     }
 
     // Bare `--catalog`: fail early (before ncurses) with a clear message if no
