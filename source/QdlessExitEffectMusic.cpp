@@ -655,13 +655,10 @@ void effectHendrixGuitar(const Renderer& renderer, const std::vector<Rgb>& src, 
   auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(30 + l * 0.10F), u8(20 + l * 0.05F), u8(20 + l * 0.05F), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+        return Rgb{u8(30 + l * 0.10F), u8(20 + l * 0.05F), u8(20 + l * 0.05F), false};
+      });
       // Guitar body (Strat-shape, simplified).
       const float cx = w * 0.5F;
       const float cy = h * 0.55F;
@@ -711,11 +708,9 @@ void effectOperaCurtain(const Renderer& renderer, const std::vector<Rgb>& src, i
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          dst[static_cast<std::size_t>(y) * w + x] = s.transparent ? Rgb{20, 20, 30, false} : s;
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        return s.transparent ? Rgb{20, 20, 30, false} : s;
+      });
       const float fall = std::clamp(t * 1.5F, 0.0F, 1.0F);
       const int hemY = static_cast<int>(fall * h);
       // Curtain pleats — data-tinted vertical bands.
@@ -745,6 +740,113 @@ void effectOperaCurtain(const Renderer& renderer, const std::vector<Rgb>& src, i
     });
 }
 
+namespace
+{
+// Clamp a channel value to 0..255
+std::uint8_t clampU8(float v)
+{
+  return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F));
+}
+
+// Fill the rectangle x0..x1, y0..y1 clipped to the image
+void fillClippedBox(std::vector<Rgb>& dst, int w, int h, int x0, int x1, int y0, int y1, const Rgb& c)
+{
+  for (int yy = y0; yy <= y1; ++yy)
+    for (int xx = x0; xx <= x1; ++xx)
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = c;
+}
+
+// The white piano keys, randomly pressed ones sending up a data-tinted ripple
+template <typename Hash>
+void drawWhiteKeys(std::vector<Rgb>& dst,
+                   const std::vector<Rgb>& src,
+                   int w,
+                   int h,
+                   int nWhite,
+                   float keyW,
+                   float keyTop,
+                   float keyBot,
+                   float t,
+                   float mn,
+                   float ya,
+                   Hash&& hash)
+{
+  for (int k = 0; k < nWhite; ++k) {
+    const float kx = k * keyW;
+    const bool pressed = (hash(k + static_cast<int>(t * 8)) > 0.7F);
+    const float kCol = pressed ? 200 : 250;
+    fillClippedBox(dst, w, h, static_cast<int>(kx + 2), static_cast<int>(kx + keyW - 2),
+                   static_cast<int>(keyTop), static_cast<int>(keyBot),
+                   Rgb{clampU8(kCol), clampU8(kCol), clampU8(kCol - 20), false});
+    // Ripple rising from pressed keys — data-tinted.
+    if (pressed) {
+      const float rip = std::fmod(t * 4.0F, 1.0F);
+      const float rx = kx + keyW * 0.5F;
+      const float ry = keyTop - rip * mn * 0.30F;
+      const Rgb d = sample(src, w, h, static_cast<int>(rx), static_cast<int>(ry));
+      const float dr = d.transparent ? 200.0F : d.r;
+      plotDot(dst, w, h, rx, ry, mn * 0.015F * (1 - rip), ya,
+              Rgb{clampU8(220 + dr * 0.1F), clampU8(180), clampU8(120), false});
+    }
+  }
+}
+
+// One data-textured bout (oval) of the violin body centred on (cx, yc)
+void drawViolinBout(std::vector<Rgb>& dst,
+                    const std::vector<Rgb>& src,
+                    int w,
+                    int h,
+                    float cx,
+                    float yc,
+                    float rx,
+                    float ry)
+{
+  for (int yo = -static_cast<int>(ry); yo <= static_cast<int>(ry); ++yo)
+    for (int xo = -static_cast<int>(rx); xo <= static_cast<int>(rx); ++xo) {
+      const float nx = xo / rx;
+      const float nyN = yo / ry;
+      if (nx * nx + nyN * nyN > 1.0F) continue;
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(yc + yo);
+      if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+      const Rgb d = sample(src, w, h, xx, yy);
+      const float dr = d.transparent ? 180.0F : d.r;
+      dst[static_cast<std::size_t>(yy) * w + xx] =
+          Rgb{clampU8(140 + dr * 0.20F), clampU8(70), clampU8(30), false};
+    }
+}
+
+// The violin's two f-holes left and right of the centre line
+void drawFHoles(std::vector<Rgb>& dst, int w, int h, float cx, float cy, float vL, float mn, float ya)
+{
+  for (int side = -1; side <= 1; side += 2) {
+    for (float yy = cy - vL * 0.12F; yy <= cy + vL * 0.12F; yy += 1.0F) {
+      const float curve = std::sin((yy - cy) * 8 / vL) * vL * 0.02F;
+      plotDot(dst, w, h, cx + side * vL * 0.08F + curve, yy,
+              std::max(1.0F, mn * 0.002F), ya, Rgb{20, 10, 5, false});
+    }
+  }
+}
+
+// Two lightning forks striking down from the top edge
+template <typename Hash>
+void drawLightningForks(std::vector<Rgb>& dst, int w, int h, float mn, float ya, Hash&& hash)
+{
+  for (int b = 0; b < 2; ++b) {
+    float bx = hash(b) * w;
+    float by = 0;
+    for (int s = 0; s < 6; ++s) {
+      const float nx = bx + (hash(b * 7 + s) - 0.5F) * mn * 0.05F;
+      const float ny = by + mn * 0.10F;
+      drawSeg(dst, w, h, bx, by, nx, ny, std::max(1.0F, mn * 0.003F), ya,
+              Rgb{240, 240, 255, false});
+      bx = nx; by = ny;
+    }
+  }
+}
+}  // namespace
+
 void effectPianoKeys(const Renderer& renderer, const std::vector<Rgb>& src, int w, int h)
 {
   const float ya = yAspectFor(renderer);
@@ -753,47 +855,23 @@ void effectPianoKeys(const Renderer& renderer, const std::vector<Rgb>& src, int 
   auto hash = [](int n) { return std::fmod(std::sin(n * 12.9898F) * 43758.5453F, 1.0F) * 0.5F + 0.5F; };
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(40 + l * 0.10F), u8(30 + l * 0.08F), u8(40 + l * 0.10F), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+        return Rgb{u8(40 + l * 0.10F), u8(30 + l * 0.08F), u8(40 + l * 0.10F), false};
+      });
       const float keyTop = h * 0.70F;
       const float keyBot = h * 0.92F;
       const int nWhite = 14;
       const float keyW = static_cast<float>(w) / nWhite;
       // White keys.
-      for (int k = 0; k < nWhite; ++k) {
-        const float kx = k * keyW;
-        const bool pressed = (hash(k + static_cast<int>(t * 8)) > 0.7F);
-        const float kCol = pressed ? 200 : 250;
-        for (int yy = static_cast<int>(keyTop); yy <= static_cast<int>(keyBot); ++yy)
-          for (int xx = static_cast<int>(kx + 2); xx <= static_cast<int>(kx + keyW - 2); ++xx)
-            if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-              dst[static_cast<std::size_t>(yy) * w + xx] =
-                  Rgb{u8(kCol), u8(kCol), u8(kCol - 20), false};
-        // Ripple rising from pressed keys — data-tinted.
-        if (pressed) {
-          const float rip = std::fmod(t * 4.0F, 1.0F);
-          const float rx = kx + keyW * 0.5F;
-          const float ry = keyTop - rip * mn * 0.30F;
-          const Rgb d = sample(src, w, h, static_cast<int>(rx), static_cast<int>(ry));
-          const float dr = d.transparent ? 200.0F : d.r;
-          plotDot(dst, w, h, rx, ry, mn * 0.015F * (1 - rip), ya,
-                  Rgb{u8(220 + dr * 0.1F), u8(180), u8(120), false});
-        }
-      }
+      drawWhiteKeys(dst, src, w, h, nWhite, keyW, keyTop, keyBot, t, mn, ya, hash);
       // Black keys (between certain whites: 2-3, 4-5, 5-6 etc — simplified
       // every-other-pair pattern).
       for (int k = 0; k < nWhite - 1; ++k) {
         if (k % 7 == 2 || k % 7 == 6) continue;  // no black between B-C and E-F
-        for (int yy = static_cast<int>(keyTop); yy <= static_cast<int>(keyTop + (keyBot - keyTop) * 0.6F); ++yy)
-          for (int xx = static_cast<int>((k + 1) * keyW - keyW * 0.25F);
-               xx <= static_cast<int>((k + 1) * keyW + keyW * 0.25F); ++xx)
-            if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-              dst[static_cast<std::size_t>(yy) * w + xx] = Rgb{20, 20, 30, false};
+        fillClippedBox(dst, w, h, static_cast<int>((k + 1) * keyW - keyW * 0.25F),
+                       static_cast<int>((k + 1) * keyW + keyW * 0.25F), static_cast<int>(keyTop),
+                       static_cast<int>(keyTop + (keyBot - keyTop) * 0.6F), Rgb{20, 20, 30, false});
       }
     });
 }
@@ -842,42 +920,18 @@ void effectStradivarius(const Renderer& renderer, const std::vector<Rgb>& src, i
   auto u8 = [](float v) { return static_cast<std::uint8_t>(std::clamp(v, 0.0F, 255.0F)); };
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(20 + l * 0.10F), u8(15 + l * 0.05F), u8(10 + l * 0.03F), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        const float l = s.transparent ? 30.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+        return Rgb{u8(20 + l * 0.10F), u8(15 + l * 0.05F), u8(10 + l * 0.03F), false};
+      });
       const float cx = w * 0.5F;
       const float cy = h * 0.55F;
       const float vL = mn * 0.30F;
       // Violin body — two ovals (upper bout, lower bout) + waist.
-      auto drawBout = [&](float yc, float rx, float ry) {
-        for (int yo = -static_cast<int>(ry); yo <= static_cast<int>(ry); ++yo)
-          for (int xo = -static_cast<int>(rx); xo <= static_cast<int>(rx); ++xo) {
-            const float nx = xo / rx;
-            const float nyN = yo / ry;
-            if (nx * nx + nyN * nyN > 1.0F) continue;
-            const int xx = static_cast<int>(cx + xo);
-            const int yy = static_cast<int>(yc + yo);
-            if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
-            const Rgb d = sample(src, w, h, xx, yy);
-            const float dr = d.transparent ? 180.0F : d.r;
-            dst[static_cast<std::size_t>(yy) * w + xx] =
-                Rgb{u8(140 + dr * 0.20F), u8(70), u8(30), false};
-          }
-      };
-      drawBout(cy - vL * 0.25F, vL * 0.25F, vL * 0.18F);  // upper bout
-      drawBout(cy + vL * 0.25F, vL * 0.30F, vL * 0.20F);  // lower bout
+      drawViolinBout(dst, src, w, h, cx, cy - vL * 0.25F, vL * 0.25F, vL * 0.18F);  // upper bout
+      drawViolinBout(dst, src, w, h, cx, cy + vL * 0.25F, vL * 0.30F, vL * 0.20F);  // lower bout
       // f-holes (left + right).
-      for (int side = -1; side <= 1; side += 2) {
-        for (float yy = cy - vL * 0.12F; yy <= cy + vL * 0.12F; yy += 1.0F) {
-          const float curve = std::sin((yy - cy) * 8 / vL) * vL * 0.02F;
-          plotDot(dst, w, h, cx + side * vL * 0.08F + curve, yy,
-                  std::max(1.0F, mn * 0.002F), ya, Rgb{20, 10, 5, false});
-        }
-      }
+      drawFHoles(dst, w, h, cx, cy, vL, mn, ya);
       // Neck.
       drawSeg(dst, w, h, cx, cy - vL * 0.42F, cx, cy - vL * 0.65F,
               std::max(1.0F, mn * 0.014F), ya, Rgb{40, 20, 10, false});
@@ -954,46 +1008,25 @@ void effectValkyrieRide(const Renderer& renderer, const std::vector<Rgb>& src, i
   runFrames(renderer, w, h, 5400,
     [&](float t, std::vector<Rgb>& dst) {
       // Storm sky.
-      for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-          const Rgb& s = src[static_cast<std::size_t>(y) * w + x];
-          const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
-          const float sf = static_cast<float>(y) / h;
-          dst[static_cast<std::size_t>(y) * w + x] =
-              Rgb{u8(40 + 60 * (1 - sf) + l * 0.10F), u8(30 + 40 * (1 - sf) + l * 0.08F),
-                  u8(50 + 50 * (1 - sf) + l * 0.10F), false};
-        }
+      shadePixels(dst, src, w, h, [&](const Rgb& s, int x, int y) {
+        const float l = s.transparent ? 40.0F : (0.3F * s.r + 0.59F * s.g + 0.11F * s.b);
+        const float sf = static_cast<float>(y) / h;
+        return Rgb{u8(40 + 60 * (1 - sf) + l * 0.10F), u8(30 + 40 * (1 - sf) + l * 0.08F),
+                   u8(50 + 50 * (1 - sf) + l * 0.10F), false};
+      });
       // Lightning forks.
       const bool flash = std::fmod(t * 3.0F, 1.0F) < 0.1F;
-      if (flash) {
-        for (int b = 0; b < 2; ++b) {
-          float bx = hash(b) * w;
-          float by = 0;
-          for (int s = 0; s < 6; ++s) {
-            const float nx = bx + (hash(b * 7 + s) - 0.5F) * mn * 0.05F;
-            const float ny = by + mn * 0.10F;
-            drawSeg(dst, w, h, bx, by, nx, ny, std::max(1.0F, mn * 0.003F), ya,
-                    Rgb{240, 240, 255, false});
-            bx = nx; by = ny;
-          }
-        }
-      }
+      if (flash)
+        drawLightningForks(dst, w, h, mn, ya, hash);
       // Valkyrie + horse silhouette, charging right.
       const float cx = -mn * 0.20F + t * (w + mn * 0.40F);
       const float cy = h * 0.55F;
       const Rgb body{20, 14, 30, false};
       const float bL = mn * 0.20F;
       // Horse body.
-      for (int yo = -static_cast<int>(bL * 0.15F); yo <= static_cast<int>(bL * 0.15F); ++yo)
-        for (int xo = -static_cast<int>(bL * 0.45F); xo <= static_cast<int>(bL * 0.30F); ++xo) {
-          const float nx = xo / (bL * 0.45F);
-          const float nyN = yo / (bL * 0.15F);
-          if (nx * nx + nyN * nyN > 1.0F) continue;
-          const int xx = static_cast<int>(cx + xo);
-          const int yy = static_cast<int>(cy + yo);
-          if (xx >= 0 && xx < w && yy >= 0 && yy < h)
-            dst[static_cast<std::size_t>(yy) * w + xx] = body;
-        }
+      fillEllipse(dst, w, h, cx, cy, bL * 0.45F, bL * 0.15F, -static_cast<int>(bL * 0.45F),
+                  static_cast<int>(bL * 0.30F), -static_cast<int>(bL * 0.15F),
+                  static_cast<int>(bL * 0.15F), body);
       // Horse head + legs.
       drawSeg(dst, w, h, cx + bL * 0.30F, cy - bL * 0.10F, cx + bL * 0.45F, cy - bL * 0.25F,
               std::max(1.0F, mn * 0.012F), ya, body);

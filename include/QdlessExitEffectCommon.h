@@ -155,6 +155,35 @@ void shadePixels(std::vector<Rgb>& dst, const std::vector<Rgb>& src, int w, int 
           shade(src[static_cast<std::size_t>(y) * w + x], x, y);
 }
 
+// Fills the pixels around (cx, cy) at offsets xoMin..xoMax, yoMin..yoMax which
+// lie inside the ellipse (xo / rx)^2 + (yo / ry)^2 <= 1 and inside the image.
+inline void fillEllipse(std::vector<Rgb>& dst,
+                        int w,
+                        int h,
+                        float cx,
+                        float cy,
+                        float rx,
+                        float ry,
+                        int xoMin,
+                        int xoMax,
+                        int yoMin,
+                        int yoMax,
+                        const Rgb& colour)
+{
+  for (int yo = yoMin; yo <= yoMax; ++yo)
+    for (int xo = xoMin; xo <= xoMax; ++xo)
+    {
+      const float nx = xo / rx;
+      const float nyN = yo / ry;
+      if (nx * nx + nyN * nyN > 1.0F)
+        continue;
+      const int xx = static_cast<int>(cx + xo);
+      const int yy = static_cast<int>(cy + yo);
+      if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+        dst[static_cast<std::size_t>(yy) * w + xx] = colour;
+    }
+}
+
 inline float yAspectFor(const Renderer& renderer)
 {
   return 4.0F / static_cast<float>(subRowsForStyle(renderer.cornerStyle()));
