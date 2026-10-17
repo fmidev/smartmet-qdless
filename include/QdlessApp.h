@@ -587,6 +587,10 @@ class App
   // with a ShapeSource over the picked layer. Called once at startup
   // and re-invoked on [T]. Returns true on success.
   bool openPgPicker(UI& ui);
+  bool openDeferredSource(UI& ui);
+  void applyStartupView();
+  void redrawScreen(UI& ui);
+  int inputWaitMs() const;
   // Build a ShapeSource over a named layer of itsPgDataset. Used by
   // openPgPicker after selection and by --table direct-open.
   void openPgLayer(const std::string& schemaTable);

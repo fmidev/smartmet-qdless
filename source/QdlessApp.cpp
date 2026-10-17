@@ -9487,63 +9487,9 @@ int App::runInteractive()
 
   UI ui;
 
-  // Deferred PostGIS layer pick: when launched with --pg but no
-  // --table, the constructor stopped after opening the connection
-  // (popups need the UI). Run the picker now; openPgLayer fills
-  // itsSource and we follow up with the same source-dependent init
-  // the file path runs in the ctor.
-  if (itsSource == nullptr && itsPgDataset != nullptr)
-  {
-    if (!openPgPicker(ui))
-      return 0;  // user cancelled the picker
-    initFromSource();
-  }
-  // Deferred PNG-tree pick: same shape as the PG path. --dir on a tree
-  // root left itsSource null in the ctor; open the picker now and run
-  // initFromSource on the picked leaf.
-  if (itsSource == nullptr && !itsOpts.browseRoot.empty())
-  {
-    if (!openBrowsePicker(ui))
-      return 0;
-    initFromSource();
-  }
-  // Deferred masala-catalog pick: --catalog pointed above a cube, so the
-  // ctor left itsSource null. Run the Miller-column picker now.
-  if (itsSource == nullptr && !itsOpts.catalogRoot.empty())
-  {
-    if (!openCatalogPicker(ui))
-      return 0;
-    initFromSource();
-  }
-  // Deferred bare-`--catalog` pick: discover weather mounts from fstab and let
-  // the user choose one, then enter the column picker rooted there.
-  if (itsSource == nullptr && itsOpts.catalogDiscover)
-  {
-    if (!openCatalogRootPicker(ui))
-      return 0;
-    initFromSource();
-  }
-
-  // --3d: boot straight into 3D mode when the active source supports it.
-  // Silently fall back to 2D otherwise so passing --3d at startup is safe
-  // regardless of what file the user later opens via the in-app pickers.
-  if (itsOpts.start3D && sourceSupports3D())
-  {
-    itsMode3D = true;
-    apply3DDefaultsForSource();
-  }
-  // --globe: boot straight into the globe view, centred on the data.
-  if (itsOpts.startGlobe && sourceSupportsGlobe())
-  {
-    itsModeGlobe = true;
-    itsMode3D = false;
-    const auto bb = itsSource->boundingBox();
-    constexpr double kLatLimit = M_PI_2 - 0.01;
-    itsCamYaw = ((bb.minLon + bb.maxLon) * 0.5) * M_PI / 180.0;
-    itsCamPitch =
-        std::clamp(((bb.minLat + bb.maxLat) * 0.5) * M_PI / 180.0, -kLatLimit, kLatLimit);
-    itsCamZoom = 1.0;
-  }
+  if (!openDeferredSource(ui))
+    return 0;  // user cancelled a picker
+  applyStartupView();
 
   bool quit = false;
   bool needRedraw = true;
@@ -9551,44 +9497,8 @@ int App::runInteractive()
   while (!quit)
   {
     if (needRedraw)
-    {
-      // DEC mode 2026 (synchronized output): the terminal buffers all
-      // rendering between begin and end so the user sees one composed
-      // frame instead of timeline → map → popup as three flashes.
-      // Terminals that don't support 2026 ignore the private-mode set,
-      // so the sequence is safe to emit unconditionally.
-      std::fputs("\x1b[?2026h", stdout);
-
-      // Order matters: ncurses' first doupdate() force-paints the whole
-      // screen with blanks, which would clobber a raw-ANSI map written
-      // beforehand. So commit ncurses windows first, then draw the map
-      // on top via raw escapes.
-      renderTimeline(ui);
-      drawMap(ui);
-      drawCrossSection(ui);
-
-      std::fputs("\x1b[?2026l", stdout);
-      std::fflush(stdout);
-    }
-
-    // While any curtain animation is on we need to redraw on a fixed
-    // cadence — the curtain's swing/rotate/orbit/tilt phases advance in
-    // wall-clock time, and without a periodic wake-up there's nothing to
-    // trigger a frame. ~33 ms ≈ 30 FPS, fast enough that a 2-3 s rotation
-    // looks smooth. Plain time-step animation (Space) keeps its own
-    // user-chosen delay; if both are on, take the faster of the two so
-    // the curtain still animates smoothly.
-    const bool curtainAnim = itsMode3DCurtain &&
-                             (itsCurtainAutoSwing || itsCurtainAutoRotate ||
-                              itsCurtainAutoOrbit || itsCurtainAutoTilt);
-    int waitMs = -1;
-    if (itsAnimating && curtainAnim)
-      waitMs = std::min(itsAnimationDelayMs, 33);
-    else if (itsAnimating)
-      waitMs = itsAnimationDelayMs;
-    else if (curtainAnim)
-      waitMs = 33;
-    int key = ui.waitInput(waitMs);
+      redrawScreen(ui);
+    int key = ui.waitInput(inputWaitMs());
     if (key == ERR)
     {
       // Timeout. With time-step animation: advance the time index. With
@@ -9613,5 +9523,118 @@ int App::runInteractive()
   // played while curses is still up (the UI destructor's endwin runs after).
   playExitEffect();
   return 0;
+}
+
+// Run the pickers of the deferred-source modes (--pg without --table, --dir
+// on a tree root, --catalog above a cube, bare --catalog). False if the user
+// cancelled a picker.
+bool App::openDeferredSource(UI& ui)
+{
+  // Deferred PostGIS layer pick: when launched with --pg but no
+  // --table, the constructor stopped after opening the connection
+  // (popups need the UI). Run the picker now; openPgLayer fills
+  // itsSource and we follow up with the same source-dependent init
+  // the file path runs in the ctor.
+  if (itsSource == nullptr && itsPgDataset != nullptr)
+  {
+    if (!openPgPicker(ui))
+      return false;  // user cancelled the picker
+    initFromSource();
+  }
+  // Deferred PNG-tree pick: same shape as the PG path. --dir on a tree
+  // root left itsSource null in the ctor; open the picker now and run
+  // initFromSource on the picked leaf.
+  if (itsSource == nullptr && !itsOpts.browseRoot.empty())
+  {
+    if (!openBrowsePicker(ui))
+      return false;
+    initFromSource();
+  }
+  // Deferred masala-catalog pick: --catalog pointed above a cube, so the
+  // ctor left itsSource null. Run the Miller-column picker now.
+  if (itsSource == nullptr && !itsOpts.catalogRoot.empty())
+  {
+    if (!openCatalogPicker(ui))
+      return false;
+    initFromSource();
+  }
+  // Deferred bare-`--catalog` pick: discover weather mounts from fstab and let
+  // the user choose one, then enter the column picker rooted there.
+  if (itsSource == nullptr && itsOpts.catalogDiscover)
+  {
+    if (!openCatalogRootPicker(ui))
+      return false;
+    initFromSource();
+  }
+  return true;
+}
+
+// Apply the --3d and --globe startup views when the source supports them
+void App::applyStartupView()
+{
+  // --3d: boot straight into 3D mode when the active source supports it.
+  // Silently fall back to 2D otherwise so passing --3d at startup is safe
+  // regardless of what file the user later opens via the in-app pickers.
+  if (itsOpts.start3D && sourceSupports3D())
+  {
+    itsMode3D = true;
+    apply3DDefaultsForSource();
+  }
+  // --globe: boot straight into the globe view, centred on the data.
+  if (itsOpts.startGlobe && sourceSupportsGlobe())
+  {
+    itsModeGlobe = true;
+    itsMode3D = false;
+    const auto bb = itsSource->boundingBox();
+    constexpr double kLatLimit = M_PI_2 - 0.01;
+    itsCamYaw = ((bb.minLon + bb.maxLon) * 0.5) * M_PI / 180.0;
+    itsCamPitch =
+        std::clamp(((bb.minLat + bb.maxLat) * 0.5) * M_PI / 180.0, -kLatLimit, kLatLimit);
+    itsCamZoom = 1.0;
+  }
+}
+
+// Draw one complete frame: timeline, map and cross-section
+void App::redrawScreen(UI& ui)
+{
+  // DEC mode 2026 (synchronized output): the terminal buffers all
+  // rendering between begin and end so the user sees one composed
+  // frame instead of timeline → map → popup as three flashes.
+  // Terminals that don't support 2026 ignore the private-mode set,
+  // so the sequence is safe to emit unconditionally.
+  std::fputs("\x1b[?2026h", stdout);
+
+  // Order matters: ncurses' first doupdate() force-paints the whole
+  // screen with blanks, which would clobber a raw-ANSI map written
+  // beforehand. So commit ncurses windows first, then draw the map
+  // on top via raw escapes.
+  renderTimeline(ui);
+  drawMap(ui);
+  drawCrossSection(ui);
+
+  std::fputs("\x1b[?2026l", stdout);
+  std::fflush(stdout);
+}
+
+// How long to wait for input before the next animation frame, -1 = forever
+int App::inputWaitMs() const
+{
+  // While any curtain animation is on we need to redraw on a fixed
+  // cadence — the curtain's swing/rotate/orbit/tilt phases advance in
+  // wall-clock time, and without a periodic wake-up there's nothing to
+  // trigger a frame. ~33 ms ≈ 30 FPS, fast enough that a 2-3 s rotation
+  // looks smooth. Plain time-step animation (Space) keeps its own
+  // user-chosen delay; if both are on, take the faster of the two so
+  // the curtain still animates smoothly.
+  const bool curtainAnim = itsMode3DCurtain &&
+                           (itsCurtainAutoSwing || itsCurtainAutoRotate ||
+                            itsCurtainAutoOrbit || itsCurtainAutoTilt);
+  if (itsAnimating && curtainAnim)
+    return std::min(itsAnimationDelayMs, 33);
+  if (itsAnimating)
+    return itsAnimationDelayMs;
+  if (curtainAnim)
+    return 33;
+  return -1;
 }
 }  // namespace Qdless
