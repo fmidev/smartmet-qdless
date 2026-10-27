@@ -2,8 +2,8 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.10.17
-Release: 2%{?dist}.fmi
+Version: 26.10.27
+Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
 URL: https://github.com/fmidev/smartmet-qdless
@@ -45,7 +45,6 @@ BuildRequires: smartmet-library-grid-files-devel >= 26.10.16
 BuildRequires: smartmet-library-macgyver-devel >= 26.10.16
 BuildRequires: smartmet-library-newbase-devel >= 26.10.16
 BuildRequires: smartmet-library-smarttools-devel >= 26.10.16
-BuildRequires: smartmet-timezones
 BuildRequires: zlib-devel
 
 Requires: %{smartmet_boost}-filesystem
@@ -72,10 +71,9 @@ Requires: netcdf-cxx4
 Requires: smartmet-library-calculator >= 26.10.16
 Requires: smartmet-library-gis >= 26.10.17
 Requires: smartmet-library-grid-files >= 26.10.17
-Requires: smartmet-library-macgyver >= 26.10.17
+Requires: smartmet-library-macgyver >= 26.10.27
 Requires: smartmet-library-newbase >= 26.10.17
 Requires: smartmet-library-smarttools >= 26.10.17
-Requires: smartmet-timezones >= 26.9.26
 Requires: zlib
 
 Provides: qdless = %{version}
@@ -115,6 +113,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Tue Oct 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.27-1.fmi
+- Removed the unused smartmet-timezones dependency
+- Require macgyver 26.10.27, which no longer aborts at startup when tzdata is missing
 * Mon Oct 19 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.17-2.fmi
 - Repackaged: simultaneous CI runs corrupted the 26.10.17-1 RPMs
 * Sat Oct 17 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.10.17-1.fmi
