@@ -7466,7 +7466,7 @@ void App::draw3DSurfaceStack(const Layout& layout)
   // have parameter-specific thresholds because their units aren't %.
   struct Layer
   {
-    FmiParameterName paramId;
+    FmiParameterName paramId = kFmiBadParameter;
     const char* shortName = nullptr;
     double heightKm = 0.0;
     float threshold = 0.0F;          // value below this is skipped
