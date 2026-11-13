@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.11.7
+Version: 26.11.13
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -113,6 +113,9 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Fri Nov 13 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.11.13-1.fmi
+- Added includes no longer provided indirectly by SmartMet library headers
+
 * Sat Nov 7 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.11.7-1.fmi
 - Initialize member variables that some constructors left uninitialized
 
