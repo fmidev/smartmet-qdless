@@ -2,7 +2,7 @@
 %define RPMNAME smartmet-%{BINNAME}
 Summary: Interactive UTF-8 terminal viewer for SmartMet querydata
 Name: %{RPMNAME}
-Version: 26.11.13
+Version: 26.11.25
 Release: 1%{?dist}.fmi
 License: MIT
 Group: Development/Tools
@@ -113,6 +113,13 @@ make %{_smp_mflags}
 %{_datadir}/smartmet/qdless/cmu/*.bvh
 
 %changelog
+* Wed Nov 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.11.25-1.fmi
+- Built-in fallback ramp is now a continuous gradient over the visible area of the current time step
+- Fixed the built-in ramp leaving the data minimum and maximum uncoloured
+- Values above 1e6 (e.g. accumulated radiation in J/m2) are no longer treated as missing
+- Fixed swapped corner bevels in the SmallTriangle rendering style
+- Terminal colour codes are sent only when they change, halving the frame size
+
 * Fri Nov 13 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.11.13-1.fmi
 - Added includes no longer provided indirectly by SmartMet library headers
 

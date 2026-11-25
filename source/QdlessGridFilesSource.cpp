@@ -500,7 +500,10 @@ float GridFilesSource::interpolatedValue(double lat, double lon) const
   // LatLonCoordinates (whose argument ordering varies per backend — see
   // itsCoordsSwapped), getGridValueByLatLonCoordinate consistently takes
   // (lat, lon), so no swap-aware wrapper is needed here.
-  return static_cast<float>(msg->getGridValueByLatLonCoordinate(lat, lon, 1));
+  const auto value = msg->getGridValueByLatLonCoordinate(lat, lon, 1);
+  if (value == ParamValueMissing)
+    return std::numeric_limits<float>::quiet_NaN();
+  return static_cast<float>(value);
 }
 
 bool GridFilesSource::ensureValueGrid() const

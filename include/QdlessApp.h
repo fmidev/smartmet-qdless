@@ -926,6 +926,9 @@ class App
   // cache invalidates on viewport / param / level change.
   std::vector<ViewportStats> ensureViewportStats() const;
 
+  // Stats of the current time step over the viewport (one series entry).
+  ViewportStats sampleViewportStats() const;
+
   // Cache for ensureViewportStats(). Invalidated on viewport/param/
   // level mismatch. Mutable so const probes can refresh it on demand.
   mutable bool itsStatsCacheValid = false;

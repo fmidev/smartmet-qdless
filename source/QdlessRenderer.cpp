@@ -34,9 +34,9 @@ constexpr std::array<const char*, 16> kSmallTriangle = {nullptr,
                                                         "🭇",
                                                         nullptr,
                                                         nullptr,
-                                                        "🭢",
-                                                        nullptr,
                                                         "🬼",
+                                                        nullptr,
+                                                        "🭢",
                                                         "🭗",
                                                         nullptr};
 
@@ -229,9 +229,55 @@ Rgb opaqueMean(const std::array<Rgb, 8>& q, int n, std::uint8_t& mixedMask)
              static_cast<std::uint8_t>(sumB / count)};
 }
 
+// Tracks the colours last emitted on the current output row so that runs of
+// identical colours (large uniform areas, or xterm-256 quantisation) are not
+// re-sent for every cell. Shrinks the frame size considerably, which matters
+// for animation over ssh. Key -1 means the terminal default colour.
+class SgrState
+{
+ public:
+  explicit SgrState(bool truecolor) : itsTruecolor(truecolor) {}
+
+  void reset()
+  {
+    itsFg = kDefault;
+    itsBg = kDefault;
+  }
+
+  void fg(std::ostream& os, const Rgb& c) { emit(os, c, 38, itsFg); }
+  void bg(std::ostream& os, const Rgb& c) { emit(os, c, 48, itsBg); }
+
+  void defaultBg(std::ostream& os)
+  {
+    if (itsBg != kDefault)
+      os << "\x1b[49m";
+    itsBg = kDefault;
+  }
+
+ private:
+  static constexpr int kDefault = -1;
+
+  void emit(std::ostream& os, const Rgb& c, int sgr, int& last) const
+  {
+    const int key = itsTruecolor ? ((c.r << 16) | (c.g << 8) | c.b) : xterm256(c);
+    if (key == last)
+      return;
+    last = key;
+    if (itsTruecolor)
+      os << "\x1b[" << sgr << ";2;" << static_cast<int>(c.r) << ';' << static_cast<int>(c.g) << ';'
+         << static_cast<int>(c.b) << 'm';
+    else
+      os << "\x1b[" << sgr << ";5;" << key << 'm';
+  }
+
+  bool itsTruecolor;
+  int itsFg = kDefault;
+  int itsBg = kDefault;
+};
+
 // Emit a fully opaque cell: split into two colours and pick the glyph of the style
 void renderOpaqueCell(
-    std::ostream& os, const std::array<Rgb, 8>& q, int n, CornerStyle style, bool truecolor)
+    std::ostream& os, const std::array<Rgb, 8>& q, int n, CornerStyle style, SgrState& sgr)
 {
   Rgb fg{};
   Rgb bg{};
@@ -248,18 +294,23 @@ void renderOpaqueCell(
   if (glyph == nullptr)
     glyph = (style == CornerStyle::Sextant) ? sextantTable()[mask] : kQuadrant[mask];
 
-  const Rgb& outFg = swapColors ? bg : fg;
-  const Rgb& outBg = swapColors ? fg : bg;
-  if (truecolor)
+  // A blank glyph shows only the background and a full block only the
+  // foreground, so the other colour need not be sent.
+  const auto full = static_cast<std::uint8_t>((1U << n) - 1);
+  if (mask == 0)
   {
-    os << "\x1b[38;2;" << static_cast<int>(outFg.r) << ';' << static_cast<int>(outFg.g) << ';'
-       << static_cast<int>(outFg.b) << "m\x1b[48;2;" << static_cast<int>(outBg.r) << ';'
-       << static_cast<int>(outBg.g) << ';' << static_cast<int>(outBg.b) << 'm';
+    sgr.bg(os, bg);
+    os << ' ';
+    return;
   }
-  else
+  if (mask == full)
   {
-    os << "\x1b[38;5;" << xterm256(outFg) << "m\x1b[48;5;" << xterm256(outBg) << 'm';
+    sgr.fg(os, fg);
+    os << glyph;
+    return;
   }
+  sgr.fg(os, swapColors ? bg : fg);
+  sgr.bg(os, swapColors ? fg : bg);
   os << glyph;
 }
 }  // namespace
@@ -337,6 +388,8 @@ void Renderer::render(std::ostream& os,
   auto baseGlyph = [&](std::uint8_t m) -> const char*
   { return sextant ? sextantTable()[m] : kQuadrant[m]; };
 
+  SgrState sgr(itsTruecolor);
+  os << "\x1b[0m";
   for (int cy = 0; cy < cellH; ++cy)
   {
     os << "\x1b[" << (originRow + cy + 1) << ';' << (originCol + 1) << 'H';
@@ -354,7 +407,8 @@ void Renderer::render(std::ostream& os,
       if (nTrans == n)
       {
         // Fully transparent cell: blank, no colour.
-        os << "\x1b[0m ";
+        sgr.defaultBg(os);
+        os << ' ';
         continue;
       }
       if (nTrans > 0)
@@ -363,13 +417,16 @@ void Renderer::render(std::ostream& os,
         // are background (terminal default).
         std::uint8_t mixedMask = 0;
         const Rgb fgMean = opaqueMean(q, n, mixedMask);
-        os << "\x1b[49m" << fgEscape(fgMean) << baseGlyph(mixedMask);
+        sgr.defaultBg(os);
+        sgr.fg(os, fgMean);
+        os << baseGlyph(mixedMask);
         continue;
       }
 
-      renderOpaqueCell(os, q, n, itsCornerStyle, itsTruecolor);
+      renderOpaqueCell(os, q, n, itsCornerStyle, sgr);
     }
     os << "\x1b[0m";
+    sgr.reset();
   }
   os << "\x1b[0m";
 }

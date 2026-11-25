@@ -684,7 +684,10 @@ parameter (after removing each level's median) as text, then exits.
 
 `qdless.conf` is JSON and maps parameter names (case-insensitive) to palette
 names. If a parameter isn't listed, qdless guesses a palette from its unit
-and name, and falls back to a built-in ramp. `--palette NAME` overrides both.
+and name, and falls back to a built-in ramp. The built-in ramp is a smooth
+blue-to-red gradient spanning the values visible on screen at the time step
+shown when the parameter is selected; values outside that range take the end
+colours. `--palette NAME` overrides both.
 To regenerate the palettes from `wms-conf`, run
 `scripts/wmsconf2palette.py`. Packagers can compile in a different data
 directory with `-DQDLESS_DATA_DIR=...`.

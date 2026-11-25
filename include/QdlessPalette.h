@@ -1,5 +1,8 @@
 #pragma once
 
+#include <newbase/NFmiGlobals.h>
+
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -7,6 +10,16 @@
 
 namespace Qdless
 {
+// Treat sentinel/garbage values as missing. Catches kFloatMissing (32700),
+// GRIB's 9.999e20, NetCDF's NC_FILL_FLOAT and accidental uninitialised reads
+// (±1e29). The threshold must stay well above real values: accumulated
+// radiation fields in J/m² reach 1e8 over a long forecast. grid-files'
+// ParamValueMissing (-16777216) is mapped to NaN by GridFilesSource.
+inline bool isMissingValue(float value)
+{
+  return value == kFloatMissing || !std::isfinite(value) || std::abs(value) > 1e10F;
+}
+
 struct Rgb
 {
   std::uint8_t r = 0;
@@ -33,6 +46,9 @@ class Palette
   };
 
   static Palette loadFromFile(const std::string& path);
+  // Continuous ramp over [dataMin, dataMax], used when no named palette
+  // applies. Colours are interpolated per value (values outside the range
+  // clamp to the end colours); the bands only describe it for the legend.
   static Palette builtinRamp(float dataMin, float dataMax);
   // Flat-fill palette: any value ≥ 0.5 paints `color`, anything below
   // is transparent. Used by the shapefile backend so non-feature cells
@@ -59,5 +75,10 @@ class Palette
  private:
   std::string itsName;
   std::vector<Band> itsBands;
+  // Continuous colour stops evenly spaced over [itsRampMin, itsRampMax].
+  // When set, lookup() interpolates these instead of matching the bands.
+  std::vector<Rgb> itsRampStops;
+  float itsRampMin = 0;
+  float itsRampMax = 0;
 };
 }  // namespace Qdless

@@ -129,7 +129,7 @@ Grid sampleGrid(DataSource& src)
   return g;
 }
 
-bool valid(float v) { return v != kFloatMissing && std::isfinite(v) && std::fabs(v) < 1e6F; }
+bool valid(float v) { return !isMissingValue(v); }
 
 // Detector 1: tropical convection / MJO ----------------------------------
 PhenomenonHint detectTropicalConvection(const Grid& g, const std::string& units)

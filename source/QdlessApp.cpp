@@ -1688,8 +1688,7 @@ bool App::openBrowsePicker(UI& ui)
 
 float App::transform(float v) const
 {
-  // Same sentinel detection as Palette::lookup; keep them in sync.
-  if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F)
+  if (isMissingValue(v))
     return v;
   const auto& p = activePanel();
   return v * p.valueScale + p.valueOffset;
@@ -1806,6 +1805,12 @@ void App::loadPalette()
 
 Palette App::sampledBuiltinRamp() const
 {
+  // Range of the current time step over the visible area, so the full ramp
+  // is spent on the situation on screen.
+  if (const auto s = sampleViewportStats(); s.valid && s.min < s.max)
+    return Palette::builtinRamp(s.min, s.max);
+
+  // Empty viewport or a constant field on screen: coarse full-area sample
   float lo = std::numeric_limits<float>::infinity();
   float hi = -std::numeric_limits<float>::infinity();
   constexpr int N = 40;
@@ -1814,7 +1819,7 @@ Palette App::sampledBuiltinRamp() const
     for (int i = 0; i < N; ++i)
     {
       const float v = transform(itsSource->sampleValueAtUV((i + 0.5) / N, (j + 0.5) / N));
-      if (v == kFloatMissing || !std::isfinite(v) || std::abs(v) > 1e6F)
+      if (isMissingValue(v))
         continue;
       lo = std::min(lo, v);
       hi = std::max(hi, v);
@@ -1992,7 +1997,7 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin, f
     {
       const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / subWidth * spanU;
       const float val = transform(itsSource->sampleValueAtUV(up, vp));
-      if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e6F)
+      if (!isMissingValue(val))
       {
         dataMin = std::min(dataMin, val);
         dataMax = std::max(dataMax, val);
@@ -2001,6 +2006,49 @@ std::vector<Rgb> App::sampleSlice(int subWidth, int subHeight, float& dataMin, f
     }
   }
   return out;
+}
+
+App::ViewportStats App::sampleViewportStats() const
+{
+  // Sample at a fixed resolution that's coarser than the screen but
+  // dense enough for stable min / max estimation. 256x128 is ~33k
+  // samples per time step, around 1M total for a 24-step file —
+  // well under a second on a modern CPU.
+  constexpr int kSampleW = 256;
+  constexpr int kSampleH = 128;
+  const float spanU = itsViewport.uMax - itsViewport.uMin;
+  const float spanV = itsViewport.vMax - itsViewport.vMin;
+  ViewportStats s;
+  if (spanU <= 0 || spanV <= 0)
+    return s;
+
+  double sum = 0;
+  int count = 0;
+  float lo = std::numeric_limits<float>::infinity();
+  float hi = -std::numeric_limits<float>::infinity();
+  for (int sy = 0; sy < kSampleH; ++sy)
+  {
+    const float vp = itsViewport.vMin + (static_cast<float>(sy) + 0.5F) / kSampleH * spanV;
+    for (int sx = 0; sx < kSampleW; ++sx)
+    {
+      const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / kSampleW * spanU;
+      const float val = transform(itsSource->sampleValueAtUV(up, vp));
+      if (isMissingValue(val))
+        continue;
+      sum += val;
+      ++count;
+      lo = std::min(lo, val);
+      hi = std::max(hi, val);
+    }
+  }
+  if (count > 0)
+  {
+    s.min = lo;
+    s.max = hi;
+    s.mean = static_cast<float>(sum / count);
+    s.valid = true;
+  }
+  return s;
 }
 
 std::vector<App::ViewportStats> App::ensureViewportStats() const
@@ -2019,12 +2067,6 @@ std::vector<App::ViewportStats> App::ensureViewportStats() const
       std::fabs(itsStatsCacheViewport.vMax - itsViewport.vMax) < kEps)
     return itsStatsCacheSeries;
 
-  // Sample at a fixed resolution that's coarser than the screen but
-  // dense enough for stable min / max estimation. 256x128 is ~33k
-  // samples per time step, around 1M total for a 24-step file —
-  // well under a second on a modern CPU.
-  constexpr int kSampleW = 256;
-  constexpr int kSampleH = 128;
   const float spanU = itsViewport.uMax - itsViewport.uMin;
   const float spanV = itsViewport.vMax - itsViewport.vMin;
 
@@ -2047,34 +2089,7 @@ std::vector<App::ViewportStats> App::ensureViewportStats() const
   for (std::size_t t = 0; t < nt; ++t)
   {
     mut->selectTimeIndex(t);
-    double sum = 0;
-    int count = 0;
-    float lo = std::numeric_limits<float>::infinity();
-    float hi = -std::numeric_limits<float>::infinity();
-    for (int sy = 0; sy < kSampleH; ++sy)
-    {
-      const float vp = itsViewport.vMin + (static_cast<float>(sy) + 0.5F) / kSampleH * spanV;
-      for (int sx = 0; sx < kSampleW; ++sx)
-      {
-        const float up = itsViewport.uMin + (static_cast<float>(sx) + 0.5F) / kSampleW * spanU;
-        const float val = transform(itsSource->sampleValueAtUV(up, vp));
-        if (val == kFloatMissing || !std::isfinite(val) || std::fabs(val) > 1e6F)
-          continue;
-        sum += val;
-        ++count;
-        lo = std::min(lo, val);
-        hi = std::max(hi, val);
-      }
-    }
-    ViewportStats s;
-    if (count > 0)
-    {
-      s.min = lo;
-      s.max = hi;
-      s.mean = static_cast<float>(sum / count);
-      s.valid = true;
-    }
-    out[t] = s;
+    out[t] = sampleViewportStats();
   }
   mut->selectTimeIndex(savedTime);
 
@@ -8651,7 +8666,7 @@ void App::drawGlobe(const Layout& layout)
       zbuf[idx] = static_cast<float>(-d);
 
       const float val = transform(itsSource->interpolatedValue(lat, lon));
-      if (val != kFloatMissing && std::isfinite(val) && std::abs(val) < 1e6F)
+      if (!isMissingValue(val))
       {
         const Rgb color = pal.lookup(val);
         if (!color.transparent)

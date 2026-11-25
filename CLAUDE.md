@@ -232,7 +232,9 @@ the data keeps reading normally.
 - Sentinel detection: `Palette::lookup` treats `|value| > 1e10` as missing
 - Out-of-palette-range values render as `transparent` Rgb (terminal default
   bg), not clamped to the nearest band — e.g. precipitation < 0.1 mm shows
-  no colour
+  no colour. Exception: the fallback `Palette::builtinRamp` (no named
+  palette) interpolates continuously and clamps to its end colours; its range
+  is the current time step over the viewport (`App::sampleViewportStats`)
 - Popups bypass ncurses for the body (raw ANSI), use ncurses only for the
   status / timeline windows and `wgetch` for input
 - Coordinate convention: `NFmiArea` uses image-coords (Y=0 at top = north,

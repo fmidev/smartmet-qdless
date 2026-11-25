@@ -79,12 +79,23 @@ Palette Palette::builtinRamp(float dataMin, float dataMax)
     return p;
   }
 
+  p.itsRampStops.assign(stops.begin(), stops.end());
+  p.itsRampMin = dataMin;
+  p.itsRampMax = dataMax;
+
+  // Legend description: one band per stop interval, coloured by its midpoint
   const float step = (dataMax - dataMin) / (N - 1);
   p.itsBands.reserve(N);
   for (int i = 0; i < N - 1; ++i)
   {
-    float lo = dataMin + i * step;
-    float hi = dataMin + (i + 1) * step;
+    // The range comes from a sample of the field, so the true extremes can
+    // fall outside it: leave the end bands open, as lookup() clamps.
+    std::optional<float> lo;
+    std::optional<float> hi;
+    if (i > 0)
+      lo = dataMin + i * step;
+    if (i < N - 2)
+      hi = dataMin + (i + 1) * step;
     Rgb mid = interpolate(stops[i], stops[i + 1], 0.5F);
     p.itsBands.push_back(Band{lo, hi, mid, {}});
   }
@@ -149,14 +160,16 @@ Palette Palette::rainbowCycle(int n, std::string name)
 
 Rgb Palette::lookup(float value) const
 {
-  // Treat sentinel/garbage values as missing. Catches kFloatMissing (32700),
-  // grid-files' ParamValueMissing (-16777216 ≈ -1.67e7, returned for
-  // out-of-grid points by getGridValueByLatLonCoordinate), GRIB's 9.999e20,
-  // NetCDF's NC_FILL_FLOAT, and accidental uninitialised reads (±1e29).
-  // Threshold 1e6 is well above any real meteorological value (max ~5e4 for
-  // geopotential height) and well below typical sentinels.
-  if (value == kFloatMissing || !std::isfinite(value) || std::abs(value) > 1e6F)
+  if (isMissingValue(value))
     return missingColor();
+  if (!itsRampStops.empty())
+  {
+    const auto last = static_cast<float>(itsRampStops.size() - 1);
+    const float pos =
+        std::clamp((value - itsRampMin) / (itsRampMax - itsRampMin) * last, 0.0F, last);
+    const auto i = std::min(static_cast<std::size_t>(pos), itsRampStops.size() - 2);
+    return interpolate(itsRampStops[i], itsRampStops[i + 1], pos - static_cast<float>(i));
+  }
   if (itsBands.empty()) return missingColor();
 
   for (const auto& b : itsBands)
